@@ -1,6 +1,6 @@
 {
   "rewrites": [
-    { "source": "/c/:id", "destination": "https://api.hello22.ai/c/:id" },
+    { "source": "/c/:id", "destination": "https://nextaidc-api.onrender.com/c/:id" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
