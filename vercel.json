@@ -1,0 +1,34 @@
+{
+  "rewrites": [
+    { "source": "/c/:id", "destination": "https://api.hello22.ai/c/:id" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/login",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, follow" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "app.hello22.ai" }],
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, follow" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "staging.hello22.ai" }],
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    }
+  ]
+}

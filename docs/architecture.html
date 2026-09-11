@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>hello22.ai — Architecture &amp; Flow</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <style>
+    :root { --fg:#111827; --muted:#6b7280; --line:#e5e7eb; --brand:#ea580c; --bg:#ffffff; --panel:#f9fafb; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.55;
+    }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 48px 32px 96px; }
+    header { border-bottom: 2px solid var(--line); padding-bottom: 20px; margin-bottom: 32px; }
+    h1 { font-size: 28px; margin: 0 0 6px; }
+    h1 span { color: var(--brand); }
+    .sub { color: var(--muted); font-size: 14px; margin: 0; }
+    h2 {
+      font-size: 19px; margin: 40px 0 4px; padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    h2 .num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 7px; margin-right: 10px;
+      background: var(--brand); color: #fff; font-size: 14px; font-weight: 700;
+    }
+    .desc { color: var(--muted); font-size: 14px; margin: 4px 0 14px; }
+    .diagram {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      padding: 18px; overflow-x: auto; text-align: center;
+    }
+    .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 22px; }
+    .toc ol { margin: 6px 0; padding-left: 20px; }
+    .toc a { color: var(--brand); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    footer { margin-top: 56px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    @media print {
+      .no-print { display: none !important; }
+      h2 { page-break-before: always; border-top: none; }
+      h2:first-of-type { page-break-before: avoid; }
+      .diagram { break-inside: avoid; }
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>hello22<span>.ai</span> — Architecture &amp; Flow</h1>
+      <p class="sub">24/7 AI Voice Receptionist SaaS · Frontend (React/Vite on Vercel) · Backend (Express/Prisma on Render) · Neon PostgreSQL · Vapi · Twilio · Stripe · SMTP</p>
+      <p class="hint no-print">Tip: to save as PDF, use your browser's <strong>Print → Save as PDF</strong> (each diagram starts on a new page).</p>
+    </header>
+
+    <nav class="toc no-print">
+      <strong>Contents</strong>
+      <ol>
+        <li><a href="#s1">System architecture</a></li>
+        <li><a href="#s2">Signup → onboarding → provisioning</a></li>
+        <li><a href="#s3">Inbound call lifecycle</a></li>
+        <li><a href="#s4">CRM lead delivery decision</a></li>
+        <li><a href="#s5">Trial / billing lifecycle</a></li>
+        <li><a href="#s6">System emails pipeline</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="s1"><span class="num">1</span>System architecture</h2>
+    <p class="desc">How the frontend, backend, database and third-party integrations connect.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+flowchart LR
+  subgraph Client["Frontend — React 19 + Vite (Vercel)"]
+    UI["Dashboard / AI Brain / Connect CRM / Admin"]
+    Stores["Zustand stores"]
+    APIc["api.ts (typed client, Bearer JWT)"]
+    UI --> Stores --> APIc
+  end
+  subgraph Server["Backend — Express + Prisma (Render)"]
+    Routes["/api routes: auth, profile, agent, calls, crm, billing, admin, onboard, chat"]
+    Svc["services: vapi, webhook, email, emailTemplates, otp, trial, provisioning, sms, whatsapp"]
+    Routes --> Svc
+  end
+  DB[("Neon PostgreSQL — Prisma")]
+  Vapi["Vapi (voice + Claude Haiku LLM)"]
+  Twilio["Twilio (numbers + SMS)"]
+  Stripe["Stripe (billing)"]
+  SMTP["SMTP (Nodemailer)"]
+  CRM["Nexleon CRM / Custom webhook"]
+  APIc -->|HTTPS + JWT| Routes
+  Svc --> DB
+  Svc <--> Vapi
+  Svc <--> Twilio
+  Svc <--> Stripe
+  Svc --> SMTP
+  Svc --> CRM
+  Vapi -->|end-of-call-report webhook| Routes
+      </pre>
+    </div>
+
+    <h2 id="s2"><span class="num">2</span>Signup → onboarding → provisioning</h2>
+    <p class="desc">From pasting a website URL to a live AI receptionist on a dedicated number.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+flowchart TD
+  A["Visitor pastes website URL"] --> B["/onboard/analyze — build agent config"]
+  B --> C["Register: email + password"]
+  C --> D["OTP email verification (email_verification template)"]
+  D --> E["Account created + Conversion(agentConfig) saved"]
+  E --> F["Subscribe / start trial (Stripe)"]
+  F -->|subscriptionStatus = trialing/active| G["provisionAgentForUser()"]
+  G --> H["upsertAssistant() → Vapi assistant (analysisPlan + server.url)"]
+  H --> I["Customer claims number → importTwilioNumber() → routes to assistant"]
+  I --> J["numberAssignedEmail — AI receptionist live"]
+  H -. admin only .-> K["auto-assign pool number"]
+      </pre>
+    </div>
+
+    <h2 id="s3"><span class="num">3</span>Inbound call lifecycle</h2>
+    <p class="desc">The core flow: a caller dials in, Vapi's AI answers, and the end-of-call report drives the call log, CRM delivery and owner notifications.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+sequenceDiagram
+  participant Caller
+  participant Vapi
+  participant WH as POST /api/calls/webhook/vapi
+  participant DB as Prisma/Neon
+  participant CRM as Nexleon/Custom
+  participant Notify as Email/SMS/WhatsApp
+  Caller->>Vapi: Calls the assigned number
+  Vapi->>Vapi: AI (Haiku) answers, captures name/phone/intent
+  Vapi->>WH: end-of-call-report (customer, analysis.structuredData, transcript)
+  WH->>WH: eventType == "end-of-call-report"? else ack and stop
+  WH->>DB: find Conversion by vapiAssistantId
+  WH->>WH: callerName = structuredData.name ?? customer.name ?? "Unknown"
+  WH->>DB: create CallLog (outcome, name, number, summary, analysis)
+  WH->>CRM: deliverCallToCrm() (see flow 4)
+  WH->>Notify: callSummaryEmail + owner SMS/WhatsApp (best-effort, plan-gated)
+  WH->>DB: recordUsage() then settleAfterCall() (trial/billing reconcile)
+      </pre>
+    </div>
+
+    <h2 id="s4"><span class="num">4</span>CRM lead delivery decision</h2>
+    <p class="desc">Company-default Nexleon CRM applies to everyone unless a user configures their own; a Custom webhook can also receive leads.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+flowchart TD
+  A["deliverCallToCrm(userId, call)"] --> B{"User has own Nexleon?<br/>(connectedProvider=perfex + url + key)"}
+  B -->|Yes| C["deliver to user's Nexleon<br/>(skip admin-global to avoid dupes)"]
+  B -->|No| D["deliverToAdminNexleon()<br/>company default (Admin → Settings)"]
+  A --> E{"User has Custom webhook?"}
+  E -->|Yes| F["POST JSON to custom webhook"]
+  C --> G["log WebhookDelivery"]
+  D --> G
+  F --> G
+      </pre>
+    </div>
+
+    <h2 id="s5"><span class="num">5</span>Trial / billing lifecycle</h2>
+    <p class="desc">Trial converts or lapses into a grace window; active plans renew and emit usage alerts; failed charges suspend and freeze calls.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+stateDiagram-v2
+  [*] --> Trialing: subscribe (card saved)
+  Trialing --> Active: minutes/days exhausted then auto-charge (planActivatedEmail)
+  Trialing --> Grace: trial lapses, no conversion (graceStartedEmail)
+  Grace --> Active: picks a plan (number kept)
+  Grace --> Released: grace ends then number released (graceEndedEmail)
+  Active --> Active: renewal; usageThresholdEmail at 50/80/90%
+  Active --> PastDue: charge fails
+  PastDue --> Suspended: unresolved (assistant detached, calls frozen)
+  Suspended --> Active: admin reactivates (accountReactivatedEmail)
+      </pre>
+    </div>
+
+    <h2 id="s6"><span class="num">6</span>System emails pipeline</h2>
+    <p class="desc">Every lifecycle email renders from an editable template (DB row with code-default fallback), with variable substitution and an editable header/footer.</p>
+    <div class="diagram">
+      <pre class="mermaid">
+flowchart LR
+  T["Trigger (signup, call, billing, staff)"] --> S["sendTemplate(key, to, vars)"]
+  S --> R["renderEmail(): DB EmailTemplate row then code default fallback"]
+  R --> V["substitute {{vars}} + escape values"]
+  V --> W["wrap in editable header/footer + from-name"]
+  W --> EN{"enabled? (alwaysOn always sends)"}
+  EN -->|Yes| SM["sendEmail() then Nodemailer SMTP"]
+  EN -->|No| X["skip"]
+  Admin["Admin → System Emails page"] -->|edit subject/body/toggle| DB[("email_templates")]
+  DB --> R
+      </pre>
+    </div>
+
+    <footer>
+      Generated architecture reference for hello22.ai. Diagrams reflect the current backend flows
+      (Vapi structured-data name extraction, admin-default Nexleon CRM with per-user override, and the
+      system-email template renderer).
+    </footer>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: "base",
+      themeVariables: {
+        primaryColor: "#fff7ed",
+        primaryBorderColor: "#ea580c",
+        primaryTextColor: "#111827",
+        lineColor: "#9ca3af",
+        fontFamily: "-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+      }
+    });
+  </script>
+</body>
+</html>

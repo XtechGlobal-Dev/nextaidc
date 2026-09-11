@@ -1,0 +1,16 @@
+{
+  "name": "hello22.ai — Voice Receptionist",
+  "short_name": "hello22",
+  "description": "24/7 AI Voice Receptionist Dashboard",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#f5f7fa",
+  "theme_color": "#2C76ED",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
