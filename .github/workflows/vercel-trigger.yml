@@ -1,0 +1,58 @@
+name: Post-Merge Vercel Trigger
+on:
+  push:
+    branches: [main]
+
+# Serialize so overlapping dev merges don't race to push
+concurrency:
+  group: vercel-trigger-main
+  cancel-in-progress: false
+
+jobs:
+  trigger-vercel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT_ALLOWED_DEV }}   # PAT of the xtechglobal account (repo write)
+          ref: main          # follow the branch, not the (possibly stale) trigger SHA
+          fetch-depth: 0     # full history so the empty commit pushes cleanly
+
+      - name: Re-stamp HEAD as authorized author (empty commit)
+        env:
+          AUTHORIZED_EMAIL: xtechglobal0011@gmail.com
+        run: |
+          git config user.name  "xtechglobal"
+          git config user.email "$AUTHORIZED_EMAIL"
+
+          for attempt in 1 2 3 4 5; do
+            # Always start from the CURRENT remote tip — main may have moved
+            # since this run was queued (another merge, or an earlier run of
+            # this workflow that already pushed its own empty commit).
+            git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+            git checkout --quiet -B main origin/main
+
+            LAST_AUTHOR_EMAIL="$(git log -1 --format='%ae')"
+            echo "Attempt $attempt — tip $(git rev-parse --short HEAD) by $LAST_AUTHOR_EMAIL"
+
+            if [ "$LAST_AUTHOR_EMAIL" = "$AUTHORIZED_EMAIL" ]; then
+              echo "Tip is already authored by the authorized account; nothing to do."
+              exit 0
+            fi
+
+            # NO [skip ci] — Vercel must build this. [skip actions] stops the
+            # redundant re-run of THIS workflow; Vercel ignores that token.
+            git commit --allow-empty -m "chore: authorize Vercel production deploy [skip actions]"
+
+            if git push origin main; then
+              echo "Pushed authorized commit $(git rev-parse --short HEAD)."
+              exit 0
+            fi
+
+            echo "Push rejected — main moved underneath us. Retrying..."
+            sleep 5
+          done
+
+          echo "::error::Could not push the authorization commit after 5 attempts."
+          exit 1
