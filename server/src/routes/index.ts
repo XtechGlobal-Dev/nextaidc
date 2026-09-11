@@ -1,0 +1,129 @@
+import { Router } from "express";
+import authRouter from "./auth.routes.js";
+import profileRouter from "./profile.routes.js";
+import agentRouter from "./agent.routes.js";
+import callsRouter from "./calls.routes.js";
+import notificationsRouter from "./notifications.routes.js";
+import ticketsRouter from "./tickets.routes.js";
+import adminTicketsRouter from "./adminTickets.routes.js";
+import trialRouter from "./trial.routes.js";
+import crmRouter from "./crm.routes.js";
+import transferRouter from "./transfer.routes.js";
+import chatRouter from "./chat.routes.js";
+import billingRouter from "./billing.routes.js";
+import adminRouter from "./admin.routes.js";
+import adminPhonesRouter from "./adminPhones.routes.js";
+import brandsRouter from "./brands.routes.js";
+import platformViewsRouter from "./platformViews.routes.js";
+import brandAdminRouter from "./brandAdmin.routes.js";
+import apiCenterRouter from "./apiCenter.routes.js";
+import resellerRouter from "./reseller.routes.js";
+import onboardRouter from "./onboard.routes.js";
+import bookingRouter from "./booking.routes.js";
+import bookingModuleRouter from "./bookingModule.routes.js";
+import bookingAiRouter from "./bookingAi.routes.js";
+import aiSmsRouter from "./aiSms.routes.js";
+import ttsRouter from "./tts.routes.js";
+import googleRouter from "./google.routes.js";
+import whatsappRouter from "./whatsapp.routes.js";
+import voicesRouter from "./voices.routes.js";
+import industriesRouter from "./industries.routes.js";
+import eventsRouter from "./events.routes.js";
+import unsubscribeRouter from "./unsubscribe.routes.js";
+import { getEffective } from "../services/settings.js";
+import { getBranding } from "../services/branding.js";
+import { getSeoScripts } from "../services/seo.js";
+import { brandBySlug, publicBrand } from "../services/brands.js";
+import { brandScripts } from "../services/brandSetup.js";
+import { requireBrandModule } from "../middleware/brandModule.js";
+
+export const apiRouter = Router();
+
+// Public, non-secret runtime config for the frontend (Vapi browser key,
+// branding + admin-managed custom scripts for head/body/footer).
+//
+// `brand` is the white-label tenant this request's host resolved to, or null on
+// the platform's own domain. It carries the palette, font and logos the SPA
+// paints itself with — so a visitor to a brand subdomain sees that brand from
+// the very first render, before any sign-in.
+apiRouter.get("/config", async (req, res) => {
+  res.json({
+    vapiPublicKey: getEffective("vapi.publicKey", req.brand?.id ?? null),
+    branding: await getBranding(),
+    // A brand host gets the BRAND's snippets, not the platform's on top: a
+    // tenant's pages must never carry the platform's analytics or chat widget.
+    scripts: req.brand ? brandScripts(req.brand) : await getSeoScripts(),
+    brand: req.brand ? publicBrand(req.brand) : null,
+  });
+});
+
+/**
+ * Resolve a brand by its slug — how the SPA turns the first path segment of
+ * `example.com/acme` into a tenant before it renders anything.
+ *
+ * Public and unauthenticated on purpose: it answers the same question the login
+ * screen already has to answer ("whose front door is this?"), and returns only
+ * what a visitor is about to see anyway — a name, some logos and a palette.
+ * A suspended or unknown slug is a 404, so the SPA falls back to the platform's
+ * own look rather than a half-branded page.
+ */
+apiRouter.get("/brand/:slug", async (req, res) => {
+  const brand = brandBySlug(req.params.slug);
+  if (!brand) {
+    res.status(404).json({ error: "No such brand" });
+    return;
+  }
+  res.json(publicBrand(brand));
+});
+
+apiRouter.use("/unsubscribe", unsubscribeRouter);
+apiRouter.use("/events", eventsRouter);
+apiRouter.use("/onboard", onboardRouter);
+apiRouter.use("/bookings", bookingRouter);
+// Website-first booking module. `/booking/ai` (public Vapi tool dispatcher) is
+// mounted BEFORE `/booking` (owner API) so the more specific path wins. `/bookings`
+// (plural, above) is the unrelated marketing demo form.
+apiRouter.use("/booking/ai", bookingAiRouter);
+// Owner-facing module APIs sit behind the brand's module switches — a brand that
+// turned Booking off gets a 403 here, not a working API behind a hidden nav item.
+// The public dispatchers above (/booking/ai, /ai/sms) are Vapi tool callbacks
+// and carry no request brand, so they are deliberately not gated.
+apiRouter.use("/booking", requireBrandModule("booking"), bookingModuleRouter);
+// Public Vapi tool dispatcher for "Text Info to Callers" (sendInfoSms).
+apiRouter.use("/ai/sms", aiSmsRouter);
+apiRouter.use("/tts", ttsRouter);
+apiRouter.use("/auth", authRouter);
+apiRouter.use("/profile", profileRouter);
+apiRouter.use("/agent", agentRouter);
+apiRouter.use("/voices", voicesRouter);
+apiRouter.use("/industries", industriesRouter);
+apiRouter.use("/calls", callsRouter);
+apiRouter.use("/notifications", notificationsRouter);
+// Support tickets, requester side. One prefix for both lanes: a customer asks
+// their brand, a brand admin asks the platform, and which of the two you get is
+// decided by your role rather than by the URL (see lib/ticketLanes.ts).
+apiRouter.use("/tickets", ticketsRouter);
+apiRouter.use("/trial", trialRouter);
+apiRouter.use("/crm", requireBrandModule("crm"), crmRouter);
+apiRouter.use("/transfer", requireBrandModule("transfer"), transferRouter);
+apiRouter.use("/google", googleRouter);
+apiRouter.use("/whatsapp", whatsappRouter);
+apiRouter.use("/chat", chatRouter);
+apiRouter.use("/billing", billingRouter);
+// Super-admin only: white-label brands (tenants). Its own prefix, not /admin,
+// so the boundary is visible in the URL as well as in the middleware.
+apiRouter.use("/super", brandsRouter);
+// The super admin's overview, the customer directory, and one brand's inside
+// (its customers, subscriptions, support) — see platformViews.routes.ts.
+apiRouter.use("/super", platformViewsRouter);
+apiRouter.use("/admin/phones", adminPhonesRouter);
+// The handler side of the same two lanes — a brand admin's customer inbox, or
+// the super admin's brand-request inbox.
+apiRouter.use("/admin/tickets", adminTicketsRouter);
+// Mounted before /admin so the more specific prefix wins.
+apiRouter.use("/admin/api-center", apiCenterRouter);
+// A brand admin's own pricing addons and wallet. Mounted before /admin so the
+// more specific prefix wins; scoped to the caller's brand, never by id.
+apiRouter.use("/admin/brand", brandAdminRouter);
+apiRouter.use("/admin", adminRouter);
+apiRouter.use("/reseller", resellerRouter);
