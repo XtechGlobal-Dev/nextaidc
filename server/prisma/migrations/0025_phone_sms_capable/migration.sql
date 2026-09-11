@@ -1,0 +1,11 @@
+-- Whether this number can actually SEND SMS, as reported by Twilio's
+-- `capabilities.sms` when it was purchased or imported.
+--
+-- NULL = unknown (every row predating this column, and any number added while
+-- the Twilio lookup failed). Unknown is treated as "can't send" by
+-- resolveSmsSender, which falls back to the global platform sender — never
+-- assume capability we haven't confirmed, or caller-facing texts silently fail.
+--
+-- Populated going forward on purchase/import; run scripts/backfillSmsCapable.ts
+-- to fill in existing rows from Twilio.
+ALTER TABLE "phone_numbers" ADD COLUMN IF NOT EXISTS "smsCapable" BOOLEAN;

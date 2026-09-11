@@ -1,0 +1,1366 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled endpoint (Neon PgBouncer) — what the running app queries through.
+  url       = env("DATABASE_URL")
+  // Direct, UNPOOLED endpoint — used only by the Prisma CLI (migrate / db push /
+  // introspect / studio). Those take a *session-level* advisory lock
+  // (pg_advisory_lock), which a transaction-mode pooler cannot hold, so routing
+  // them through DATABASE_URL fails with `P1002 ... Timed out trying to acquire a
+  // postgres advisory lock`. On Neon the direct host is the pooled one minus the
+  // `-pooler` suffix. Must be set in every environment that runs the CLI —
+  // including the Render build (`render:build` runs `prisma db push`).
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  /// Brand-level administrator. Owns ONE brand (tenant) and everything inside
+  /// it. Deliberately cannot reach platform integration keys / API accounts —
+  /// those are SUPER_ADMIN-only (see requireSuperAdmin).
+  ADMIN
+  STAFF
+  RESELLER
+  /// Platform owner. Passes every ADMIN check plus the super-admin-only areas:
+  /// Brands, Platform Settings (integrations) and the API Center. There is
+  /// normally exactly one, seeded by prisma/seed.ts.
+  SUPER_ADMIN
+}
+
+/// Lifecycle of a white-label brand. Only `active` resolves a front door
+/// (middleware/brand.ts), so none of the other states can take a login or a
+/// sign-up.
+///   provisioning — row created, its own database is being set up
+///   active       — live
+///   suspended    — keeps its data; subdomain stops resolving, nobody signs in
+///   failed       — database setup broke (brand_databases.error says how);
+///                  Retry on the brand's page re-runs it
+enum BrandStatus {
+  active
+  suspended
+  provisioning
+  failed
+}
+
+enum Plan {
+  free
+  premium
+}
+
+enum CallType {
+  Web
+  Phone
+}
+
+enum CallOutcome {
+  completed
+  missed
+  failed
+  voicemail
+}
+
+enum VerificationPurpose {
+  signup
+  password_reset
+  /// One-time code that lets an admin who forgot the "Login as Customer" PIN
+  /// set a new one. Its OWN purpose, deliberately: sharing `password_reset`
+  /// would let a code issued for one act perform the other.
+  impersonation_pin_reset
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  fullName     String
+  role         Role       @default(USER)
+  // Effective permission keys for STAFF. Denormalized from the assigned
+  // StaffRole (source of truth) so every auth read-path stays a single column
+  // read; re-synced whenever the role's permissions change.
+  permissions  String[]   @default([])
+  // The named role this staff member is assigned (drives `permissions` above).
+  // A plain id since phase 4: the role lives in the plane the account does — a
+  // brand's roles in its own database, the platform's here — so no key can
+  // reach it from this table. Looked up through `planeOf(brandId)`.
+  staffRoleId  String?
+
+  // 2FA (otplib / TOTP) — optional
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+
+  // Reseller/affiliate. A RESELLER has a referralCode + commissionPercent; a
+  // customer referred by one carries referredById.
+  referralCode      String? @unique
+  commissionPercent Float   @default(0)
+  referredById      String?
+  referredBy        User?   @relation("Referrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals         User[]  @relation("Referrals")
+
+  // Marketing/notification email opt-out. Set when the recipient clicks the
+  // unsubscribe link in an email footer (or via a mail client's one-click
+  // List-Unsubscribe); null = subscribed. Only silences non-essential
+  // notification emails (call summaries, usage & grace/trial reminders) —
+  // security and account emails (verification, password reset, suspension,
+  // staff) always send regardless of this flag.
+  emailOptOutAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notifications Notification[]
+
+  ticketsAssigned    Ticket[]           @relation("TicketAssignee")
+  /// Support queues granted to THIS person directly, on top of whatever their
+  /// StaffRole holds. Effective access is the union of the two, so a role can
+  /// cover the common case and one person can be lent an extra queue without
+  /// minting a role for them.
+  ticketDepartments  TicketDepartment[] @relation("StaffTicketDepartments")
+  ticketSavedReplies TicketSavedReply[] @relation("SavedReplyAuthor")
+
+  @@map("users")
+}
+
+/// A named staff role — the source of truth for a bundle of permission keys
+/// (section capabilities + column-level `section.field.*` sub-permissions).
+/// Admins define roles once; staff are assigned a role and inherit its keys.
+model StaffRole {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String   @default("")
+  permissions String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+
+  /// Support queues this role works. Holding `tickets.*` says WHAT the role may
+  /// do with a ticket; this says WHICH tickets it may do it to. Empty = no
+  /// ticket queue at all (deliberately closed by default).
+  ticketDepartments TicketDepartment[] @relation("StaffRoleTicketDepartments")
+
+  @@map("staff_roles")
+}
+
+/// A phone number tracked by the admin phone panel. Source of truth for the
+/// system pool + per-number metadata (added date, cost) the dashboard derives
+/// from `Profile.receptionistNumber` can't carry. A null `userId` means the
+/// number sits in the shared system pool (Free-plan callers); a set `userId`
+/// means it's assigned to that customer's agent (`assistantId` = live Vapi id).
+/// `twilioSid` ties the row back to the owning Twilio IncomingPhoneNumber.
+model PhoneNumber {
+  id        String  @id @default(cuid())
+  number    String  @unique // E.164
+  provider  String  @default("twilio")
+  twilioSid String?
+
+  /// Telephony health: active | inactive | pending. Distinct from poolStatus.
+  status     String @default("active")
+  /// Pool lifecycle: AVAILABLE | ASSIGNED | PENDING_APPROVAL.
+  ///
+  /// A released number becomes AVAILABLE again immediately — there is no
+  /// cooldown. What keeps it with the brand that paid for it is `brandId` plus
+  /// the allocation rule (see nextAvailableForBrand), not a frozen status.
+  poolStatus String @default("AVAILABLE")
+
+  /// The account holding this number — a plain id, no relation: that account
+  /// lives in the brand's database named by `brandId`. Set with the tenant's
+  /// `profiles.receptionistNumber` / `phoneNumberId`, Main side first; the
+  /// hourly reclaim sweep repairs a number assigned here but held by nobody.
+  userId      String?
+  /// Live Vapi assistant this number routes inbound calls to (when assigned).
+  assistantId String?
+
+  /// Tenant that currently holds this number, denormalised off the owner the
+  /// same way profiles.brandId / call_logs.brandId are.
+  ///
+  /// It is NOT derivable from `userId` when it matters most: releasing a number
+  /// nulls `userId`, and with it every trace of whose customer had it. Storing
+  /// the brand is what lets a released number stay in the right tenant's pool
+  /// for the hold window instead of falling straight back to the platform.
+  ///
+  /// Null = the shared platform pool — inventory any brand's customer may draw
+  /// from at signup. Set = that brand's own inventory, whether currently
+  /// assigned to one of its customers or free in its pool.
+  brandId String?
+  brand   Brand?  @relation("BrandPhoneNumbers", fields: [brandId], references: [id], onDelete: SetNull)
+
+  /// When a brand admin unassigned this number from one of their customers.
+  ///
+  /// It is the brand's "use it or lose it" clock, not a cooldown: the number is
+  /// AVAILABLE in that brand's pool straight away, but if the brand hasn't
+  /// re-assigned it within the reclaim window (7 days) the hourly sweep moves it
+  /// to the shared platform pool for every brand to draw on. Cleared the moment
+  /// it goes back into service.
+  ///
+  /// Only a DELIBERATE unassign sets it. An account deletion or a lapsed grace
+  /// period doesn't — those release the number at Twilio outright, so there is
+  /// nothing left to reclaim.
+  releasedAt DateTime?
+
+  /// Can this number SEND SMS (Twilio's `capabilities.sms`)? null = unknown,
+  /// which resolveSmsSender treats as "no" and falls back to the platform
+  /// sender — never assume a capability we haven't confirmed. Note most
+  /// geographic numbers outside NANP (e.g. Australian +61 2/3/7/8) are voice-only.
+  smsCapable Boolean?
+
+  purchasePriceCents Int @default(0)
+  monthlyPriceCents  Int @default(5000)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  /// Drives every tenant-scoped pool read and the brand-first allocation.
+  @@index([brandId, poolStatus])
+  @@map("phone_numbers")
+}
+
+/// Platform-level config (integration API keys etc.). Secret values are
+/// stored encrypted (isSecret = true). Keyed like "vapi.apiKey".
+model PlatformSetting {
+  key       String   @id
+  value     String
+  isSecret  Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_settings")
+}
+
+/// Editable system-email templates (sign-up, verification, billing, staff, …).
+/// Seeded from code defaults; admins edit subject/body/enabled from Admin →
+/// System Emails. `alwaysOn` templates (e.g. verification codes) can't be
+/// disabled. Body is plain text with {{variables}} rendered to HTML on send.
+model EmailTemplate {
+  key         String   @id // stable code id, e.g. "email_verification"
+  category    String // "Authentication" | "Billing" | "Account" | "Staff" | "Calls"
+  name        String
+  description String   @default("")
+  audience    String   @default("User") // "User" | "Admin" | "Staff"
+  subject     String
+  body        String
+  variables   String[] @default([])
+  enabled     Boolean  @default(true)
+  alwaysOn    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("email_templates")
+}
+
+/// Short-lived email OTP codes for sign-up verification and password reset.
+/// Codes are stored hashed; `payload` holds the pending sign-up data until verified.
+model VerificationCode {
+  id         String              @id @default(cuid())
+  email      String
+  purpose    VerificationPurpose
+  codeHash   String
+  payload    Json?
+  attempts   Int                 @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime            @default(now())
+
+  @@index([email, purpose])
+  @@map("verification_codes")
+}
+
+model Booking {
+  id          String   @id @default(cuid())
+  topic       String // "Demo call" | "Strategy call" | "Agent build meeting"
+  name        String
+  email       String
+  phone       String   @default("")
+  preferredAt String   @default("") // chosen date + time (free text)
+  message     String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@map("bookings")
+}
+
+/// Admin/ops audit trail — one row per sensitive admin mutation. Best-effort:
+/// writing a row never blocks the mutation it records.
+model AuditLog {
+  id         String   @id @default(cuid())
+  /// Plain id, no relation: the actor is a brand's operator living in that
+  /// brand's own database, or the platform's own person in this one. Which
+  /// plane is `actorBrandId` (null = the platform's).
+  actorId      String?
+  actorBrandId String?
+  actorEmail   String   @default("")
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  ip         String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorBrandId, createdAt])
+  @@map("audit_logs")
+}
+
+/// Admin-created subscription plan. Customers pick one at signup and get a
+/// free trial (trial length is GLOBAL — PlatformSetting "trial.days", default 14).
+model SubscriptionPlan {
+  id                  String         @id @default(cuid())
+  name                String // short key, e.g. "starter"
+  displayName         String // customer-facing, e.g. "Starter"
+  description         String         @default("")
+  priceCents          Int            @default(0)
+  currency            String         @default("usd")
+  interval            String         @default("month") // week | month | year
+  // How many `interval` units one billing cycle spans — Stripe's interval_count.
+  // 1 = monthly, 3 = quarterly, 6 = half-yearly, 12 = annual. Stripe caps a cycle
+  // at one year, so with interval="month" this may not exceed 12.
+  //
+  // `includedMinutes` is the total for the WHOLE cycle, not per month: a
+  // quarterly plan granting 600 minutes stores 600, matching the field's label
+  // ("granted each billing period") and keeping the allowance logic unaware of
+  // cycle length. Only MRR normalisation divides by this.
+  intervalCount       Int            @default(1)
+  includedMinutes     Int            @default(0) // call minutes granted per billing period
+  features            Json           @default("[]") // string[] — marketing bullets (display only)
+  // Real entitlement flags: services check these to gate the feature per plan tier.
+  smsEnabled          Boolean        @default(false) // post-call owner SMS summaries
+  // "SMS to Caller": the AI texts a caller details they ask for mid-call. Split
+  // from smsEnabled so the two can be sold apart — that flag is about texting the
+  // OWNER a summary, this one about texting the CALLER. Existing plans are
+  // backfilled from smsEnabled (scripts/backfillSmsToCaller.ts) so nobody's
+  // entitlement changes on deploy.
+  smsToCallerEnabled  Boolean        @default(false)
+  whatsappEnabled     Boolean        @default(false) // WhatsApp summaries + inbound AI auto-reply
+  customCrmEnabled    Boolean        @default(false) // Custom CRM (webhook) lead delivery
+  multilingualEnabled Boolean        @default(false) // AI answers in the caller's language (languages picked in AI Brain)
+  transcriptsEnabled  Boolean        @default(true) // "Summary, Transcript & Recording" bullet shown for this plan
+  // Human Call Transfer: whether this plan may configure transfer departments at
+  // all. Off = the module is locked and the AI never offers a handoff.
+  callTransferEnabled Boolean        @default(false)
+  // How many transfer departments the plan allows. 0 = unlimited — the same
+  // convention `includedMinutes` uses, so admins read one rule across the form.
+  // Meaningless while callTransferEnabled is false; always resolve the pair
+  // through transferDepartmentAllowance() rather than reading this directly.
+  callTransferLimit   Int            @default(0)
+  allowedVoices       Json           @default("[]") // DEPRECATED (kept for back-compat) — gating now uses voiceCategory
+  // Voice Bank: the single category of voices customers on this plan may choose in
+  // the AI Brain. Null = no picker (they stay on the default voice). SetNull so
+  // deleting a category leaves plans intact.
+  voiceCategoryId     String?
+  voiceCategory       VoiceCategory? @relation(fields: [voiceCategoryId], references: [id], onDelete: SetNull)
+  stripeProductId     String?
+  stripePriceId       String?
+  active              Boolean        @default(true)
+
+  // Display ordering on subscribe page (lower = first).
+  sortOrder   Int     @default(0)
+  // "Recommended" / "Popular" highlight on the subscribe page.
+  recommended Boolean @default(false)
+  // Pre-selected plan on the onboarding subscribe page. At most one plan is
+  // default — setting it on one plan clears it on the others.
+  isDefault   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  brandAddons BrandPlanAddon[] @relation("PlanBrandAddons")
+
+  @@map("subscription_plans")
+}
+
+/// Voice Bank category — an admin-curated named set of voices (from BOTH providers:
+/// Deepgram short names + ElevenLabs voice_ids). A plan points at one category to
+/// decide which voices its customers can pick in the AI Brain.
+model VoiceCategory {
+  id        String   @id @default(cuid())
+  title     String
+  voiceIds  Json     @default("[]") // string[] — voice ids (Deepgram names + ElevenLabs voice_ids)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plans SubscriptionPlan[]
+
+  @@map("voice_categories")
+}
+
+/// An admin-created discount code. Redeemed by a customer at checkout or granted
+/// directly by an admin, it discounts the plan price (`percentOff`) and/or tops up
+/// the cycle's call minutes (`bonusMinutes`) for a bounded number of billing
+/// cycles.
+///
+/// Duration is counted in BILLING CYCLES by us, never in Stripe's calendar months.
+/// `renewActivePlanIfExhausted` renews a subscription early whenever the included
+/// minutes run out, so a heavy user can burn several cycles inside one calendar
+/// month — Stripe's `duration_in_months` would silently discount all of them. See
+/// services/coupons.ts and BILLING_ARCHITECTURE.md.
+model Coupon {
+  id          String @id @default(cuid())
+  /// The code the customer types. Normalized to UPPERCASE on write, so lookups
+  /// and the unique constraint are case-insensitive in practice.
+  code        String @unique
+  /// Customer-facing name shown at checkout, e.g. "Launch offer".
+  displayName String
+  description String @default("")
+
+  /// Percentage off the recurring plan price (1..100). Mirrored to a Stripe
+  /// coupon, which does the arithmetic on subscription invoices.
+  percentOff   Int?
+  /// Extra call minutes granted on top of the plan's `includedMinutes`, every
+  /// cycle the discount is live. Purely ours — never sent to Stripe.
+  bonusMinutes Int?
+
+  /// How many billing cycles the discount lasts once redeemed. 1 = the first
+  /// charge only.
+  durationCycles Int @default(1)
+
+  /// The REDEMPTION window — when the code may be entered. Distinct from
+  /// `durationCycles` (how long the discount lasts afterwards): a closed window
+  /// stops new redemptions but never cancels a discount already running.
+  startsAt  DateTime?
+  expiresAt DateTime?
+
+  /// Global supply cap (null = unlimited). Compared against `redeemedCount` PLUS
+  /// live `pending` reservations, so an in-flight checkout can't oversell it.
+  maxRedemptions Int?
+  /// Redemptions that actually converted (money moved). Incremented in
+  /// activateRedemption, never at reservation time.
+  redeemedCount  Int  @default(0)
+
+  /// Restrict to customers who have never held a paid plan. Checked against
+  /// PlanEvent history rather than current status — a customer who cancelled and
+  /// came back is not new.
+  newCustomersOnly Boolean  @default(true)
+  /// Plans this code may be redeemed against; empty = every plan. Gates
+  /// REDEMPTION only — a later plan change never cancels a running discount.
+  planIds          String[] @default([])
+
+  active         Boolean @default(true)
+  /// The mirrored Stripe coupon object that performs the discount.
+  stripeCouponId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+
+  @@map("coupons")
+}
+
+/// In-app notification surfaced by the bell. Created server-side on real events
+/// (calls, signups, approvals). Scoped to one user; read state + cleared per user.
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // missed_call | new_lead | billing | agent | system
+  title     String
+  message   String   @default("")
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// ------------------------------------------------------------------
+//  API Center — telemetry for every third-party API this platform calls.
+//  See services/apiProviders.ts (what a provider IS), services/apiTrace.ts
+//  (who writes these rows) and services/apiCenter.ts (what reads them).
+// ------------------------------------------------------------------
+
+/// One outbound third-party API call, written by the tracer. Every number on the
+/// API Center — uptime, latency percentiles, error rate, spend, quota headroom —
+/// is derived from this table, so it is deliberately wide and append-only.
+///
+/// Written fire-and-forget in batches (see apiTrace.ts): a request never waits on
+/// its own telemetry, and losing a buffered batch on shutdown costs a few rows of
+/// analytics, never a user-facing failure.
+model ApiRequestLog {
+  id            String    @id @default(cuid())
+  /// Trace key matching ProviderDef.id in services/apiProviders.ts.
+  provider      String
+  /// Path with volatile ids replaced by `:id`, so calls to the same endpoint
+  /// group into one row on the Errors/Logs screens instead of thousands.
+  endpoint      String    @default("")
+  method        String    @default("GET")
+  /// HTTP status, or 0 when the request never got a response (DNS, TLS, timeout).
+  status        Int       @default(0)
+  ok            Boolean   @default(true)
+  durationMs    Int       @default(0)
+  environment   String    @default("production") // production | sandbox
+  errorCode     String    @default("")
+  errorMessage  String    @default("")
+  /// Billable units this call consumed — tokens, characters, seconds, segments.
+  /// Zero when the tracer had no way to measure them (see CostConfidence).
+  units         Float     @default(0)
+  /// Cost in micro-USD (millionths of a dollar). Integer maths so summing
+  /// millions of sub-cent rows can't accumulate float drift.
+  costMicroUsd  Int       @default(0)
+  /// Rate-limit headroom the vendor advertised on this response, when it does.
+  rateLimit     Int?
+  rateRemaining Int?
+  rateResetAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  /// The three shapes every API Center query takes: one provider over time,
+  /// the whole fleet over time, and one provider's failures over time.
+  @@index([provider, createdAt])
+  @@index([createdAt])
+  @@index([provider, ok, createdAt])
+  @@map("api_request_logs")
+}
+
+/// Admin-editable, per-provider configuration for the API Center: the quota to
+/// measure headroom against, the unit price behind cost estimates, and key
+/// expiry. Rows are created lazily — a provider with no row uses the defaults
+/// from PROVIDER_DEFS, so adding a vendor needs no seed step.
+model ApiProviderSetting {
+  provider String @id
+
+  /// Units allowed per calendar month by the vendor plan; 0 = unmetered/unknown,
+  /// which the UI renders as "—" rather than a 0% meter that reads as "empty".
+  monthlyQuota     Int       @default(0)
+  /// Overrides ProviderDef.defaultUnitCostUsd, in micro-USD per unit. Null =
+  /// use the code default.
+  unitCostMicroUsd Int?
+  /// Requests/minute ceiling; 0 = unknown.
+  rateLimitPerMin  Int       @default(0)
+  environment      String    @default("production")
+  /// When the key in use expires, for vendors that issue expiring credentials.
+  keyExpiresAt     DateTime?
+  /// Keep collecting telemetry but stop alerting — for a vendor with a known
+  /// open incident, so its noise doesn't bury a new problem elsewhere.
+  muted            Boolean   @default(false)
+  notes            String    @default("")
+
+  updatedAt DateTime @updatedAt
+
+  @@map("api_provider_settings")
+}
+
+/// A threshold that turns API Center telemetry into an alert.
+model ApiAlertRule {
+  id          String    @id @default(cuid())
+  /// Null applies the rule to every provider — one "error rate > 5%" rule covers
+  /// vendors added later without anyone remembering to add a rule for them.
+  provider    String?
+  metric      String // error_rate | latency_p95 | quota_used | uptime | no_traffic
+  comparator  String    @default("gt") // gt | lt
+  threshold   Float
+  /// Minutes of history the rule is evaluated over.
+  windowMin   Int       @default(60)
+  severity    String    @default("warning") // warning | critical
+  enabled     Boolean   @default(true)
+  /// Suppress re-firing for this many minutes after the rule last fired.
+  cooldownMin Int       @default(60)
+  lastFiredAt DateTime?
+
+  events ApiAlertEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+  @@map("api_alert_rules")
+}
+
+/// One firing of an ApiAlertRule — the Alerts page's history feed. Kept as its
+/// own row (rather than a flag on the rule) so an alert can be acknowledged and
+/// resolved independently of the rule that raised it.
+model ApiAlertEvent {
+  id     String       @id @default(cuid())
+  ruleId String
+  rule   ApiAlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  provider  String
+  metric    String
+  severity  String @default("warning")
+  /// The value that tripped the threshold, and the threshold it tripped — kept
+  /// on the event so history stays truthful after the rule is edited.
+  value     Float
+  threshold Float
+  message   String @default("")
+
+  acknowledgedAt DateTime?
+  /// Set when the metric came back inside the threshold.
+  resolvedAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([provider, createdAt])
+  @@map("api_alert_events")
+}
+
+/// Persisted cache of Vapi prompt summaries. Compressing the master prompt for
+/// the live/test assistant needs an OpenAI call (several seconds); the result is
+/// deterministic per prompt, so it's cached here keyed by the prompt's SHA-1.
+/// Unlike the in-memory cache this survives restarts / cold starts, so a test
+/// call or assistant re-sync on a freshly-woken instance doesn't re-pay the
+/// summariser latency for an unchanged prompt.
+model PromptCache {
+  hash      String   @id
+  summary   String
+  createdAt DateTime @default(now())
+
+  @@map("prompt_cache")
+}
+
+/// A white-label tenant. One deployment serves many brands; a brand is a front
+/// door — its own subdomain, logos, palette, font and messaging senders — owned
+/// by a brand ADMIN. Created only by the SUPER_ADMIN (Admin → Brands).
+///
+/// What lives here vs. in BrandSetting: everything on this model is public,
+/// non-secret presentation (what the browser needs to paint the brand). Secrets
+/// — SMTP password, Twilio auth token, WhatsApp access token — never touch it;
+/// they live encrypted in BrandSetting.
+model Brand {
+  id           String  @id @default(cuid())
+  /// Display name, used across the UI, email footers and the tenant's agent
+  /// copy (e.g. "Acme Voice").
+  name         String
+  /// Subdomain label — acme → acme.<platform domain>. Lowercase [a-z0-9-],
+  /// unique, and checked against a reserved list (www, api, admin, app, …).
+  slug         String  @unique
+  /// Optional vanity domain pointed at this deployment by CNAME.
+  customDomain String? @unique
+
+  /// Where `customDomain` is in its lifecycle:
+  ///   none      — no vanity domain set
+  ///   pending   — claimed; waiting for the brand's DNS records to appear
+  ///   verified  — TXT proof seen and traffic routes here; links use it
+  ///   error     — last check failed (reason in `domainError`)
+  /// Only a VERIFIED domain is used to build links, or a customer would be sent
+  /// to a hostname that doesn't resolve yet.
+  domainStatus     String    @default("none")
+  /// Ownership-proof nonce the brand publishes as a TXT record. Random per
+  /// brand, so claiming a domain requires control of that domain's DNS —
+  /// otherwise one tenant could point links at a domain it doesn't own.
+  domainToken      String    @default("")
+  domainVerifiedAt DateTime?
+  domainCheckedAt  DateTime?
+  /// Human-readable reason the last verification failed ("" when fine).
+  domainError      String    @default("")
+
+  status BrandStatus @default(active)
+
+  // Whitelabel: UI assets (public S3 URLs; blank = platform default).
+  logoLightUrl String @default("")
+  logoDarkUrl  String @default("")
+  faviconUrl   String @default("")
+
+  // Theme: colour + typography (see services/brandTheme.ts).
+  /// Palette preset id from the ten-colour catalog, or "custom" when the
+  /// colours below were hand-picked.
+  themePreset     String  @default("ocean")
+  /// Brand hue used for buttons, links and active nav — hex, e.g. "#2C76ED".
+  primaryColor    String  @default("#2C76ED")
+  /// Secondary hue for highlights and charts.
+  accentColor     String  @default("#7C5CFC")
+  /// Font family id from the catalog (Business or Classic group).
+  fontFamily      String  @default("inter")
+  /// Which catalog group the font came from: "business" | "classic".
+  fontStyle       String  @default("business")
+  /// Brand ships in dark mode by default when true.
+  darkModeDefault Boolean @default(false)
+
+  // Whitelabel: copy shown to this brand's customers.
+  tagline      String @default("")
+  supportEmail String @default("")
+  supportPhone String @default("")
+
+  // Legal identity for email/SMS footers — the tenant's compliance details,
+  // never the platform's. Blank lines are simply left out of the footer.
+  legalName       String   @default("")
+  legalAddress    String   @default("")
+  termsUrl        String   @default("")
+  privacyUrl      String   @default("")
+  // The brand's own sites, for Help links and the email footer.
+  websiteUrl      String   @default("")
+  helpUrl         String   @default("")
+  // Locale defaults stamped on this brand's NEW customers (ISO-2 / IANA).
+  defaultCountry  String   @default("")
+  defaultTimezone String   @default("")
+  // public — anyone may sign up on the brand's door; invite — only the
+  // brand's admins create accounts.
+  signupMode      String   @default("public")
+  // Sign-in screen copy; blank = the platform's default lines.
+  loginHeadline   String   @default("")
+  loginBlurb      String   @default("")
+  // Feature switches, { booking?, transfer?, crm?, smsToCaller?, whatsapp? }
+  // → boolean. A missing key means ON. See services/brandSetup.ts.
+  modules         Json     @default("{}")
+  // SubscriptionPlan ids this brand sells. Empty = every active platform plan.
+  planIds         Json     @default("[]")
+  // Trial overrides; null = the platform's value applies.
+  trialDays       Int?
+  trialMinutes    Int?
+  cardRequired    Boolean?
+  // Default agent voice for this brand's new customers; blank = platform default.
+  defaultVoiceId  String   @default("")
+  // Per-brand <head>/<body>/footer snippets (analytics, chat widgets). On a
+  // brand host these REPLACE the platform's, so a tenant's pages never carry
+  // the platform's tracking.
+  scripts         Json     @default("{}")
+  // Pricing: may the brand's own admin set its addons (its charge on top of a
+  // plan's base price), and the most it may add per cycle (null = no cap).
+  addonEditable   Boolean  @default(true)
+  maxAddonCents   Int?
+
+  /// Who created it (a SUPER_ADMIN user id) — kept as a plain id, not a
+  /// relation, so deleting that admin never blocks deleting a brand.
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings      BrandSetting[]
+  numbers       PhoneNumber[]      @relation("BrandPhoneNumbers")
+  planAddons    BrandPlanAddon[]   @relation("BrandPlanAddons")
+  walletEntries BrandWalletEntry[] @relation("BrandWalletEntries")
+
+  /// The tenant's own support queues (lane `support`) and the tickets filed
+  /// into them — its customers' conversations with its own team.
+  ticketDepartments  TicketDepartment[] @relation("BrandTicketDepartments")
+  ticketSavedReplies TicketSavedReply[] @relation("BrandTicketSavedReplies")
+  /// Every ticket RAISED from this tenant: its customers' support threads AND
+  /// the queries its own admins put to the platform.
+  tickets            Ticket[]           @relation("BrandTickets")
+
+  /// Set only for a brand whose call data has been moved into its own Neon
+  /// project — see services/tenantDb.ts. Absent for every other brand, which
+  /// is the normal case.
+  database BrandDatabase?
+
+  /// Platform views (phase 5): last night's numbers and the thin directory —
+  /// the only two things Main knows about what goes on inside the brand.
+  statsDaily BrandStatsDaily[]
+  directory  CustomerDirectory[]
+
+  @@map("brands")
+}
+
+/// A brand whose CALL DATA lives in its own Neon project instead of in this
+/// database — the "data plane" half of the hybrid described in
+/// docs/tenant-databases.md.
+///
+/// This exists for compliance and data residency, NOT for performance. A brand
+/// only gets a row here when a contract requires its customers' call
+/// transcripts to sit in a named region, or in storage no other tenant shares.
+/// Partitioning (migration 0055) is what answers "the table is too big"; moving
+/// a tenant out answers "this data may not live with yours", and nothing else.
+///
+/// Everything else about the brand — the brand itself, its users, plans,
+/// coupons, wallet, tickets and billing — stays here in the control plane, so
+/// the platform's own cross-brand admin views keep working as one SQL query.
+model BrandDatabase {
+  brandId String @id
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  /// Where the tenant's database actually is.
+  ///   neon         — its own Neon project: isolation, its own region and
+  ///                  compute. The production shape.
+  ///   local-schema — a Postgres schema on the platform's own database, used
+  ///                  when NEON_API_KEY is not set (development, tests) so the
+  ///                  same code path runs everywhere. `schemaName` says which.
+  provider   String @default("neon")
+  schemaName String @default("")
+
+  /// The Neon project holding this tenant's data plane, and the region it was
+  /// created in — the region is the whole point for a residency contract, so it
+  /// is recorded rather than inferred from the connection string. Empty for a
+  /// local-schema tenant.
+  neonProjectId String
+  region        String @default("")
+
+  /// Pooled and direct connection strings, AES-256-GCM encrypted with the same
+  /// key as every other stored credential (lib/crypto.ts). These are the keys to
+  /// a customer's entire call history, so they are never stored or logged in
+  /// plaintext and never leave the server.
+  urlEncrypted       String
+  directUrlEncrypted String
+
+  /// provisioning — database created, schema not confirmed yet
+  /// migrating    — schema being brought up to date (or history being copied)
+  /// active       — reads and writes route here
+  /// failed       — provisioning or migration broke; `error` says how
+  /// disabled     — routing suspended, database retained
+  ///
+  /// Only `active` routes. A brand whose database is in any other state is not
+  /// served from the control plane instead — its door stays shut until the
+  /// database is ready (see tenantFor in services/tenantDb.ts).
+  status String @default("provisioning")
+  error  String @default("")
+
+  /// Name of the newest tenant migration applied (prisma/tenant/migrations), so
+  /// a tenant that missed a later one is detectable — and stops routing until
+  /// `npm run tenant:migrate` has caught it up.
+  schemaVersion String    @default("")
+  provisionedAt DateTime?
+  migratedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("brand_databases")
+}
+
+/// One row per brand per day, written by the nightly rollup (services/brandStats.ts)
+/// that visits every tenant. The super admin's overview reads THIS — never the
+/// tenants — so it loads from Main alone and says "as of" when it was computed.
+model BrandStatsDaily {
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  /// The UTC calendar day the per-day numbers (calls, minutes) describe.
+  day     DateTime @db.Date
+
+  /// Snapshot of the brand as of `computedAt`.
+  customers    Int   @default(0)
+  active       Int   @default(0)
+  trialing     Int   @default(0)
+  callsTotal   Int   @default(0)
+  minutesTotal Float @default(0)
+  openTickets  Int   @default(0)
+
+  /// What happened ON `day`.
+  calls   Int   @default(0)
+  minutes Float @default(0)
+
+  computedAt DateTime @default(now())
+
+  @@id([brandId, day])
+  @@index([day])
+  @@map("brand_stats_daily")
+}
+
+/// The one piece of customer PII Main keeps once the accounts live in the
+/// tenants (plan §7, decision Q4): enough to answer "which brand is this
+/// email in?" and to count a brand's people without opening its database.
+/// Maintained by services/customerDirectory.ts on every account write.
+model CustomerDirectory {
+  brandId  String
+  brand    Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  userId   String
+  email    String
+  fullName String @default("")
+  role     Role   @default(USER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([brandId, userId])
+  @@index([userId])
+  @@index([email])
+  @@index([brandId, role])
+  @@map("customer_directory")
+}
+
+/// Where a shared call lives. The "More info" link in a call-summary SMS names
+/// a call by an unguessable slug and is served from the platform's API host
+/// for every brand — so the request's host cannot say which brand's database
+/// holds the call. This index can. Written when the slug is minted
+/// (services/callWrite.ts); read by routes/publicCall.routes.ts.
+model CallShare {
+  publicId      String    @id
+  brandId       String
+  callId        String
+  /// The call's createdAt — the other half of its key in a partitioned table.
+  callCreatedAt DateTime
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([brandId])
+  @@map("call_shares")
+}
+
+/// Stripe customer id → which brand, which customer. Stripe stays one account
+/// (the platform's), so this is how a payment finds its way home: written when
+/// the Stripe customer is created (and stamped on the Stripe object as
+/// metadata, a second copy), read by the webhook before it touches anything.
+model StripeCustomer {
+  stripeCustomerId String   @id
+  brandId          String
+  userId           String
+  createdAt        DateTime @default(now())
+
+  @@index([brandId])
+  @@index([userId])
+  @@map("stripe_customers")
+}
+
+/// One row per paid invoice: the whole payment, split into the platform's share
+/// (the plan's base price) and the brand's share (its addon), in proportion to
+/// what was actually paid. THE place "what did we earn this month, and per
+/// brand" is answered. The brand wallet is credited from this row, never from
+/// the profile.
+model PlatformLedger {
+  id               String    @id @default(cuid())
+  stripeInvoiceId  String    @unique
+  stripeCustomerId String
+  brandId          String
+  userId           String
+  planId           String?
+  couponId         String?
+  currency         String    @default("usd")
+  totalCents       Int
+  platformCents    Int
+  brandCents       Int
+  /// Cumulative, from Stripe's charge.refunded — the row stays, so a refunded
+  /// payment still shows what it was.
+  refundedCents    Int       @default(0)
+  periodStart      DateTime?
+  periodEnd        DateTime?
+  /// webhook | reconcile | renewal | go_live — which path booked it first.
+  source           String    @default("webhook")
+  paidAt           DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+
+  @@index([brandId, paidAt])
+  @@index([paidAt])
+  @@map("platform_ledger")
+}
+
+/// A Stripe event whose customer no brand holds — an old Stripe customer, a
+/// metadata gap. Parked here, never dropped; the super admin sees it and can
+/// retry it once the index is repaired, or dismiss it.
+model StripeUnroutedEvent {
+  id                   String    @id @default(cuid())
+  stripeEventId        String    @unique
+  type                 String
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  payload              Json
+  reason               String    @default("")
+  receivedAt           DateTime  @default(now())
+  resolvedAt           DateTime?
+  /// routed | dismissed
+  resolution           String?
+  resolvedById         String?
+
+  @@index([resolvedAt, receivedAt])
+  @@map("stripe_unrouted_events")
+}
+
+/// A deleted brand's database outlives the brand by 30 days, so a mistaken
+/// delete is recoverable. The brand row (and its brand_databases row) is gone
+/// by then, so what the daily sweep needs to find and remove the database is
+/// copied here at deletion time.
+model TenantDatabaseRetirement {
+  id            String   @id @default(cuid())
+  brandSlug     String
+  brandName     String
+  provider      String
+  neonProjectId String   @default("")
+  schemaName    String   @default("")
+  region        String   @default("")
+  retireAfter   DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([retireAfter])
+  @@map("tenant_database_retirements")
+}
+
+/// A brand's own charge on top of a platform plan. The customer pays
+/// (plan price + addon) to the platform through a Stripe Price of the brand's
+/// own, created under the plan's product; the addon share lands in the
+/// brand's wallet when the invoice is paid. Addon 0 = the brand sells the
+/// plan at the platform's price and no brand Price exists.
+model BrandPlanAddon {
+  id      String           @id @default(cuid())
+  brandId String
+  brand   Brand            @relation("BrandPlanAddons", fields: [brandId], references: [id], onDelete: Cascade)
+  planId  String
+  plan    SubscriptionPlan @relation("PlanBrandAddons", fields: [planId], references: [id], onDelete: Cascade)
+
+  addonCents    Int    @default(0)
+  /// Stripe Price for (base + addon); "" while addon is 0 or Stripe is unlinked.
+  stripePriceId String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([brandId, planId])
+  @@index([stripePriceId])
+  @@map("brand_plan_addons")
+}
+
+/// The brand's wallet, as a ledger. Balance = sum(amountCents) per currency.
+///   credit   — a customer's paid invoice earned the brand its addon (positive)
+///   payout   — the platform paid the brand, recorded by the super admin (negative)
+///   reversal — a refund undid a credit (negative)
+/// `stripeInvoiceId` is unique so a credit can never be booked twice, whichever
+/// of the invoice-paid paths (webhook, reconcile, go-live) sees it first.
+model BrandWalletEntry {
+  id      String @id @default(cuid())
+  brandId String
+  brand   Brand  @relation("BrandWalletEntries", fields: [brandId], references: [id], onDelete: Cascade)
+
+  type             String
+  amountCents      Int
+  currency         String  @default("usd")
+  stripeInvoiceId  String? @unique
+  /// For a reversal: the invoice whose credit it undoes (not unique — a
+  /// partial refund followed by another produces two reversals).
+  relatedInvoiceId String?
+  customerId       String?
+  planId           String?
+  note             String  @default("")
+  reference        String  @default("")
+  createdById      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([brandId, createdAt])
+  @@index([relatedInvoiceId])
+  @@map("brand_wallet_entries")
+}
+
+/// Per-brand overrides of the platform integration settings — the same key
+/// namespace as platform_settings ("smtp.from", "twilio.fromNumber",
+/// "whatsapp.accessToken", …). A blank/absent row means "use the platform
+/// value", so a brand only stores what it actually white-labels. Secrets are
+/// encrypted at rest exactly like platform settings and are never returned raw.
+model BrandSetting {
+  brandId  String
+  brand    Brand   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  key      String
+  value    String
+  isSecret Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+
+  @@id([brandId, key])
+  @@map("brand_settings")
+}
+
+// ------------------------------------------------------------------
+//  Support tickets — TWO lanes, one implementation.
+//
+//  The hierarchy this platform already has is three deep: a customer
+//  belongs to a brand, and a brand belongs to the platform. Support
+//  follows the same ladder, so a ticket is always a conversation with
+//  the tier directly above:
+//
+//    support — a brand's CUSTOMER asks that brand's admin team.
+//              Brand-scoped: only that tenant's admins and staff ever
+//              see it, exactly like its customer list. The platform
+//              owner is deliberately refused (see BRAND_SCOPED_SECTIONS).
+//
+//    brand   — a BRAND ADMIN asks the platform (the super admin).
+//              Platform-scoped: only the super admin handles these, and
+//              a brand admin only ever sees the ones they raised.
+//
+//  Which lane an account uses is decided by its role, never by a form
+//  field — see lib/ticketLanes.ts. That is what keeps the two wires from
+//  ever crossing: there is no request shape in which a customer can
+//  address the platform, or a brand admin its own customers.
+// ------------------------------------------------------------------
+
+/// Which rung of the ladder a ticket spans. See the block comment above.
+enum TicketLane {
+  /// Customer → their brand's admin team.
+  support
+  /// Brand admin → the platform (super admin).
+  brand
+}
+
+enum TicketStatus {
+  open
+  /// Replied by a handler — waiting on the requester.
+  pending
+  resolved
+  closed
+}
+
+enum TicketPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+/// A queue a ticket is filed into (Billing, Technical, Sales…), and the unit of
+/// access staff are granted.
+///
+/// Departments are per-lane AND per-tenant: a `support` department belongs to
+/// the brand whose team works it (`brandId` set), a `brand` department belongs
+/// to the platform (`brandId` null). So every brand defines its own customer
+/// queues without seeing anyone else's, and the platform defines the queues its
+/// brand admins file into.
+model TicketDepartment {
+  id   String     @id @default(cuid())
+  lane TicketLane
+
+  /// Tenant that owns this queue. Set for `support`, null for `brand` (the
+  /// platform's own). Mirrors `users.brandId`, so the same tenant filter that
+  /// scopes every other admin read scopes these too.
+  brandId String?
+  brand   Brand?  @relation("BrandTicketDepartments", fields: [brandId], references: [id], onDelete: Cascade)
+
+  name             String
+  description      String  @default("")
+  /// Offered in the requester's own department picker. Turn off for a queue
+  /// staff file into by hand but nobody should choose.
+  requesterVisible Boolean @default(true)
+  /// Off = hidden everywhere and unselectable, without losing its tickets.
+  enabled          Boolean @default(true)
+  /// Display ordering in every picker and filter.
+  order            Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roles   StaffRole[] @relation("StaffRoleTicketDepartments")
+  /// Staff granted this department individually (see User.ticketDepartments).
+  staff   User[]      @relation("StaffTicketDepartments")
+  tickets Ticket[]
+
+  savedReplies TicketSavedReply[]
+
+  /// Protects the brand-scoped case. Platform rows carry a NULL brandId, which
+  /// Postgres treats as distinct, so the duplicate-name check for those lives in
+  /// the service (which answers 409 either way).
+  @@unique([brandId, lane, name])
+  @@index([lane, brandId, order])
+  @@map("ticket_departments")
+}
+
+/// A reply a handler reaches for often — "we're looking into it" with the blanks
+/// ({{customer_name}}, {{ticket_number}}…) filled from the ticket when it is
+/// dropped into the composer. Scoped to one lane; global within it
+/// (`departmentId` null) or to a single department.
+model TicketSavedReply {
+  id    String     @id @default(cuid())
+  lane  TicketLane
+  title String
+  body  String
+
+  /// The tenant whose team may use it. Set for `support`, null for `brand`.
+  brandId String?
+  brand   Brand?  @relation("BrandTicketSavedReplies", fields: [brandId], references: [id], onDelete: Cascade)
+
+  /// Null = offered on every department's tickets in this lane.
+  departmentId String?
+  department   TicketDepartment? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  createdById String?
+  createdBy   User?   @relation("SavedReplyAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lane, brandId, title])
+  @@map("ticket_saved_replies")
+}
+
+/// One support conversation.
+model Ticket {
+  id        String @id @default(cuid())
+  /// Running number in the order tickets were opened — "#42". The reference is
+  /// what a requester quotes back; this is the short one a team says out loud.
+  number    Int    @unique @default(autoincrement())
+  reference String @unique
+  subject   String
+
+  lane     TicketLane
+  status   TicketStatus   @default(open)
+  priority TicketPriority @default(normal)
+
+  /// The tenant this ticket belongs to — ALWAYS the requester's own brand,
+  /// whichever lane it is on:
+  ///   support — the brand whose team handles it.
+  ///   brand   — the brand that is asking (the platform handles it).
+  /// Null only for a platform-level requester (a legacy account with no brand),
+  /// which is the same case `tenantScope` already treats as unscoped.
+  brandId String?
+  brand   Brand?  @relation("BrandTickets", fields: [brandId], references: [id], onDelete: SetNull)
+
+  /// Null only when the department was deleted after filing — such orphans stay
+  /// visible to that lane's full admins, who hold every queue.
+  departmentId String?
+  department   TicketDepartment? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  /// A plain id. In this database the requester is a brand admin, who lives in
+  /// the brand's own database (phase 6); `requesterName` / `requesterEmail`
+  /// below are the snapshot every reader uses. In a tenant it is a real relation.
+  requesterId String
+
+  /// A brand admin can hand one of their customers' tickets up to the platform.
+  /// That creates a NEW ticket on the `brand` lane (the brand asking, the
+  /// platform answering) and links it back here. The customer's ticket stays
+  /// on the `support` lane, in the brand's inbox — the platform never reaches
+  /// a tenant's customer conversation; it reaches the brand admin's account of
+  /// it. Unique, so a ticket is escalated at most once.
+  /// The customer ticket this platform ticket was raised FROM, and whose
+  /// brand's database it is in. A plain reference: the pair lives in two
+  /// databases (services/tickets.ts, attachEscalationPairs).
+  escalatedFromId      String? @unique
+  escalatedFromBrandId String?
+  /// The platform ticket this customer ticket was escalated TO (in the
+  /// control plane). Set on the tenant's row; null here.
+  escalationId         String?
+
+  /// Who asked, as of when they asked. On lane `brand` the requester is a
+  /// brand admin who lives in their brand's database; the snapshot is what
+  /// this row keeps once the control plane's mirror of them is gone.
+  requesterBrandId String?
+  requesterName    String  @default("")
+  requesterEmail   String  @default("")
+
+  assignedToId String?
+  assignedTo   User?   @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  /// app — raised by the requester themselves.
+  /// admin — raised by a handler on the requester's behalf (a phone call, a
+  ///         conversation elsewhere), so the thread exists to reply in.
+  source String @default("app")
+
+  /// Sort key for both inboxes (newest activity first), and the basis of the
+  /// unread dots each side sees.
+  lastMessageAt      DateTime @default(now())
+  unreadForStaff     Boolean  @default(true)
+  unreadForRequester Boolean  @default(false)
+
+  /// When each side last opened the thread — the basis of the "Seen" tick under
+  /// the newest message you sent. Written by the read paths, never by hand.
+  staffReadAt     DateTime?
+  requesterReadAt DateTime?
+
+  /// How the requester rated the outcome: 1–5 stars, offered only once the work
+  /// is finished. Null means unrated, which is NOT a neutral score — averaging
+  /// unanswered tickets in as 3s would be a fiction.
+  rating        Int?
+  ratingComment String    @default("")
+  ratedAt       DateTime?
+
+  closedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  messages    TicketMessage[]
+  attachments TicketAttachment[]
+  merges      TicketMerge[]
+
+  @@index([lane, brandId, status, lastMessageAt])
+  @@index([lane, brandId, lastMessageAt])
+  @@index([departmentId, lastMessageAt])
+  @@index([requesterId, lastMessageAt])
+  @@index([assignedToId, lastMessageAt])
+  @@index([rating])
+  @@map("tickets")
+}
+
+/// One chat bubble. `internal` notes are staff-only and are filtered out of
+/// every requester-facing read path.
+model TicketMessage {
+  id       String @id @default(cuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  /// requester | staff | system
+  authorType String
+  authorId   String?
+  /// Snapshotted so a deleted staff account doesn't blank out old replies.
+  authorName String  @default("")
+
+  body     String  @default("")
+  internal Boolean @default(false)
+
+  /// The message this one is a reply to. Same-ticket is enforced in the service,
+  /// since the database cannot express it. SetNull, not Cascade: deleting a
+  /// quoted message must not take the reply (and everything hanging off it) too.
+  replyToId String?
+  replyTo   TicketMessage?  @relation("TicketMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   TicketMessage[] @relation("TicketMessageReplies")
+
+  /// Set the first time the author edits the text — drives the "(edited)" mark.
+  editedAt  DateTime?
+  /// Soft delete. The row stays so a reply quoting it still makes sense and the
+  /// thread keeps an honest shape; body and attachments are cleared at the point
+  /// of deletion, so the text never reaches a client again.
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  attachments TicketAttachment[]
+  reactions   TicketMessageReaction[]
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
+}
+
+/// A ticket that was merged into another. The source row is deleted at merge
+/// time (its messages and files move across first), so this snapshot is the only
+/// record of what it was — it answers "where did #12 go?" later on.
+model TicketMerge {
+  id       String @id @default(cuid())
+  /// The ticket that stayed.
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  sourceNumber        Int
+  sourceReference     String
+  sourceSubject       String
+  sourceRequesterName String   @default("")
+  sourceCreatedAt     DateTime
+  /// How many messages came across — the size of what got folded in.
+  messageCount        Int      @default(0)
+
+  /// Who did it. The name is snapshotted the way message authors are, so a staff
+  /// account deleted later doesn't blank out the record.
+  mergedById   String?
+  mergedByName String   @default("")
+  mergedAt     DateTime @default(now())
+
+  @@index([ticketId, mergedAt])
+  @@map("ticket_merges")
+}
+
+/// One emoji, put on one message, by one person. Unique per (message, actor,
+/// emoji) so tapping the same one again removes it instead of stacking.
+model TicketMessageReaction {
+  id        String        @id @default(cuid())
+  messageId String
+  message   TicketMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  emoji     String
+  /// The user id — every participant in both lanes holds an account.
+  actorKey  String
+  /// requester | staff — who put it there, for the label under the bubble.
+  actorType String
+  actorName String @default("")
+
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, actorKey, emoji])
+  @@index([messageId])
+  @@map("ticket_message_reactions")
+}
+
+/// A file sent in a ticket. The bytes live in S3 (services/storage.ts); this row
+/// is the record of what was sent, by whom, on which message.
+model TicketAttachment {
+  id       String @id @default(cuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  messageId String?
+  message   TicketMessage? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  name String
+  mime String
+  size Int
+  /// S3 object key (for deletes) + the public URL the chat renders.
+  key  String
+  url  String
+
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_attachments")
+}

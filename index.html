@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2C76ED" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0" />
+    <title>hello22.ai — Voice Receptionist</title>
+    <script>
+      // Boot watchdog — self-heals the "blank screen" when the entry bundle never
+      // runs (stale/404'd chunk after a deploy, or a network blip). Runs before the
+      // module script so it can detect a failed boot; the in-app ErrorBoundary and
+      // chunkReload handler only cover errors AFTER the bundle is executing. Reloads
+      // once per load (sessionStorage-guarded) so a genuinely broken build can't loop;
+      // the app clears the guard on a clean mount.
+      (function () {
+        var KEY = "hello22:boot-reloaded";
+        function rootEmpty() {
+          var r = document.getElementById("root");
+          return !r || r.childElementCount === 0;
+        }
+        function recover() {
+          try {
+            if (sessionStorage.getItem(KEY)) return; // already retried this load
+            sessionStorage.setItem(KEY, "1");
+          } catch (e) {
+            /* sessionStorage blocked (private mode) — still attempt one reload */
+          }
+          window.location.reload();
+        }
+        // Entry/module script failed to load (404 after deploy, network error).
+        window.addEventListener(
+          "error",
+          function (e) {
+            var t = e && e.target;
+            if (t && t.tagName === "SCRIPT" && rootEmpty()) recover();
+          },
+          true,
+        );
+        // Fallback: bundle loaded but never painted anything into #root.
+        window.addEventListener("load", function () {
+          setTimeout(function () {
+            if (rootEmpty()) recover();
+          }, 6000);
+        });
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <!--
+      No analytics/tracking tags live in this file — on purpose.
+
+      GTM, GA4, Meta Pixel, verification metas and any other snippet are managed
+      in Admin → Settings → SEO & Scripts and injected at runtime by SeoManager
+      (src/components/SeoManager.tsx) into <head>, the start of <body>, or the
+      footer. Adding one here instead hides it from the admin UI and needs a
+      code deploy to change, so put it in the admin fields.
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
