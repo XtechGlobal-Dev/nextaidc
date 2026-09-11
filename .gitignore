@@ -1,0 +1,18 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+.vite
+server/node_modules
+server/.env
+
+# All Markdown files (notes, docs drafts, local logs) — kept on disk, out of the repo
+*.md
+
+# Local-only Claude Code config & skills (kept on disk, out of the repo)
+.claude/
