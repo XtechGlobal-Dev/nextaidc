@@ -3,18 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveGreeting, clampGreeting, GREETING_MAX } from "./agentConfig.js";
 
-/* The opening greeting is now owner-editable, and the promise attached to that
- * input is "the AI says exactly this, every time". Two things have to hold, and
- * both are easy to break by accident:
- *
- *  1. The greeting is spoken as Vapi's `firstMessage` with
- *     `firstMessageMode: "assistant-speaks-first"`. That mode plays the string
- *     through TTS directly — the LLM never generates the first turn, so it
- *     cannot paraphrase it. Switching to "assistant-waits-for-user", or feeding
- *     firstMessage anything other than the greeting, silently breaks the
- *     promise while every test still passes.
- *  2. Nothing rewrites an owner's wording on the way through.
- */
+// The promise is "the AI says exactly this". It holds only while the greeting is Vapi's `firstMessage`
+// with "assistant-speaks-first" (TTS plays it, the LLM can't paraphrase) and nothing rewrites it en route.
 
 const vapiSrc = readFileSync(resolve(import.meta.dirname, "../services/vapi.ts"), "utf8");
 const summarizerSrc = readFileSync(
@@ -52,9 +42,7 @@ describe("the owner's greeting reaches the caller verbatim", () => {
   });
 
   it("survives the prompt compressor — the summariser must keep it word for word", () => {
-    // The live prompt is LLM-compressed before it reaches Vapi. The greeting is
-    // on the summariser's verbatim list; losing that line would let the model
-    // reword the greeting quoted in the prompt.
+    // The prompt is LLM-compressed before Vapi; drop this line and the model can reword the quoted greeting.
     expect(summarizerSrc).toMatch(/Keep VERBATIM, word-for-word: the opening greeting in quotes/);
   });
 

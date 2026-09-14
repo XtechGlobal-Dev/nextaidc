@@ -1,15 +1,5 @@
-/**
- * Industry / niche taxonomy for the AI Brain → Identity "Industry / Niche" field.
- *
- * The selected value is stored verbatim on `profile.industry` and injected into the
- * assistant's prompt ("a {industry} business based in {country}"), so entries must
- * read naturally AND be safe to drop into a prompt. Customers can propose their own
- * industry when none fits; those go to an admin-approved queue (see settings.ts)
- * before joining the public list every customer sees.
- *
- * This built-in list is the server's source of truth for the public list; the
- * frontend keeps a copy only as an offline fallback.
- */
+/** Industry taxonomy. Values are injected verbatim into the prompt, so entries must read naturally and
+ *  be prompt-safe. Server is the source of truth; the frontend copy is an offline fallback. */
 export const BUILTIN_INDUSTRIES: string[] = [
   // Trades & home services
   "Plumbing",
@@ -80,10 +70,8 @@ export const BUILTIN_INDUSTRIES: string[] = [
 export const INDUSTRY_MIN_LEN = 2;
 export const INDUSTRY_MAX_LEN = 50;
 
-// Letters (any script), digits, spaces, and a small set of punctuation real
-// industry names use. Deliberately excludes newlines, control chars, quotes,
-// backticks, braces, angle brackets etc. — the value is dropped into the live
-// prompt, so this doubles as a guard against prompt-injection-y input.
+// No newlines, quotes, backticks, braces or angle brackets — the value lands in the live prompt, so
+// this doubles as a prompt-injection guard.
 const INDUSTRY_ALLOWED = /^[\p{L}\p{N} .,&/()'+-]+$/u;
 
 /** Collapse runs of whitespace and trim — the canonical display form. */
@@ -91,12 +79,7 @@ export function normalizeIndustryWhitespace(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
 }
 
-/**
- * Validate + clean a proposed industry label. Returns the cleaned value, or an
- * `error` describing why it was rejected. The single authority for what counts as
- * a valid industry — the client mirrors these rules for instant feedback, but the
- * server always re-checks (never trust the client).
- */
+/** Validate + clean an industry label. The client mirrors these rules for feedback; the server always re-checks. */
 export function sanitizeIndustry(raw: unknown): { value: string } | { error: string } {
   if (typeof raw !== "string") return { error: "Enter an industry name." };
   const value = normalizeIndustryWhitespace(raw);

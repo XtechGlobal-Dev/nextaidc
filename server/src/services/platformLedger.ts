@@ -5,22 +5,8 @@ import { tenantFor, tenantForUser } from "./tenantDb.js";
 import { resolveStripeCustomer, type StripeOwner } from "./stripeCustomers.js";
 import { creditWalletFromLedger } from "./brandWallet.js";
 
-/* ------------------------------------------------------------------ *
- *  The platform ledger — one payment, one row, two shares.
- *
- *  A customer of Acme pays the platform's base price plus Acme's addon,
- *  on one Stripe invoice. This is where that payment is written down
- *  once, split: the platform's share and the brand's. Everything money-
- *  shaped downstream reads from here — the brand wallet is credited from
- *  the row, the super admin's "what did we earn" is a sum over it — so
- *  a number can never disagree with itself.
- *
- *  Booked by whichever invoice-paid path runs first (webhook, reconcile,
- *  early renewal, go-live) and idempotent on the invoice id, so the rest
- *  find the row and do nothing. The customer's own view of the same
- *  payment is the `plan_events` row in their brand's database
- *  (services/planHistory.ts).
- * ------------------------------------------------------------------ */
+// Platform ledger: one payment, one row, split platform/brand. Everything money-shaped
+// reads from here so numbers can't disagree. Idempotent on invoice id across all paid paths.
 
 export type LedgerSource = "webhook" | "reconcile" | "renewal" | "go_live";
 
@@ -52,14 +38,7 @@ export interface LedgerOutcome {
 
 const NOTHING: LedgerOutcome = { ledger: null, credited: 0, alreadyBooked: false, unrouted: false };
 
-/**
- * Record a paid invoice in the ledger and credit the brand's wallet from it.
- *
- * Best-effort and idempotent: a second call for the same invoice finds the row
- * and returns it; a race between two paths is settled by the unique invoice id.
- * Never throws — a missed ledger row is visible and reconcilable, a failed
- * webhook would be retried forever.
- */
+/** Books a paid invoice and credits the brand wallet from it. Idempotent on invoice id; never throws — a missed row is reconcilable, a failed webhook retries forever. */
 export async function recordPaidInvoice(inv: PaidInvoice): Promise<LedgerOutcome> {
   try {
     if (!inv.invoiceId || !inv.customerId || inv.amountPaidCents <= 0) return NOTHING;
@@ -105,14 +84,8 @@ export async function recordPaidInvoice(inv: PaidInvoice): Promise<LedgerOutcome
   }
 }
 
-/**
- * The brand's share of what was paid.
- *
- * Proportional to the payment, not a flat addon: a 50% coupon on a $75 brand
- * price pays $37.50, and the brand's $25 becomes $12.50. On a full-price
- * invoice it is exactly the addon. A subscription on the platform's own Price
- * (addon 0, or the brand's Price not yet created) gives the brand nothing.
- */
+// Brand share is proportional to what was paid, not a flat addon (a 50% coupon
+// halves it). A subscription on the platform's own Price gives the brand nothing.
 async function splitFor(
   owner: StripeOwner,
   inv: PaidInvoice,
@@ -168,12 +141,7 @@ async function couponFor(userId: string, stripeCouponId: string | null | undefin
   return redemption?.couponId ?? null;
 }
 
-/**
- * Note a refund against the ledger row. Cumulative, from Stripe's
- * `amount_refunded`, so a replayed event changes nothing. The row stays: a
- * refunded payment still shows what it was, and the wallet reversal
- * (services/brandWallet.ts) is booked separately from the same event.
- */
+/** Notes a refund, cumulative from Stripe's amount_refunded so replays are no-ops. The row stays; the wallet reversal is booked separately. */
 export async function recordRefund(opts: {
   invoiceId: string;
   chargeAmountCents: number;

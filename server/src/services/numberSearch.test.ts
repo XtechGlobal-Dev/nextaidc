@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* searchNumbersByPattern anchors Twilio's loose `contains` match itself, and
- * filters to the admin's allowed series. Both are easy to get subtly wrong:
- *  - "start" must ignore the country dial code (+61 8… is a match for "8",
- *    the 1 in +6*1* is not);
- *  - a free-text search must not surface a series the admin switched off. */
+// searchNumbersByPattern anchors Twilio's loose `contains` itself. Gotchas: "start"
+// must skip the dial code (+6*1* isn't a leading 1), and disabled series must stay hidden.
 
 const list = vi.fn();
 

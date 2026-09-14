@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  The email footer names the TENANT — its legal entity, its address,
- *  its policies — when a brand has set them, and says nothing about
- *  them otherwise. A compliance line that quietly showed the platform's
- *  details on a white-label send would be the worst kind of leak.
- * ------------------------------------------------------------------ */
+// Footer names the tenant's legal details when set and nothing otherwise — the
+// platform's details must never leak onto a white-label send.
 
 const h = vi.hoisted(() => ({ findMany: vi.fn() }));
 

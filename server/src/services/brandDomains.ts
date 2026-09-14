@@ -4,42 +4,13 @@ import { prisma } from "../prisma.js";
 import { domainVerifyName, domainVerifyValuePrefix, env } from "../env.js";
 import { loadBrands, normalizeDomain } from "./brands.js";
 
-/* ------------------------------------------------------------------ *
- *  Brand vanity domains — claim, provision, verify.
- *
- *  A brand's SUBDOMAIN needs none of this: `*.<platform domain>` already
- *  resolves and the wildcard certificate already covers it, so
- *  acme.hello22.ai works the instant the row is written. Everything here
- *  exists for the other front door — a domain the CLIENT owns, which by
- *  definition we can neither point nor certificate on their behalf.
- *
- *  Three things have to line up before that domain can serve traffic:
- *
- *    1. Ownership — a TXT nonce proving whoever claimed the domain in our
- *                   admin actually controls its DNS.
- *    2. Routing   — a record at the client's registrar aiming the hostname
- *                   at our edge (CNAME, or A when they insist on an apex).
- *    3. Edge      — the hostname registered with the platform that
- *                   terminates TLS, so it stops 404ing and a certificate
- *                   is issued.
- *
- *  (3) is automated through the host's API when a token is configured;
- *  without one it degrades to "the operator adds it in the dashboard" and
- *  the DNS half still verifies on its own.
- * ------------------------------------------------------------------ */
+// Client-owned brand domains (platform subdomains need none of this — the wildcard covers them).
+// Three checks: TXT ownership nonce, routing record at our edge, and the edge (Vercel) knowing the hostname. Edge is optional without a token.
 
-/**
- * A record the brand's client pastes into their DNS provider.
- *
- * Shaped for a person who has never opened a DNS panel: each one is a numbered
- * step with a plain-words account of what the record TYPE is and why we ask
- * for it, alongside the four fields a registrar's form actually has.
- */
+/** A record the client pastes into their DNS provider, written for someone who has never opened a DNS panel. */
 export interface DnsRecord {
   type: "CNAME" | "A" | "TXT";
-  /** 1-based position in the client's checklist. Ownership comes first: it
-   *  changes nothing on their side, and it is the gate the routing record is
-   *  useless without. */
+  /** 1-based checklist position. Ownership first — it changes nothing on their side and gates the routing record. */
   step: number;
   /** What the step achieves, in the client's words. */
   title: string;
@@ -58,19 +29,14 @@ export interface DnsRecord {
   notes: string[];
   /** False once we've actually observed it resolving. */
   required: boolean;
-  /** What DNS currently answers at this name when it is NOT what we asked for
-   *  — the old website's address, a token from an earlier claim — so "wrong"
-   *  can be told apart from "not added yet". Empty when unchecked, absent, or
-   *  correct. */
+  /** What DNS answers instead of what we asked for, so "wrong" reads differently from "not added yet". Empty when unchecked, absent or correct. */
   seen: string[];
 }
 
 export interface DomainCheck {
   domain: string;
   status: "none" | "pending" | "verified" | "error";
-  /** True when the hostname is a bare root (brand.com) rather than a
-   *  subdomain — the case that replaces the client's website and needs an A
-   *  record, so the panel warns about it up front. */
+  /** Bare root (brand.com) rather than a subdomain — replaces the client's website and needs an A record, so the panel warns up front. */
   apex: boolean;
   /** TXT ownership nonce seen at the expected name. */
   ownershipOk: boolean;
@@ -86,16 +52,8 @@ export interface DomainCheck {
 
 /* ------------------------------ DNS lookups ------------------------------ */
 
-/**
- * Resolve through public resolvers rather than the host's.
- *
- * Verification is a race against DNS caches: the client adds a record, then
- * immediately clicks Verify. The container's own resolver may hold a negative
- * answer from a previous attempt for the whole TTL, so a correct record reads as
- * missing and the operator is told to fix something that is already right.
- * Cloudflare and Google both honour short TTLs and refuse to serve stale
- * negatives for long, which makes them the more truthful source here.
- */
+// Public resolvers, not the host's: the container's resolver can cache a negative answer from
+// a previous attempt for the whole TTL, so a freshly-added correct record reads as missing.
 function resolver(): Resolver {
   const r = new Resolver({ timeout: 5000, tries: 2 });
   r.setServers(["1.1.1.1", "8.8.8.8"]);
@@ -128,17 +86,13 @@ async function routingTargets(name: string): Promise<{ cnames: string[]; ips: st
 
 /* ---------------------------- Record templates ---------------------------- */
 
-/** True when the hostname IS the registrable apex (brand.com, not app.brand.com).
- *  Only a heuristic — a "co.uk" style suffix would need the public-suffix list to
- *  answer exactly — but it decides which record we RECOMMEND, and the operator
- *  sees the value either way. */
+// Heuristic only (co.uk-style suffixes would need the public-suffix list); it just picks
+// which record we recommend, and the operator sees the value either way.
 function looksLikeApex(domain: string): boolean {
   return domain.split(".").length <= 2;
 }
 
-/** The label a registrar wants in its "Host"/"Name" column, given an FQDN and
- *  the zone it sits in. Most providers append the zone themselves, so pasting
- *  the full name creates app.brand.com.brand.com. */
+// Registrar "Host" label. Most providers append the zone themselves, so the FQDN would become app.brand.com.brand.com.
 function hostLabel(fqdn: string, zone: string): string {
   if (fqdn === zone) return "@";
   return fqdn.endsWith(`.${zone}`) ? fqdn.slice(0, -(zone.length + 1)) : fqdn;
@@ -165,12 +119,7 @@ export function verifyRecordValue(token: string): string {
  *  offer; the number is for the ones that insist on one. */
 const RECORD_TTL = "Auto (or 3600)";
 
-/**
- * The DNS the brand's client has to publish. Two records in the normal case —
- * one to prove they own the name, one to route the traffic — in that order:
- * the TXT changes nothing on their side, while the routing record swaps
- * whatever the hostname served before, so it is the one to add last.
- */
+/** The records the client must publish: ownership TXT first (harmless), routing last (it replaces whatever the hostname served before). */
 export function domainInstructions(brand: Brand): DnsRecord[] {
   const domain = normalizeDomain(brand.customDomain);
   if (!domain) return [];
@@ -193,9 +142,7 @@ export function domainInstructions(brand: Brand): DnsRecord[] {
     seen: [],
   };
 
-  // The one caveat that trips up more setups than any other: a proxied
-  // Cloudflare record answers with Cloudflare's own addresses, so the check
-  // never sees our edge and the certificate can't be issued.
+  // Most common setup failure: a proxied Cloudflare record answers with Cloudflare's IPs, so we never see our edge.
   const proxyNote =
     "Using Cloudflare? Set this record to \"DNS only\" (grey cloud), not \"Proxied\", or the certificate cannot be issued.";
 
@@ -275,11 +222,7 @@ function vercelError(body: Record<string, unknown>, status: number): string {
   return err?.message?.trim() || `Vercel API returned ${status}.`;
 }
 
-/**
- * Register the hostname with the edge so it stops 404ing and a certificate is
- * issued. Idempotent: a domain already on the project reports success, which
- * matters because re-running verification is the normal operator gesture.
- */
+/** Registers the hostname with the edge. Idempotent — an already-attached domain reports success, since re-running verification is the normal gesture. */
 export async function attachDomainToEdge(
   domain: string,
 ): Promise<{ ok: boolean; message: string }> {
@@ -319,12 +262,8 @@ export async function detachDomainFromEdge(domain: string): Promise<void> {
   }).catch(() => undefined);
 }
 
-/**
- * What the edge thinks of the hostname: is it registered to our project, and can
- * it issue a certificate for it? `misconfigured` is the answer that matters —
- * it is Vercel's own read of whether DNS points at them well enough to complete
- * an ACME challenge.
- */
+// Is the hostname on our project and can it get a cert? `misconfigured` is Vercel's own read
+// of whether DNS points at them well enough for an ACME challenge.
 async function edgeStatus(
   domain: string,
 ): Promise<{ known: boolean; ready: boolean; message: string }> {
@@ -398,17 +337,7 @@ function routingLooksRight(cnames: string[], ips: string[]): boolean {
   return ips.includes(env.BRAND_APEX_IP);
 }
 
-/**
- * Check a brand's domain end to end and persist the verdict.
- *
- * Ownership is checked independently of routing, because the two fail for
- * opposite reasons: a missing TXT means the claim is unproven and must not be
- * trusted no matter how the traffic flows, while missing routing is just "not
- * yet" — DNS the client hasn't added or that hasn't propagated.
- *
- * Only when both hold (and the edge can serve it) does the domain become
- * `verified` and start being used to build this brand's links.
- */
+/** Checks a domain end to end and persists the verdict. Ownership is independent of routing — a missing TXT means an unproven claim that must never be trusted, however traffic flows. */
 export async function verifyBrandDomain(brand: Brand): Promise<DomainCheck> {
   const domain = normalizeDomain(brand.customDomain);
   const checkedAt = new Date();
@@ -444,11 +373,8 @@ export async function verifyBrandDomain(brand: Brand): Promise<DomainCheck> {
   const routingOk = routingLooksRight(targets.cnames, targets.ips);
   const edgeOk = edge.ready;
 
-  // What is there INSTEAD of what we asked for. For the TXT that is only a
-  // value carrying our prefix — other providers' tokens on the same name are
-  // fine and not the client's problem. For routing it is wherever the name
-  // currently lands, which is usually the website the client forgot lives
-  // there.
+  // What's there instead. For TXT only values with our prefix count — other providers' tokens
+  // on the same name are fine. For routing, wherever the name lands (usually the forgotten old site).
   const staleTokens = ownershipOk
     ? []
     : txts.map((t) => t.trim()).filter((t) => t.startsWith(`${domainVerifyValuePrefix}=`));
@@ -493,9 +419,7 @@ export async function verifyBrandDomain(brand: Brand): Promise<DomainCheck> {
     routingOk,
     edgeOk,
     message,
-    // Mark satisfied records so the UI can grey out what's already done rather
-    // than showing the client two records when only one is outstanding — and
-    // say what is there instead, so "wrong" reads differently from "missing".
+    // Mark satisfied records so the UI greys out what's done, and report what's there instead.
     records: records.map((r) =>
       r.type === "TXT"
         ? { ...r, required: !ownershipOk, seen: staleTokens }
@@ -518,9 +442,7 @@ export function pendingDomainCheck(brand: Brand): DomainCheck {
     routingOk: verified,
     edgeOk: verified,
     message: brand.domainError,
-    // Only the verdict is stored, not which record produced it — so a live
-    // domain's records read as done, and a pending one's as all outstanding
-    // until a real check runs (the panel asks for one when it opens).
+    // Only the verdict is stored, not per-record results, so pending reads as all outstanding until a real check runs.
     records: domainInstructions(brand).map((r) => ({ ...r, required: !verified })),
     checkedAt: brand.domainCheckedAt?.toISOString() ?? "",
   };
@@ -528,22 +450,7 @@ export function pendingDomainCheck(brand: Brand): DomainCheck {
 
 /* ------------------------------ Auto-verify ------------------------------ */
 
-/**
- * Re-check every domain still waiting on its client's DNS, and promote the
- * ones whose records have landed.
- *
- * The operator hands the client two records and walks away; the client
- * publishes them hours later. Nobody should have to come back and press
- * "Check now" before the brand's links switch over and its origin is admitted
- * by CORS — the sweep does that on its own, a few minutes after the records
- * appear.
- *
- * Only PENDING domains are touched. A verified domain is never re-examined
- * here: a transient resolver hiccup demoting a live domain would cut a tenant
- * off from its own API, which is far worse than a stale "verified" for the
- * rare domain whose records are later pulled. That case is the operator's
- * explicit "Check now" — or "Remove".
- */
+/** Re-checks PENDING domains and promotes the ones whose records landed. Never touches verified ones — a resolver hiccup demoting a live domain would cut the tenant off from its API; that's for an explicit "Check now". */
 export async function sweepPendingDomains(): Promise<{ checked: number; verified: number }> {
   const pending = await prisma.brand.findMany({
     where: { domainStatus: "pending", customDomain: { not: null } },

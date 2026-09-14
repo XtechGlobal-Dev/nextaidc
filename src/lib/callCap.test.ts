@@ -1,13 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { preCallCap, tightest, CEILING_MARGIN_SECONDS } from "./callCap";
 
-/* ------------------------------------------------------------------ *
- *  The test-call dialog used to announce "Call time limit: 380:00" while
- *  connecting, then snap to "2:00" the instant the call went live — the first
- *  number was the account's own allowance (179 minutes left + a 200-minute
- *  auto-renew cycle of headroom), shown before the server's per-call ceiling
- *  had been read. Both numbers were real; only one of them ever ends the call.
- * ------------------------------------------------------------------------- */
+// The dialog used to announce "Call time limit: 380:00" (the allowance) while connecting, then snap to
+// "2:00" (the server's per-call ceiling) once live. Only one of the two ever ends the call.
 
 /** The reported account: Starter, 21 of 200 minutes used, admin cap 2 minutes. */
 const REPORTED = {

@@ -44,12 +44,8 @@ export default function Step1Call() {
     };
   }, [state]);
 
-  // When the call ends, save it IMMEDIATELY (with `keepalive`, so an instant page
-  // refresh can't lose the call or its billed minutes) and advance to step 2. The
-  // AI summary + recording arrive via Vapi's report seconds later and are patched
-  // in afterwards (see enrichCapturedCall). The old flow waited up to 4s before
-  // saving, so a refresh in that window aborted the request → no history, no
-  // minutes deducted.
+  // Save immediately with keepalive, then advance; summary/recording are patched in later (enrichCapturedCall).
+  // The old flow waited up to 4s first, and a refresh in that window lost the call and its billed minutes.
   useEffect(() => {
     if (state !== "ended") return;
     void (async () => {
@@ -59,11 +55,8 @@ export default function Step1Call() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
-  // Mid-call reload / tab close: the call never reaches "ended", so finalizeCall
-  // never runs and the minutes used so far would be lost. On page hide, if a call
-  // is live and unsaved, persist what we have as a `missed` call via a keepalive
-  // request so the minutes are still recorded. `finalizedRef` guards against
-  // duplicating the normal end save.
+  // Mid-call reload never reaches "ended", so persist what we have as a `missed` call via keepalive
+  // so the minutes still bill. `finalizedRef` stops it duplicating the normal save.
   useEffect(() => {
     if (state !== "active" && state !== "connecting") return;
     const savePartial = () => {
@@ -119,9 +112,7 @@ export default function Step1Call() {
     });
   }
 
-  // Use the runtime Vapi browser key (set in Admin → Settings) so the call works
-  // even when it isn't baked in as a build-time env var — same source the main
-  // assistant tester uses.
+  // Runtime Vapi key from Admin → Settings, so it works without a build-time env var.
   useEffect(() => {
     api.config().then((c) => setVapiKey(c.vapiPublicKey || "")).catch(() => {});
   }, []);

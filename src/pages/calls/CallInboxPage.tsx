@@ -62,10 +62,7 @@ export default function CallInboxPage() {
   const [intent, setIntent] = useState<IntentFilter>("all");
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
 
-  // Keep the inbox live while it's open: refetch the call logs on mount and on
-  // every live tick (the global heartbeat also ticks on tab focus), so new calls
-  // appear without a manual reload. Scoped to this page — other routes don't pull
-  // the full call list they never display.
+  // Refetch on mount + every live tick so new calls appear without a reload. Scoped here — other routes shouldn't pull the full list.
   const liveTick = useLiveTick();
   useEffect(() => {
     void useCallsStore.getState().hydrate();

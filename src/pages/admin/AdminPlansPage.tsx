@@ -37,10 +37,7 @@ import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { isSuperAdminRole } from "@/lib/roles";
 
-// Cycle lengths, in months. Stripe caps a recurring cycle at one year, so 12 is
-// the ceiling; the unit stays "month" for every option (a 12-month cycle is
-// month x 12, not interval="year") so the Stripe price and the minute allowance
-// need no special case.
+// Cycle lengths in months. Stripe caps recurring at one year, so 12 max; always month x N (never interval="year") to avoid special cases.
 const INTERVAL_COUNTS = MONTHLY_INTERVAL_COUNTS;
 
 // Currencies plans can be billed in. AUD first — it's the current pricing.
@@ -132,18 +129,11 @@ function planToForm(p: SubscriptionPlan): FormState {
 
 export default function AdminPlansPage() {
   const [plans, setPlans] = useState<SubscriptionPlan[] | null>(null);
-  // The trial + grace controls on this page are platform-wide *settings* — one
-  // value shared by every tenant — so they're SUPER_ADMIN-only, matching
-  // requireSuperAdmin on the routes behind them. Anyone else (a staff member
-  // with just "plans", or a brand admin running their own tenant) must still be
-  // able to manage plans, so we only load/show those controls for the super
-  // admin — otherwise their fetches 403 and blow up the whole page load with a
-  // "no permission" toast.
+  // Trial/grace/cap are platform-wide settings, super admin only (matches requireSuperAdmin on the routes).
+  // Only load them for the super admin — otherwise the 403s take down the whole page load.
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canManageSettings = useAuthStore((s) => isSuperAdminRole(s.user?.role));
-  // Capability gates for the plan CRUD actions. ADMIN passes all; STAFF only
-  // where the role grants it. Denied buttons are omitted from the DOM (not just
-  // hidden) and the mutating handlers no-op as a defensive backstop.
+  // Plan CRUD gates (ADMIN passes all). Denied buttons are omitted from the DOM and handlers no-op.
   const canCreate = hasPermission("plans.create");
   const canEdit = hasPermission("plans.edit");
   const canDelete = hasPermission("plans.delete");
@@ -156,38 +146,21 @@ export default function AdminPlansPage() {
   const [graceEnabled, setGraceEnabled] = useState(true);
   const [graceDaysDraft, setGraceDaysDraft] = useState("");
   const [savingGrace, setSavingGrace] = useState(false);
-  /* The values as the SERVER has them, kept beside the drafts so each card can
-   * tell whether it is actually holding a change. Without a baseline a Save
-   * button can only report "not currently saving", which is what left all three
-   * permanently clickable — inviting a write that stores exactly what is
-   * already stored. `null` until the settings load, which is also what keeps
-   * the buttons off while the toggles are still showing their defaults. */
+  // Server baseline for the dirty check; null until loaded so Save stays off while toggles show defaults.
   const [graceSaved, setGraceSaved] = useState<{ enabled: boolean; days: string } | null>(null);
   // Platform-wide per-call ceiling. Stored in seconds, edited in minutes.
   const [capEnabled, setCapEnabled] = useState(false);
   const [capMinutesDraft, setCapMinutesDraft] = useState("");
   const [savingCap, setSavingCap] = useState(false);
   const [capSaved, setCapSaved] = useState<{ enabled: boolean; minutes: string } | null>(null);
-  // Collapsed by default: this page is for managing plans, and these three are
-  // set-once platform settings. The header carries their current values so the
-  // common case — checking what they are — needs no click at all.
+  // Collapsed by default — set-once settings; the header shows current values so checking needs no click.
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  /** One-line digest shown on the collapsed header, so checking these values
-   *  needs no click. Blank until the settings have actually loaded — the toggles
-   *  hold optimistic defaults before then, and showing those would state a grace
-   *  period or call limit that may not be the real one. */
+  // Header digest is blank until loaded — the toggles hold optimistic defaults before then.
   const settingsLoaded = trialDays != null;
 
-  /* Does this card hold an unsaved change? Each Save is disabled until its own
-   * does, so the buttons stop reading as three permanently-available actions
-   * and start meaning "there is something here to write".
-   *
-   * All three are false until the settings load: the drafts are empty strings
-   * and the toggles hold optimistic defaults at that point, so anything else
-   * would offer to save a value nobody has seen yet. Grace and cap compare the
-   * toggle as well as the number — flipping Enabled is the change on those
-   * cards, and the number input is disabled while the toggle is off. */
+  // Per-card dirty flags gate each Save. All false until settings load (drafts empty, toggles on defaults);
+  // grace/cap compare the toggle too since flipping Enabled is itself the change.
   const trialDirty =
     settingsLoaded &&
     (trialDraft !== String(trialDays) || trialMinutesDraft !== String(trialMinutes));
@@ -215,9 +188,7 @@ export default function AdminPlansPage() {
   // Voice Bank categories — a plan unlocks one of these for its customers.
   const [categories, setCategories] = useState<VoiceCategory[]>([]);
 
-  // Core Plans data — needs only the "plans" permission. Voice categories are a
-  // best-effort extra (own permission), so a 403 there degrades to an empty list
-  // rather than failing the page.
+  // Voice categories need their own permission, so a 403 there degrades to an empty list, not a failed page.
   useEffect(() => {
     let active = true;
     (async () => {
@@ -492,14 +463,8 @@ export default function AdminPlansPage() {
         }
       />
 
-      {/* Global platform settings — trial limits, grace period and the per-call
-          ceiling. Only users who can manage settings (ADMIN) see them.
-          Collapsed into a single bar by default: they're set-once values that
-          were pushing the actual plans below the fold.
-          Built as ONE bordered panel — header and tray share a border, and the
-          tray is tinted with the inner cards' shadows dropped. Given their own
-          border and shadow outside that panel, they read as three unrelated
-          cards that happen to sit below a bar, not as its contents. */}
+      {/* Platform settings (super admin only), collapsed so they don't push plans below the fold.
+          One bordered panel — separate card borders made the tray read as unrelated cards. */}
       {canManageSettings && (
       <div className="mb-6 overflow-hidden rounded-[var(--radius-card)] border border-border bg-card shadow-[var(--shadow-soft)]">
         <button
@@ -1118,9 +1083,7 @@ export default function AdminPlansPage() {
                 />
               </div>
 
-              {/* Only meaningful while Call Transfer is on, so it stays hidden
-                  otherwise rather than sitting there greyed out asking to be
-                  read. 0 = unlimited, matching Included Minutes above. */}
+              {/* Hidden unless Call Transfer is on. 0 = unlimited, like Included Minutes. */}
               {form.callTransferEnabled && (
                 <Field
                   label="Transfer departments"

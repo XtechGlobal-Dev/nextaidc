@@ -1,14 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { isProviderInUse } from "./apiCenter.js";
 
-/* ------------------------------------------------------------------ *
- *  Which providers a given environment actually uses.
- *
- *  This rule decides what the Providers table shows by default, so both of its
- *  failure modes are user-visible: too loose and every environment lists two
- *  dozen vendors it will never call; too tight and a provider disappears from
- *  the dashboard at the exact moment its credentials break.
- * ------------------------------------------------------------------ */
+// Decides what the Providers table shows by default. Too loose lists vendors the env
+// never calls; too tight hides a provider at the exact moment its credentials break.
 
 const base = { wired: true, connected: false, requests: 0, lastRequestAt: null as Date | null };
 
@@ -43,9 +37,8 @@ describe("isProviderInUse", () => {
   });
 
   it("does not depend on the selected time range", () => {
-    // Switching the range to "1h" zeroes `requests` for a quiet provider. It must
-    // stay listed on the strength of its recorded history, or half the fleet
-    // would blink out of existence on a range change.
+    // A "1h" range zeroes `requests` for quiet providers; history must keep them listed
+    // or half the fleet blinks out on a range change.
     const quietThisHour = { ...base, requests: 0, lastRequestAt: new Date("2026-07-20") };
     expect(isProviderInUse(quietThisHour)).toBe(true);
   });

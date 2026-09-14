@@ -1,10 +1,5 @@
-/* Server-side mirror of src/data/smsInfoItems.ts — the "Text Info to Callers"
- * catalogue and its rendering rules.
- *
- * This copy is the AUTHORITY: it decides what the tool's `topic` enum contains
- * and what actually gets texted. The frontend copy exists only so the template
- * editor can show a live character counter. Keep the two in step — same
- * convention as compilePrompt.ts ↔ agentConfig.ts. Dependency-free by design. */
+// "Text Info to Callers" catalogue + rendering. This copy is the authority; keep src/data/smsInfoItems.ts
+// in step (it only powers the editor's character counter). Dependency-free by design.
 
 /** One piece of business information the AI may text a caller on request. */
 export interface SmsInfoItem {
@@ -24,16 +19,11 @@ export interface SmsInfoItem {
  *  send so a message is never split (or billed) as a multi-part SMS. */
 export const SMS_MAX_LENGTH = 160;
 
-/** Most details that may be ENABLED at once — seeded and custom together. This is
- *  the user-facing "limit of 3": a small ceiling that keeps the tool's `topic`
- *  enum tight (better model routing), the per-call spend bounded, and the caller's
- *  choices simple. Disabled rows don't count, so a business can keep more than
- *  three drafts around and switch between them. */
+/** Max enabled at once (seeded + custom). Keeps the tool's `topic` enum tight and per-call spend bounded;
+ *  disabled rows don't count. */
 export const MAX_ENABLED_SMS_INFO_ITEMS = 3;
 
-/** Hard ceiling on how many rows may exist at all (the three seeded templates plus
- *  up to three custom details). A safety bound on the stored array — the meaningful
- *  limit the owner works against is MAX_ENABLED_SMS_INFO_ITEMS. */
+/** Safety bound on the stored array; the limit the owner works against is MAX_ENABLED_SMS_INFO_ITEMS. */
 export const MAX_SMS_INFO_ITEMS = MAX_ENABLED_SMS_INFO_ITEMS * 2;
 
 /** The business details a template can interpolate. */
@@ -55,22 +45,11 @@ export const EMPTY_SMS_INFO_VALUES: SmsInfoValues = {
   hours: "",
 };
 
-/** `business` is decoration — a blank business name tidies away rather than
- *  disabling the item. Every other placeholder IS the thing the caller asked
- *  for, so an item referencing a blank one is hidden instead of texting a gap. */
+// `business` is decoration and tidies away when blank; any other blank placeholder hides the item.
 const OPTIONAL_PLACEHOLDERS = new Set(["business"]);
 
-/**
- * The catalogue every new account starts with — the three most commonly asked-for
- * details. All seeded off: the owner reviews the copy and opts each one in, so a
- * fresh account never texts a caller until it's been set up on purpose. Items
- * whose placeholder has no value on the profile also hide themselves. An owner who
- * wants opening hours or a callback number instead can repurpose any row.
- *
- * Booking links are deliberately absent: the booking module already owns that
- * with its own `sendBookingLink` tool, and two tools that text the same link
- * would just make the model pick badly.
- */
+/** Starter catalogue, all seeded off so a fresh account never texts a caller until set up on purpose.
+ *  No booking link here — `sendBookingLink` owns that, and two tools for one link make the model pick badly. */
 export const SEEDED_SMS_INFO_ITEMS: SmsInfoItem[] = [
   {
     id: "sms_website",
@@ -150,17 +129,8 @@ function clipToWord(text: string, max: number): string {
   return (lastSpace > 0 ? clipped.slice(0, lastSpace) : clipped).replace(/[\s,.;:]+$/, "");
 }
 
-/**
- * Force a message under `limit` characters without mangling the detail it
- * exists to deliver.
- *
- * Sentences carrying a link or email address are "essential"; everything else is
- * prose we can spend. Prose is dropped from the END first, so the opener that
- * names the business survives while trailing pleasantries go. Only once nothing
- * optional is left do we clip — on a whole-word boundary, which can never split
- * a URL or email (neither contains a space), and if that clip would cost us the
- * link entirely we send the link on its own instead.
- */
+/** Fit under `limit` without mangling the link/email: drop non-essential sentences from the end first,
+ *  then word-clip (can't split a URL), and if that would lose the link, send the link alone. */
 export function clampSms(text: string, limit = SMS_MAX_LENGTH): string {
   const full = collapse(text);
   if (full.length <= limit) return full;
@@ -187,11 +157,7 @@ export function clampSms(text: string, limit = SMS_MAX_LENGTH): string {
   return clipped;
 }
 
-/**
- * The exact message this item would text, or "" when it can't be sent — the
- * template references a detail the business hasn't filled in, or renders to
- * nothing. Always within SMS_MAX_LENGTH.
- */
+/** The message this item would text, or "" when a required detail is blank. Always within SMS_MAX_LENGTH. */
 export function buildSmsInfoBody(item: SmsInfoItem, values: SmsInfoValues): string {
   const template = item.template?.trim();
   if (!template) return "";
@@ -199,13 +165,8 @@ export function buildSmsInfoBody(item: SmsInfoItem, values: SmsInfoValues): stri
   return clampSms(tidy(renderSmsTemplate(template, values)));
 }
 
-/**
- * A compact one-line form of an item, for packing several details into a single
- * combined SMS. A template built around one detail (the website, the email…)
- * collapses to "Label: value" so the greeting isn't repeated for every item; a
- * free-text custom item keeps its whole rendered message. "" when it can't
- * render (a required detail is missing).
- */
+/** Compact one-line form for a combined SMS: single-detail templates collapse to "Label: value" so the
+ *  greeting isn't repeated; free-text items keep their whole message. "" when a detail is missing. */
 export function smsInfoFragment(item: SmsInfoItem, values: SmsInfoValues): string {
   const template = item.template?.trim();
   if (!template) return "";
@@ -218,14 +179,8 @@ export function smsInfoFragment(item: SmsInfoItem, values: SmsInfoValues): strin
   return tidy(renderSmsTemplate(template, values));
 }
 
-/**
- * ONE message covering several requested details, so a caller who asks for "the
- * website and the email" gets a single text instead of several. Business name
- * leads once for attribution; each detail follows as a compact fragment. Falls
- * back to the normal single-item message when only one detail is in play, and is
- * always within SMS_MAX_LENGTH (the clamp trims the tail if the caller asked for
- * more than fits, never splitting a link).
- */
+/** One message for several requested details. Falls back to the single-item message for one; always
+ *  within SMS_MAX_LENGTH. */
 export function buildCombinedSmsBody(
   items: SmsInfoItem[],
   values: SmsInfoValues,

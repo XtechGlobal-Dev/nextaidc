@@ -2,13 +2,8 @@ import { tenantForUser } from "../tenantDb.js";
 import { getFreeBusy, type BusyInterval } from "../google.js";
 import { generateSlots, type Slot, type WorkingHours } from "./hours.js";
 
-/* ------------------------------------------------------------------ *
- *  Availability = the owner's open time-slot window MINUS busy time.
- *  Busy time is (a) Google Calendar freeBusy on the booking calendar and
- *  (b) the owner's own confirmed Appointments (so a slot booked by the AI when
- *  the Google write was fire-and-forget can't be offered again). NO capacity and
- *  NO per-day booking cap — the only constraints are the window + busy time.
- * ------------------------------------------------------------------ */
+// Availability = open window minus busy time (Google freeBusy + confirmed Appointments, since the
+// Google write is fire-and-forget and may lag). No capacity or per-day cap — window + busy only.
 
 export interface AvailabilityInput {
   userId: string;
@@ -29,12 +24,7 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): b
   return aStart < bEnd && bStart < aEnd;
 }
 
-/**
- * Compute the open slots for a date: generate candidate slots, drop any that have
- * already started (in the past), then drop any overlapping a busy interval.
- * Returns slots in chronological order. Best-effort — Google errors degrade to
- * "internal busy only" rather than throwing.
- */
+/** Open slots for a date, chronological. Google errors degrade to "internal busy only" rather than throwing. */
 export async function computeAvailability(input: AvailabilityInput): Promise<Slot[]> {
   const now = (input.now ?? new Date()).getTime();
   const candidates = generateSlots(input.dateISO, input.hours, input.durationMin, input.timezone);

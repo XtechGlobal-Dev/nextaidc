@@ -4,25 +4,8 @@ import { HttpError } from "../lib/http.js";
 import type { TicketLane } from "../lib/ticketLanes.js";
 import type { TenantClient } from "./tenantDb.js";
 
-/* ------------------------------------------------------------------ *
- *  Ticket departments — the shape and the rules, shared by the two
- *  places that manage them.
- *
- *  WHICH QUEUES EXIST is the platform's call, on both lanes:
- *
- *    brand   lane — the platform's own queues (brandId null), in the
- *                   control plane. The super admin manages them from the
- *                   Brand Requests inbox.
- *    support lane — a BRAND's customer queues, in that brand's own
- *                   database (phase 4). The super admin manages them from
- *                   that brand's page, which opens that database. The
- *                   brand's admin only STAFFS them: who works a queue is
- *                   the brand's business; which queues there are is not.
- *                   A brand starts with the ones the platform gives it
- *                   and asks for more.
- *
- *  Every function takes the lane's database (`laneDb`, services/tenantDb.ts).
- * ------------------------------------------------------------------ */
+// Ticket department shape and rules. Which queues exist is the platform's call on both lanes;
+// a brand admin only staffs them. Every function takes the lane's DB (`laneDb`).
 
 export const departmentInclude = {
   _count: { select: { tickets: true, roles: true, staff: true } },
@@ -42,9 +25,8 @@ export function serializeDepartment(d: DepartmentRow, mine: boolean) {
     order: d.order,
     ticketCount: d._count.tickets,
     roleCount: d._count.roles,
-    // Members granted this department PERSONALLY. Role-granted members show up
-    // in `roleCount` instead — listing them here would imply an admin can
-    // remove them from this screen, and they can't: that lives on the role.
+    // Personal grants only. Role-granted members live in `roleCount` — listing
+    // them here would imply they can be removed from this screen (they can't).
     staffCount: d._count.staff,
     staff: d.staff.map((u) => ({ id: u.id, name: u.fullName || u.email, email: u.email })),
     /** False only under `?scope=all`: a queue the caller can hand off to, not work. */
@@ -87,9 +69,7 @@ export async function assertDepartmentNameFree(
   if (clash) throw new HttpError(409, "A department with that name already exists");
 }
 
-/** Deleting a queue with tickets in it would orphan the threads (departmentId
- *  → null), which quietly hides them from every staff role. Make the operator
- *  move them first. */
+/** Deleting a queue with tickets would null their departmentId and hide them from every staff role — make the operator move them first. */
 export async function assertDepartmentDeletable(
   db: TenantClient,
   dept: { id: string; name: string },

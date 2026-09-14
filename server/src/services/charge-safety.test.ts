@@ -1,13 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Money-safety rules for one-time charges (the upgrade delta):
-//   1. The line item must be bound to OUR invoice, never left pending on the
-//      customer — a pending item is swept onto the next subscription invoice, which
-//      is how a $6 upgrade delta resurfaced inside a $62 renewal a month later.
-//   2. finalizeInvoice does NOT take money. `pay` must be called, or every upgrade
-//      reads back as "open" and looks like a failed charge.
-//   3. A failed collection must VOID the invoice, so an uncollected amount can never
-//      reappear unannounced on a later bill.
+// One-time charge money-safety: bind the item to OUR invoice (a pending item got swept into a later renewal),
+// call `pay` (finalize doesn't take money), and VOID on failed collection so it can't resurface on a later bill.
 
 const invoices = {
   create: vi.fn(),
@@ -71,9 +65,8 @@ describe("chargeOneTime — an upgrade delta must be collected NOW or disappear"
   });
 
   it("pins a card ON the invoice — a standalone invoice does NOT inherit the subscription's card", async () => {
-    // The customer's invoice_settings default is unset (ensureSubscriptionDefault…
-    // returns early when the SUBSCRIPTION already has one), so the invoice must
-    // carry the saved card explicitly or `pay` fails with "no payment method".
+    // Customer invoice_settings default is unset (the subscription has one instead), so the invoice
+    // must carry the card explicitly or `pay` fails with "no payment method".
     await chargeOneTime("cus_1", 2000, "Upgrade to Pro", "aud");
 
     expect(invoices.create.mock.calls[0][0].default_payment_method).toBe("pm_card");

@@ -213,20 +213,8 @@ describe("getEntitlement — unentitled", () => {
   });
 });
 
-/* The card wall.
- *
- * Two fields decide it, and NEITHER is the subscription status:
- *   cardRequiredAtSignup — the account's own signup-time policy snapshot.
- *   cardConfirmedAt      — written only by /billing/confirm-card.
- *
- * The status is deliberately not used, because it is written from outside this
- * flow: /subscribe opens a real Stripe TRIAL subscription before any card exists
- * (Stripe reports "trialing" and the webhook mirrors it), /billing/renew's
- * failure path writes "past_due", and an abandoned trial is cancelled to
- * "canceled". Each of those would silently lift a status-keyed wall.
- *
- * The platform toggle is likewise never read here — that is what stops an admin
- * flipping it from retroactively walling live customers. */
+// The card wall is decided by cardRequiredAtSignup + cardConfirmedAt — never by status (Stripe
+// writes "trialing" before any card) and never by the live toggle (an admin flip can't wall live customers).
 describe("getEntitlement — the card-required wall", () => {
   it("blocks a card-required account that never confirmed a card", async () => {
     findUnique.mockResolvedValue(
@@ -248,11 +236,8 @@ describe("getEntitlement — the card-required wall", () => {
     expect(entitlementError(s).code).toBe("NO_SUBSCRIPTION");
   });
 
-  // The bypass an adversarial review found: /subscribe creates a live Stripe
-  // trial subscription BEFORE any card, Stripe fires customer.subscription.created
-  // with status "trialing", and the billing webhook mirrors it onto the profile.
-  // A status-keyed wall would hand the full free trial to anyone who picks a plan
-  // and closes the tab.
+  // The bypass: /subscribe creates a "trialing" Stripe sub BEFORE any card, so a
+  // status-keyed wall would hand a free trial to anyone who picks a plan and closes the tab.
   it.each(["trialing", "active", "past_due", "canceled"])(
     "stays blocked even when Stripe moves the status to %s with no card confirmed",
     async (status) => {
@@ -266,9 +251,7 @@ describe("getEntitlement — the card-required wall", () => {
   );
 
   it("GRANDFATHERING: a card-less account stays unblocked, whatever the admin toggle says", async () => {
-    // getEntitlement must decide purely from the row. If it ever grew a lookup of
-    // the live platform setting, the prisma mock has no `platformSetting` and this
-    // would throw — which is the tripwire we want.
+    // Tripwire: the prisma mock has no `platformSetting`, so a live-setting lookup would throw.
     findUnique.mockResolvedValue(
       trialRow({ subscriptionStatus: "none", cardRequiredAtSignup: false, trialSecondsUsed: 0 }),
     );
@@ -317,10 +300,8 @@ describe("getEntitlement — the card-required wall", () => {
     expect(s.unlimited).toBe(true);
   });
 
-  // The failure mode this feature is most likely to ship with: a column added to
-  // the TS type but forgotten in the prisma select. The result is cast, so
-  // TypeScript catches neither — the field reads undefined, the wall silently
-  // never engages, and every other test here still passes green.
+  // A column in the TS type but missing from the prisma select reads undefined (the
+  // result is cast), and the wall silently never engages.
   it.each(["cardRequiredAtSignup", "cardConfirmedAt"])(
     "asks Prisma for %s (or the wall silently no-ops)",
     async (column) => {
@@ -403,10 +384,8 @@ describe("buildTrialStartData", () => {
 
 describe("applyActivePlanMinutes", () => {
   it("snapshots minutes and resets usage on a first activation", async () => {
-    // No stored period end = a brand-new subscription. The RESET comes from the
-    // caller saying so (`resetUsage`), not from the missing end: a null stored end
-    // also happens when a webhook simply hasn't landed, and treating that as a new
-    // cycle wiped live usage on every auto-renew toggle / downgrade.
+    // The reset comes from `resetUsage`, not a null stored end — that also happens when
+    // a webhook hasn't landed, and treating it as a new cycle wiped live usage.
     findUnique.mockResolvedValue({ currentPeriodEnd: null });
     update.mockResolvedValue({});
     await applyActivePlanMinutes("u1", {
@@ -437,14 +416,8 @@ describe("applyActivePlanMinutes", () => {
   });
 
   it("does NOT re-credit minutes just because the allowance is spent", async () => {
-    // Exhaustion is not a billing boundary — it is a state the user sits in until
-    // something actually charges them. Every caller that has taken money says so
-    // explicitly with `resetUsage: true`, so inferring a reset from "usage >=
-    // allowance" only ever fires on the ONE caller that doesn't: the
-    // customer.subscription.updated webhook. That event fires for edits that move
-    // no money at all — toggling auto-renew, scheduling a downgrade, a price swap
-    // — so a user with auto-renew OFF who had spent their minutes got a fresh
-    // allowance for free the next time any of those happened.
+    // Exhaustion isn't a billing boundary: inferring a reset from "usage >= allowance" fired on
+    // the subscription.updated webhook, which also fires for no-money edits — free minutes.
     findUnique.mockResolvedValue({
       currentPeriodEnd: inDays(30),
       planMinutesAllocated: 200,
@@ -595,10 +568,8 @@ describe("computeProration — minutes-based credit", () => {
     expect(r.amountDueCents).toBe(2000);
   });
 
-  /* Credit is a refund of unused time, so it can only be a share of money that
-   * actually changed hands. Basing it on the plan's list price handed a
-   * discounted customer back more than they ever paid — the reported case: a
-   * $20 plan bought at 50% off ($10), untouched, upgrading to $50. */
+  // Credit is a share of money that actually changed hands. Basing it on list price
+  // refunded a 50%-off customer more than they paid.
   describe("with a discount, the credit follows what was PAID", () => {
     const halfPriceUntouched = (paidCents?: number) =>
       computeProration({

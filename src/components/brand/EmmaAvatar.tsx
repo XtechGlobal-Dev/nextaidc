@@ -2,11 +2,7 @@ import { useEffect, useState } from "react";
 import { Headset } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/**
- * The onboarding AI-receptionist persona avatar (gradient ring + icon). The
- * displayed name is dynamic (defaults to "Emma"); swap `img` for a real photo
- * URL later if desired.
- */
+/** Onboarding receptionist avatar (gradient ring + icon, or a photo via `img`). */
 export function EmmaAvatar({
   size = 96,
   speaking = false,

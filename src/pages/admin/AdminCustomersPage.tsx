@@ -48,10 +48,7 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** Avatar with a live presence dot. `online` means the customer has the app open
- *  right now (an active event stream) — not a "last seen" time, so an offline
- *  customer simply shows no dot rather than a stale grey one. `size` covers the
- *  larger avatar used by the mobile cards. */
+// Avatar with presence dot. `online` = app open right now (active event stream), not "last seen", so offline shows no dot.
 function CustomerAvatar({
   name,
   online,
@@ -132,9 +129,7 @@ function CardField({ label, children }: { label: string; children: ReactNode }) 
 export default function AdminCustomersPage() {
   const navigate = useNavigate();
   const isAdmin = useAuthStore((s) => isAdminRole(s.user?.role));
-  // Only roles granted `customers.delete` get the destructive action. The menu
-  // item is omitted from the DOM (not merely hidden) when denied, and the
-  // handler no-ops defensively. ADMIN passes all permission checks.
+  // Delete needs `customers.delete`; menu item omitted from the DOM when denied and the handler no-ops.
   const canDelete = useAuthStore((s) => s.hasPermission)("customers.delete");
   const [rows, setRows] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,9 +155,7 @@ export default function AdminCustomersPage() {
   const liveTick = useLiveTick();
   const didInit = useRef(false);
   useEffect(() => {
-    // First run for this mount is a full load (shows the skeleton); every later
-    // tick is a silent background refresh. Uses a per-mount ref rather than the
-    // tick's value, since the global tick persists across in-app navigation.
+    // First run per mount is a full load, later ticks are silent. Per-mount ref, since the global tick survives navigation.
     if (!didInit.current) {
       didInit.current = true;
       void load();
@@ -197,13 +190,7 @@ export default function AdminCustomersPage() {
     setPlanFilter("all");
   }
 
-  /**
-   * Download the customers currently on screen as a spreadsheet.
-   *
-   * Exports the FILTERED set, not everything: the admin narrowed the list on
-   * purpose, and "export" almost always means "give me these". The full list is
-   * still one click away — clear the filters first.
-   */
+  // Exports the filtered set on purpose — clear filters to get everything.
   function exportCsv() {
     if (!filtered.length) {
       toast.error("Nothing to export — no customers match these filters.");
@@ -261,9 +248,7 @@ export default function AdminCustomersPage() {
         <DropdownMenuItem onSelect={() => navigate(`/dashboard/admin/customers/${c.id}`)}>
           <Eye /> View details
         </DropdownMenuItem>
-        {/* "Login as Customer" is deliberately not offered here. Impersonation is
-            now reached only from the customer's own detail page, behind a PIN —
-            see ImpersonationEmojiTrigger. */}
+        {/* No "Login as Customer" here — impersonation is PIN-gated on the detail page (ImpersonationEmojiTrigger). */}
         {canDelete && (
           <>
             <DropdownMenuSeparator />

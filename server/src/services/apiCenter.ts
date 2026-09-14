@@ -1,22 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  The read side of the API Center.
- *
- *  Turns three sources into the one view an operator needs:
- *
- *    apiTrace.ts      — how each vendor has actually behaved (our calls)
- *    settings.ts      — whether we hold its credentials at all
- *    providerStatus.ts— what the vendor says about itself
- *
- *  Everything the screens show is derived here rather than in the browser, so
- *  the definition of "degraded", "uptime" or "needs attention" is stated once
- *  and every screen agrees.
- *
- *  Cost note: figures here are *estimates*, and say so. Only providers whose
- *  tracer records real billable units carry `costConfidence: "metered"`; the
- *  rest are calls x list price, which is the right order of magnitude for
- *  flat-rate endpoints and wrong for anything usage-priced. Nothing here is
- *  billing truth, and the UI never presents it as such.
- * ------------------------------------------------------------------ */
+// Read side of the API Center: merges apiTrace, settings and providerStatus into one view.
+// Health/uptime rules live here (not the browser) so every screen agrees. Costs are estimates, never billing truth.
 
 import { prisma } from "../prisma.js";
 import { allTenants } from "./tenantDb.js";
@@ -62,10 +45,7 @@ export function resolveRange(key: string | undefined): RangeSpec {
 
 /* ---------------------------- Thresholds --------------------------- */
 
-/**
- * Where "healthy" stops. Stated once, here, so the grid, the drawer, the Health
- * screen and the default alert rules can't drift apart.
- */
+/** Where "healthy" stops. Single source so the screens and default alert rules can't drift apart. */
 export const THRESHOLDS = {
   /** Error rate (%) at which a provider is degraded / failed. */
   errorRateWarn: 5,
@@ -80,11 +60,7 @@ export const THRESHOLDS = {
   rateHeadroomWarnPct: 20,
   /** Days before key expiry that counts as "expiring". */
   keyExpiryWarnDays: 30,
-  /**
-   * Below this many requests, rates are noise — two failures out of three calls
-   * is not a 67% error rate worth waking anyone for. Providers under this count
-   * report their numbers but are never marked failed on rate alone.
-   */
+  // Under this many requests rates are noise (2 of 3 failing isn't a 67% outage); never mark failed on rate alone.
   minSampleForRates: 5,
 } as const;
 
@@ -119,20 +95,8 @@ export interface ProviderRow {
   /* Connection */
   wired: boolean;
   connected: boolean;
-  /**
-   * Whether THIS deployment actually uses the provider.
-   *
-   * Deliberately derived at runtime rather than read off a static list, because
-   * the answer differs per environment: a local box may only ever hold an OpenAI
-   * key, staging a subset, production the lot. True when the code can call the
-   * vendor AND we either hold its credentials or have already recorded traffic
-   * to it.
-   *
-   * The traffic clause matters: a provider whose key is later removed keeps
-   * showing (with its failures) for as long as its requests are retained,
-   * instead of quietly vanishing from the dashboard at the exact moment it
-   * breaks.
-   */
+  // Derived at runtime (differs per environment). Recorded traffic counts too, so a provider
+  // whose key was removed keeps showing its failures instead of vanishing when it breaks.
   inUse: boolean;
   authMethod: string;
   authLabel: string;
@@ -205,16 +169,8 @@ export interface ProviderRow {
   webhookFailed: number;
   webhookSuccessRate: number | null;
 
-  /**
-   * This provider's own numbers per time bucket, on the same x-axis every other
-   * provider uses.
-   *
-   * Sent per provider rather than only as a fleet total so the browser can
-   * rebuild the charts and headline figures for ANY filtered subset. Without it,
-   * filtering to a category changed the list underneath while the totals and the
-   * chart above kept describing the whole fleet — which reads as the analytics
-   * being broken, and is the reason this exists.
-   */
+  // Per-bucket series on the shared x-axis, sent per provider so the browser can
+  // rebuild charts/totals for any filtered subset (fleet-only totals looked broken when filtering).
   trend: {
     requests: number[];
     errors: number[];
@@ -275,12 +231,8 @@ interface TodayRow {
 
 /* --------------------------- Query helpers ------------------------- */
 
-/**
- * One pass over the window, bucketed by provider and time. Every headline number
- * on every screen comes out of this — percentiles included, computed in the
- * database because pulling raw durations to Node would mean shipping the whole
- * table across the wire.
- */
+// One pass over the window, bucketed by provider and time. Percentiles are computed
+// in Postgres — pulling raw durations to Node would ship the whole table.
 async function bucketRows(from: Date, to: Date, bucketSec: number, environment?: string): Promise<BucketRow[]> {
   const rows = await prisma.$queryRaw<BucketRow[]>`
     SELECT
@@ -340,14 +292,8 @@ async function rateRows(): Promise<RateRow[]> {
   `;
 }
 
-/**
- * Month-to-date totals — quota is a calendar-month concept, independent of the
- * window the operator happens to be looking at.
- *
- * Takes the environment filter like every other query here: filtering the screen
- * to Sandbox while the quota meter kept counting Production traffic made the two
- * halves of the same row disagree.
- */
+// Month-to-date totals (quota is calendar-month, independent of the range filter).
+// Must take the environment filter too, or the quota meter disagrees with the rest of the row.
 async function monthRows(monthStart: Date, environment?: string): Promise<MonthRow[]> {
   return prisma.$queryRaw<MonthRow[]>`
     SELECT
@@ -383,18 +329,7 @@ function isoOrNull(d: Date | null | undefined): string | null {
   return d ? d.toISOString() : null;
 }
 
-/**
- * Does THIS deployment actually use the provider?
- *
- * Answered from live state rather than a static list, because the answer differs
- * per environment — a local box may hold only an OpenAI key, staging a subset,
- * production the lot. Adding a vendor to the registry therefore doesn't clutter
- * every other environment's dashboard with a row nobody there will ever use.
- *
- * The `lastRequestAt` clause is deliberate: a provider whose credentials are
- * later removed keeps showing, with its failures, for as long as its requests
- * are retained — rather than silently disappearing at the exact moment it breaks.
- */
+/** Does this deployment use the provider? Live state, not a static list (differs per env); the lastRequestAt clause keeps a provider with a removed key visible with its failures. */
 export function isProviderInUse(input: {
   /** The code has a call site for this vendor. */
   wired: boolean;
@@ -463,17 +398,8 @@ interface DeriveInput {
   windowHours: number;
 }
 
-/**
- * Everything a single provider card shows, and *why* it shows it.
- *
- * The two judgement calls worth knowing about:
- *
- *  - `uptimePct` counts only vendor-side failures (5xx, 429, transport). A 401
- *    or a 422 means we sent something wrong; charging it against the vendor's
- *    availability would make our own bugs look like their outage.
- *  - rates on a tiny sample are reported but never escalate to `failed` — see
- *    THRESHOLDS.minSampleForRates.
- */
+// Builds one provider card. uptimePct counts only vendor-side failures (5xx/429/transport) —
+// a 401/422 is our bug, not their outage. Tiny samples never escalate to failed (minSampleForRates).
 function deriveRow(input: DeriveInput): ProviderRow {
   const { def, connected, setting, agg, marker, lastError, rate, month, incident, webhook } = input;
 
@@ -748,14 +674,7 @@ export interface ApiCenterSnapshot {
   series: SeriesPoint[];
 }
 
-/**
- * The whole dashboard in one call.
- *
- * Deliberately a single endpoint: the Overview, Connections, Health, Quotas,
- * Costs and Latency screens are all views of the same provider rows, and
- * fetching them separately would mean six queries showing six slightly different
- * moments. One snapshot, many views.
- */
+/** The whole dashboard in one call — every screen is a view of the same rows, so separate fetches would show slightly different moments. */
 export async function apiCenterSnapshot(
   rangeKey?: string,
   opts: { environment?: string } = {},
@@ -874,10 +793,8 @@ export async function apiCenterSnapshot(
     costUsd: 0,
     units: 0,
   }));
-  // Percentiles can't be summed. Weighting each bucket's percentile by its
-  // request count gives the traffic-weighted average of the per-bucket
-  // percentiles — not a true global percentile, but a stable, honest summary
-  // that never lets one quiet bucket of three slow calls dominate the headline.
+  // Percentiles can't be summed; traffic-weight each bucket's percentile instead. Not a true
+  // global percentile, but a quiet bucket of three slow calls can't dominate the headline.
   const fleetWeighted = bucketStarts.map(() => ({ p50: 0, p95: 0, p99: 0, ms: 0 }));
 
   for (const row of buckets) {
@@ -940,9 +857,7 @@ export async function apiCenterSnapshot(
   const connected = connectionMap();
   const windowHours = range.ms / 3_600_000;
 
-  // Registry providers, plus any key that only exists in the traffic log (a
-  // vendor added to a tracer before the registry). Nothing that made a real call
-  // is allowed to be invisible here.
+  // Registry providers plus any id seen only in the traffic log — nothing that made a real call may be invisible.
   const ids = new Set<string>(PROVIDER_DEFS.map((p) => p.id));
   for (const id of aggByProvider.keys()) ids.add(id);
 
@@ -1264,14 +1179,7 @@ export interface ErrorGroup {
   lastSeen: string;
 }
 
-/**
- * Failures grouped by what actually broke, newest-hurting-most first.
- *
- * Grouped by (provider, endpoint, status) rather than by message: vendors
- * routinely embed a request id in the text, so grouping on the message alone
- * produces one "group" per failure and hides the fact that the same endpoint has
- * failed four thousand times.
- */
+/** Failures grouped by (provider, endpoint, status), not message — vendors embed request ids in the text, so message grouping gives one group per failure. */
 export async function errorGroups(rangeKey?: string, provider?: string): Promise<ErrorGroup[]> {
   const range = resolveRange(rangeKey);
   const from = new Date(Date.now() - range.ms);

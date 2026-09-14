@@ -1,17 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Support ticket shapes, as the API returns them.
- *
- *  One vocabulary for both lanes and both sides of each, because they
- *  really are the same conversation one rung apart:
- *
- *    support — a brand's customer asks that brand's admin team
- *    brand   — a brand admin asks the platform (the super admin)
- *
- *  Which lane a screen is showing is never chosen by the client: the
- *  API derives it from the caller's role and hands it back with the
- *  wording to use (see TicketLaneInfo). Mirrors
- *  server/src/lib/ticketLanes.ts.
- * ------------------------------------------------------------------ */
+// Support ticket shapes. Two lanes (support: customer → brand admins; brand: brand admin → platform);
+// the API picks the lane from the caller's role, never the client. Mirrors server/src/lib/ticketLanes.ts.
 
 export type TicketLane = "support" | "brand";
 
@@ -31,13 +19,8 @@ export const MAX_STARS = 5;
 /** At or below this, a score is a complaint rather than a statistic. */
 export const POOR_RATING_MAX = 2;
 
-/**
- * What to call each side of the conversation on screen.
- *
- * Served by the API rather than derived in the client, so a customer's
- * "Support" and a brand admin's "Platform Support" can never drift out of step
- * with the emails and notifications the server writes for the same lane.
- */
+/** On-screen names for each side. Served by the API so they can't drift from the emails and
+ *  notifications the server writes for the same lane. */
 export interface TicketLaneCopy {
   inbox: string;
   requesterPage: string;
@@ -103,10 +86,7 @@ export interface TicketMessage {
   replyTo?: TicketReplyRef | null;
   attachments: TicketAttachment[];
   reactions?: TicketReaction[];
-  /**
-   * Client-only, never returned by the API: an optimistic bubble that hasn't
-   * been acknowledged yet, or one whose send failed and can be retried.
-   */
+  /** Client-only, never from the API: an optimistic bubble not yet acked, or a failed send that can retry. */
   pending?: boolean;
   failed?: boolean;
 }
@@ -136,11 +116,8 @@ export interface AdminTicketDepartment extends TicketDepartment {
   /** Staff granted this queue personally (not via their role). */
   staffCount: number;
   staff: TicketDepartmentMember[];
-  /**
-   * Whether the caller works this queue. Always true in the default listing;
-   * only meaningful under `scope: "all"`, where the reassign picker shows
-   * queues you can route to but not work.
-   */
+  /** Whether the caller works this queue. Only meaningful under `scope: "all"`, where the reassign
+   *  picker shows queues you can route to but not work. */
   mine: boolean;
 }
 
@@ -156,19 +133,11 @@ export interface Ticket {
   source: TicketSource;
   department: { id: string; name: string } | null;
   requester: { id: string; name: string; email: string; role: string };
-  /**
-   * The tenant the request came from. On the platform's inbox this is the first
-   * thing a handler needs — "which brand is asking?" — so it travels with the
-   * ticket rather than being joined back on. Null for a platform-level account.
-   */
+  /** Tenant the request came from — travels with the ticket because the platform inbox needs it
+   *  first. Null for a platform-level account. */
   brand: { id: string; name: string; slug: string } | null;
-  /**
-   * Who has taken the ticket, or null when nobody has.
-   *
-   * `id` is null on the REQUESTER's copy: they are told that somebody picked it
-   * up, and `name` is the lane's team label rather than a person, so there is
-   * nothing to pair back to an account. Handlers get the real id and name.
-   */
+  /** Who took the ticket, or null. On the REQUESTER's copy `id` is null and `name` is the team label —
+   *  nothing to pair back to an account. Handlers get the real id/name. */
   assignedTo: { id: string | null; name: string } | null;
   lastMessageAt: string;
   createdAt: string;
@@ -185,12 +154,8 @@ export interface Ticket {
   /** Whether it is far enough along to be rated. Computed server-side so every
    *  surface agrees on when to ask. */
   rateable: boolean;
-  /**
-   * The pair an escalation makes — see the Escalate action on a brand's inbox.
-   * On the PLATFORM's copy: the customer ticket this was raised from. On the
-   * customer's ticket: the platform ticket it went up as — handlers only; the
-   * customer's own view never carries it.
-   */
+  /** Escalation pair. Platform copy: the customer ticket it came from. Customer ticket: the platform
+   *  ticket it went up as — handlers only, never in the customer's own view. */
   escalatedFrom?: {
     id: string;
     number: number;
@@ -215,11 +180,8 @@ export interface BrandTicketDepartmentInput {
   order?: number;
 }
 
-/**
- * A ticket that was just updated. `handedOff` is true when the change routed it
- * out of the caller's own reach — another team's queue, or a colleague's hands.
- * The pane has to close rather than re-fetch a 404.
- */
+/** Just-updated ticket. `handedOff` = the change routed it out of the caller's reach, so the pane
+ *  must close rather than re-fetch a 404. */
 export interface UpdatedTicket extends Ticket {
   handedOff?: boolean;
 }
@@ -245,11 +207,8 @@ export interface TicketThread {
   merges?: TicketMergeRecord[];
 }
 
-/**
- * A file already uploaded but not yet sent — the server's signed descriptor,
- * replayed verbatim when the message goes. `sig` is what proves the client
- * didn't invent the S3 key, so it must be passed through untouched.
- */
+/** Uploaded-but-unsent file, replayed verbatim on send. `sig` proves the client didn't invent the S3
+ *  key — pass it through untouched. */
 export interface AttachmentDescriptor {
   name: string;
   mime: string;

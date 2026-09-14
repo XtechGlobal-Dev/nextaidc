@@ -3,10 +3,8 @@ import { onboardingRedirectPath, ONBOARDING_PRICING_STEP, STAFF_NO_ACCESS_PATH }
 import type { AuthUser } from "@/lib/api";
 import type { Profile } from "@/types";
 
-/* Where a user lands after login. This is the client-side card wall: it has to
- * beat the "onboarding already complete" short-circuit, because a direct signup
- * is stamped complete at account CREATION — so onboarding state alone could never
- * hold the wall. */
+// Post-login landing. The card wall must beat the "onboarding complete" short-circuit: a direct signup is
+// stamped complete at creation, so onboarding state alone could never hold it.
 
 const user = (profile: Partial<Profile> | null, role: AuthUser["role"] = "USER"): AuthUser =>
   ({
@@ -23,9 +21,7 @@ const DONE = "2026-01-01T00:00:00.000Z";
 
 describe("onboardingRedirectPath — the card wall", () => {
   it("sends a card-required direct signup to /subscribe despite onboarding being stamped complete", () => {
-    // The abandon-at-the-card-step case. A direct (non-funnel) signup gets
-    // onboardingCompletedAt set at creation, so the old rule short-circuited
-    // every one of them straight to the dashboard.
+    // Abandon-at-the-card-step: the old rule short-circuited every direct signup to the dashboard.
     expect(
       onboardingRedirectPath(
         user({

@@ -1,9 +1,7 @@
 import { prisma } from "../prisma.js";
 import { tenantForUser } from "./tenantDb.js";
 
-/** Every subscription lifecycle moment the Admin → Subscriptions timeline shows.
- *  Stored in the customer's brand's database (phase 3): it is the customer's
- *  billing history, and the brand admin's view of it. */
+/** Subscription lifecycle moments for the Admin → Subscriptions timeline. Stored in the customer's brand DB. */
 export type PlanEventType =
   | "trial_started"
   | "trial_converted"
@@ -35,13 +33,7 @@ export interface PlanEventInput {
   note?: string;
 }
 
-/**
- * Record a plan lifecycle event. Best-effort — never throws, so callers can
- * fire it with `void recordPlanEvent({...})` without their own try/catch (same
- * philosophy as audit()): history must never break the billing mutation it
- * documents. Missing plan names/price are resolved from the plan ids, and the
- * names are stored denormalized so the row survives plan rename/deletion.
- */
+/** Records a plan event. Never throws (history must not break the billing action); names are denormalized so the row survives plan rename/deletion. */
 export async function recordPlanEvent(e: PlanEventInput): Promise<void> {
   try {
     let fromPlanName = e.fromPlanName ?? null;

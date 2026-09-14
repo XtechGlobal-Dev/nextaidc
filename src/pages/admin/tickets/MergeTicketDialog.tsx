@@ -17,15 +17,8 @@ import { api, ApiError } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import type { Ticket } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Merge another of this requester's threads into the one that's open.
- *
- *  Only the same requester's are offered — merging exists for the
- *  question someone raised twice, and the server refuses anything else,
- *  since folding one person's thread into another's would show each of
- *  them the other's messages. The open request keeps its number and
- *  reference; the other's messages move in and it leaves the inbox.
- * ------------------------------------------------------------------ */
+// Merge another of this requester's threads into the open one. Same requester only (server refuses otherwise —
+// it would show each person the other's messages). The open ticket keeps its number; the other leaves the inbox.
 
 export function MergeTicketDialog({
   open,
@@ -51,9 +44,7 @@ export function MergeTicketDialog({
     setSourceId(null);
     setCandidates(null);
     let cancelled = false;
-    // The inbox search matches the requester's name and email, which is the
-    // closest thing to "this person's requests" the list API offers; the id
-    // check below drops anyone who merely shares a name.
+    // Search by name/email is the closest the list API gets to "this person"; the id check below drops name-sharers.
     api.admin.tickets
       .list({ status: "all", q: ticket.requester.email || ticket.requester.name, pageSize: 50 })
       .then((page) => {

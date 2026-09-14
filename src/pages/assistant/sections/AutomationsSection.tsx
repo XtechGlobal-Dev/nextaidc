@@ -39,11 +39,7 @@ import type { AgentConfig } from "@/types";
 import { SectionShell } from "../SectionShell";
 import { sectionByKey } from "../sectionMeta";
 
-/* ------------------------------------------------------------------ */
-/*  Notification Management — one card per channel.                    */
-/*  Each channel sends a post-call summary; toggle on/off, set where   */
-/*  it goes (blank = account default), and Test sends a sample now.    */
-/* ------------------------------------------------------------------ */
+// Notification management — one card per post-call summary channel (blank destination = account default).
 
 type ChannelKind = "email" | "sms" | "whatsapp";
 
@@ -55,14 +51,7 @@ const CHANNEL_FIELD = {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/**
- * Validate the notification destinations in an automations config. A blank field
- * is valid (it falls back to the account default); a non-blank but malformed
- * email / phone number is not — regardless of whether that channel is toggled on,
- * since the field still shows a validation error the user must resolve. Returns
- * one human-facing message per invalid channel — empty when everything checks
- * out. The page-level Save gates on this so an invalid number can't be saved.
- */
+/** One message per invalid notification destination (blank = fine, malformed = error even when the channel is off). Page-level Save gates on this. */
 export function automationContactErrors(
   a: AgentConfig["automations"],
 ): string[] {
@@ -77,9 +66,7 @@ export function automationContactErrors(
   if (a.summaryWhatsAppNumber?.trim() && mobileError(a.summaryWhatsAppNumber)) {
     errs.push("WhatsApp Summary — enter a valid mobile number for the selected country.");
   }
-  // Every "Text Info" detail must be complete — a name, a trigger and a message.
-  // An incomplete row (enabled or a draft) blocks the save; the owner either
-  // finishes it or deletes it. Seeded rows already carry all three.
+  // Every "Text Info" row needs name + trigger + message; an incomplete one (even a draft) blocks the save.
   for (const item of a.smsOnRequest?.items ?? []) {
     const missing: string[] = [];
     if (!item.label?.trim()) missing.push("a name");
@@ -95,9 +82,7 @@ export function automationContactErrors(
 type Channels = { email: boolean; sms: boolean; whatsapp: boolean };
 
 const CHANNELS_CACHE_KEY = "hello22_summary_channels";
-// Optimistically assume every channel is available until the backend answers,
-// so an already-activated channel never flashes as locked (below the upgrade
-// strip) and then jump above it once the fetch resolves.
+// Assume every channel is available until the backend answers, so an active channel never flashes locked.
 const OPTIMISTIC_CHANNELS: Channels = { email: true, sms: true, whatsapp: true };
 
 /** Last-known channel availability — instant on revisits, refreshed in the background. */
@@ -120,9 +105,7 @@ export function AutomationsSection() {
   const defaultEmail = profile.email || authEmail;
   const defaultMobile = profile.mobile;
 
-  // Which summary channels this plan includes. Email is always available;
-  // SMS / WhatsApp depend on the subscription. Seed from the cached result
-  // (instant, no flicker on revisit) and refresh from the backend below.
+  // Plan channels (email always; SMS/WhatsApp per subscription). Seed from cache to avoid flicker, refresh below.
   const [channels, setChannels] = useState<Channels>(readCachedChannels);
   useEffect(() => {
     let active = true;
@@ -332,10 +315,8 @@ function ChannelCard({
     return mobileError(t) ?? "";
   };
 
-  // Derive the field error straight from the saved override value — the exact
-  // thing the page-level Save gates on — so the inline error and the save-block
-  // never drift: a blank/removed number shows no error (and saves fine); an
-  // invalid one is flagged on load, not only after the user touches the field.
+  // Derive the error from the stored value (what Save gates on) so the inline error and
+  // the save-block never drift — an invalid number is flagged on load, not just after a touch.
   const error = locked ? "" : validate(automations[valueKey] || "");
 
   // Every edit flows straight into the agent store so the page-level
@@ -452,9 +433,7 @@ const LINK_VALIDITY_OPTIONS = [
   { hours: 720, label: "30 days" },
 ] as const;
 
-// Fallback when the stored validity isn't one of the offered options — e.g. a
-// legacy config saved with the removed "Never" (0) value. Keeps 30 days visibly
-// selected rather than leaving nothing highlighted.
+// Fallback for a stored validity we no longer offer (legacy "Never" = 0) so something stays selected.
 const DEFAULT_LINK_VALIDITY_HOURS = 720;
 
 // Which automations flag each channel's conversation-link toggle drives.
@@ -463,12 +442,7 @@ const LINK_TOGGLE_KEY = {
   whatsapp: "whatsAppIncludeConversationLink",
 } as const;
 
-/**
- * Per-channel extras (SMS + WhatsApp): toggle the public "More info" conversation
- * link and choose how long it stays valid. The validity is shared across channels
- * (it's a property of the link itself). Both feed straight into the agent store so
- * the page-level "Save Changes" button deploys them — no per-card save.
- */
+// SMS/WhatsApp conversation-link toggle + validity. Validity is shared across channels (it belongs to the link, not the channel).
 function ConversationLinkControls({
   kind,
   locked,

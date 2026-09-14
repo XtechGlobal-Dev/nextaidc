@@ -3,9 +3,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/* Right-side slide-over panel built on the same Radix dialog primitive as
- * dialog.tsx — same overlay, tokens and close affordance, but anchored to the
- * viewport edge with a slide-in animation (see .animate-sheet-in in index.css). */
+// Right-side slide-over on the same Radix dialog primitive as dialog.tsx (see .animate-sheet-in in index.css).
 
 export const Sheet = DialogPrimitive.Root;
 export const SheetTrigger = DialogPrimitive.Trigger;

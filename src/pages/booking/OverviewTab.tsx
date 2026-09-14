@@ -45,10 +45,8 @@ export function OverviewTab({ onGoToSettings }: { onGoToSettings: () => void }) 
   });
 
   useEffect(() => {
-    // Start the "upcoming" list at the beginning of TODAY (not the current moment)
-    // so today's whole day stays visible and reconciles with the "Bookings today"
-    // tile + the Calendar — otherwise appointments earlier today drop off and the
-    // counts look inconsistent.
+    // Start "upcoming" at the beginning of TODAY, not now — otherwise earlier-today bookings drop off
+    // and the list disagrees with the "Bookings today" tile and the Calendar.
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     Promise.all([

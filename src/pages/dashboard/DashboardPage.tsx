@@ -52,9 +52,7 @@ import {
 } from "./charts";
 import { isAdminRole } from "@/lib/roles";
 
-/* ------------------------------------------------------------------ */
-/*  Filters                                                            */
-/* ------------------------------------------------------------------ */
+// Filters
 
 type CallTypeFilter = "all" | CallType;
 
@@ -105,9 +103,7 @@ function resolveWindow(
   return { start: rangeStart(range, now).getTime(), end: now.getTime() };
 }
 
-/* ------------------------------------------------------------------ */
-/*  Analytics derivation                                              */
-/* ------------------------------------------------------------------ */
+// Analytics derivation
 
 interface Analytics {
   totalMinutes: number;
@@ -167,10 +163,8 @@ function deriveAnalytics(calls: CallLog[], timeZone?: string): Analytics {
 
   const successRate = calls.length > 0 ? Math.round((completed.length / calls.length) * 100) : 0;
 
-  // A "lead" = a completed call where the AI captured a real contact detail
-  // (name/phone/email — Vapi extracts these into analysis.structuredData; it's
-  // the same data pushed to the CRM). Web test calls carry no structuredData,
-  // so they never inflate this.
+  // A "lead" = completed call with a real contact detail in analysis.structuredData (what the CRM gets).
+  // Web test calls carry no structuredData, so they never inflate this.
   const leadsCaptured = calls.filter((c) => {
     if (c.outcome !== "completed") return false;
     const sd = c.analysis?.structuredData;
@@ -209,9 +203,7 @@ function trendPct(current: number, previous: number): number {
   return Math.round(((current - previous) / previous) * 100 * 10) / 10;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Page                                                               */
-/* ------------------------------------------------------------------ */
+// Page
 
 /** The minutes-card usage summary — from api.profile.usage(), or seeded from the
  *  persisted trial store so the card renders correctly on first paint. */
@@ -227,11 +219,8 @@ interface UsageSummary {
  *  source as loadUsage), so the minutes card is correct before the fetch lands. */
 function usageFromTrial(trial: TrialState | null): UsageSummary | null {
   if (!trial) return null;
-  // Unlimited entitlements (admin) don't track a per-cycle counter — getEntitlement
-  // reports 0 used, and the real figure is computed from call logs only by
-  // loadUsage(). Seeding 0 here would flash "0 min" → the real value, so return
-  // null and let the skeleton show until loadUsage lands. Capped plans track
-  // minutesUsed reliably, so they seed correctly and never flash.
+  // Unlimited (admin) entitlements report 0 used — the real figure only comes from loadUsage(), so
+  // seeding would flash "0 min". Return null and let the skeleton show; capped plans seed reliably.
   if (trial.unlimited || trial.planMinutes <= 0) return null;
   const percent = Math.min(100, Math.round((trial.minutesUsed / trial.planMinutes) * 100));
   return {
@@ -253,23 +242,15 @@ export default function DashboardPage() {
   const profile = useProfileStore((s) => s.profile);
   const loadUsage = useProfileStore((s) => s.loadUsage);
   const callsLoaded = useCallsStore((s) => s.loaded);
-  // Global live heartbeat — bumped every few seconds (and on tab focus) by
-  // useLiveData, which also re-hydrates the call-logs store. We reload the usage
-  // card here on each tick, and bump refreshKey below so the analytics window
-  // advances and calls logged since mount enter the current range.
+  // Live heartbeat: reload the usage card each tick and bump refreshKey so the analytics window advances.
   const liveTick = useLiveTick();
-  // Seed the minutes card from the persisted trial store (the same source the
-  // sidebar meter uses, hydrated on localStorage), so the first render already
-  // shows the correct plan usage. Without this, `usage` started null and the card
-  // briefly rendered a DIFFERENT metric (total call minutes) before loadUsage()
-  // resolved — the "55 min → 0 / 200 min" flash. loadUsage() below still refreshes.
+  // Seed the minutes card from the persisted trial store — starting null made the card briefly show a
+  // DIFFERENT metric (total call minutes) before loadUsage() resolved: the "55 min → 0 / 200 min" flash.
   const trial = useTrialStore((s) => s.trial);
   const [usage, setUsage] = useState<UsageSummary | null>(() => usageFromTrial(trial));
   useEffect(() => {
     void loadUsage().then((u) => u && setUsage(u));
-    // Pull the freshest call logs so metrics reflect calls made since the initial
-    // app-load hydrate. Scoped to this page (not the global driver) so admin/other
-    // routes don't fetch the full call list they never display.
+    // Refresh call logs here, not in the global driver, so other routes don't fetch a list they never show.
     void useCallsStore.getState().hydrate();
   }, [loadUsage, liveTick]);
   const agentStatus = useAgentStore((s) => s.status);
@@ -286,9 +267,7 @@ export default function DashboardPage() {
   const [range, setRange] = useState<RangeKey>("14d");
   const [customStart, setCustomStart] = useState(() => toDateInput(rangeStart("14d", new Date())));
   const [customEnd, setCustomEnd] = useState(() => toDateInput(new Date()));
-  /** Bumped by the Refresh button (and each live tick) to force re-derivation of
-   *  all analytics — this also advances `now`, so calls logged after mount fall
-   *  inside the window instead of being clipped by a stale upper bound. */
+  // Bumped by Refresh + each live tick; also advances `now` so post-mount calls aren't clipped by a stale upper bound.
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);

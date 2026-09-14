@@ -29,10 +29,7 @@ export const TONE_TEXT: Record<TrialTone, string> = {
   red: "text-danger",
 };
 
-/**
- * Days-remaining badge. >5 days green, ≤5 orange, exactly 1 red, expired red.
- * `expired` short-circuits regardless of the day count.
- */
+/** Days-remaining badge: >5 green, <=5 orange, 1 or expired red. `expired` wins regardless of the count. */
 export function daysBadge(daysRemaining: number, expired: boolean): BadgeContent {
   if (expired || daysRemaining <= 0) return { text: "Trial Expired", tone: "red" };
   if (daysRemaining === 1) return { text: "Valid for 1 day", tone: "red" };
@@ -40,10 +37,7 @@ export function daysBadge(daysRemaining: number, expired: boolean): BadgeContent
   return { text: `Valid for ${daysRemaining} days`, tone };
 }
 
-/**
- * Minutes-remaining badge by percent of quota left: >50% green, 25–50% orange,
- * <25% red, 0 shows "Trial Minutes Exhausted".
- */
+/** Minutes badge by percent left: >50% green, 25-50% orange, <25% red, 0 = "Trial Minutes Exhausted". */
 export function minutesBadge(minutesRemaining: number, minutesAllocated: number): BadgeContent {
   if (minutesRemaining <= 0) return { text: "Trial Minutes Exhausted", tone: "red" };
 
@@ -62,11 +56,7 @@ export interface BlockedCopy {
   cta: string;
 }
 
-/**
- * Headline + sub-line + CTA for a blocked entitlement, covering trial expiry,
- * plan-minute exhaustion, payment failure, and no-subscription. Returns null
- * when the user is not blocked.
- */
+/** Headline + reason + CTA for a blocked entitlement; null when not blocked. */
 export function blockedCopy(state: TrialState): BlockedCopy | null {
   if (!state.blocked) return null;
 

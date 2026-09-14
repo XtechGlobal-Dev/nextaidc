@@ -5,11 +5,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { SetupDraft } from "./brandSetupDraft";
 
-/* ------------------------------------------------------------------ *
- *  The words and links a brand's customers read — sign-in copy, the
- *  brand's own sites, the legal identity every email is signed with,
- *  and the analytics snippets its pages carry.
- * ------------------------------------------------------------------ */
+// Customer-facing copy and links: sign-in text, sites, email legal identity, analytics snippets.
 
 type ContentKeys =
   | "loginHeadline"

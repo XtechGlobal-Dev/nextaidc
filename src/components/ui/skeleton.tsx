@@ -75,10 +75,7 @@ export function TableSkeleton({ rows = 6, cols = 5 }: { rows?: number; cols?: nu
   );
 }
 
-/**
- * Full-page skeleton: header + optional stat cards + body. A sensible default
- * for any page that loads data — pass a `variant` to match the page shape.
- */
+/** Full-page skeleton (header + stat cards + body); pass a `variant` to match the page shape. */
 export function PageSkeleton({
   variant = "cards",
   stats = 4,

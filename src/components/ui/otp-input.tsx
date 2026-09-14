@@ -27,9 +27,7 @@ export function OtpInput({
   const inputs = React.useRef<(HTMLInputElement | null)[]>([]);
   const chars = Array.from({ length }, (_, i) => value[i] ?? "");
 
-  // Guarded here as well as on the inputs: paste and the arrow/backspace handler
-  // both move focus themselves, and a disabled box is not focusable — so without
-  // this they would throw the caret at a dead element.
+  // Guarded here too: paste and arrow/backspace move focus themselves, and a disabled box isn't focusable.
   const update = (next: string) => {
     if (disabled) return;
     onChange(next.replace(/\D/g, "").slice(0, length));

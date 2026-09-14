@@ -93,9 +93,7 @@ export default function AdminSystemEmailsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"all" | "on" | "off">("all");
   const [editing, setEditing] = useState<EmailTemplate | null>(null);
-  // System Emails only exposes view + edit. Denied controls are omitted from the
-  // DOM (not just hidden) and the handlers no-op defensively; the server also
-  // enforces `emails.edit` on every mutation. ADMIN passes all checks.
+  // Denied controls are omitted from the DOM and handlers no-op; server enforces `emails.edit` too.
   const canEdit = useAuthStore((s) => s.hasPermission)("emails.edit");
 
   async function load() {
@@ -285,9 +283,7 @@ function BrandingCard({
   const [footer, setFooter] = useState(branding.footer);
   const [saving, setSaving] = useState(false);
 
-  /* The `branding` prop is the copy the SERVER holds, so it doubles as the
-   * baseline: Save stays disabled until one of the three fields differs from it,
-   * rather than offering to write back exactly what is already stored. */
+  // `branding` is the server copy, so it's the dirty baseline.
   const dirty =
     fromName !== branding.fromName || header !== branding.header || footer !== branding.footer;
 
@@ -297,9 +293,7 @@ function BrandingCard({
     try {
       const b = await api.admin.emails.saveBranding({ fromName, header, footer });
       onSaved(b);
-      // Re-seed from the RESPONSE, not from what was typed. If the server
-      // trimmed or normalised anything, the drafts would otherwise stay
-      // different from the new baseline and the button would never go quiet.
+      // Re-seed from the response: if the server normalised anything, the drafts would stay dirty forever.
       setFromName(b.fromName);
       setHeader(b.header);
       setFooter(b.footer);
@@ -311,9 +305,7 @@ function BrandingCard({
     }
   }
 
-  // Show a sample unsubscribe line where the {{unsubscribe}} marker sits, so the
-  // preview reflects what notification emails render. The real link is per-recipient
-  // and injected at send-time, so it only appears on actual notification emails.
+  // Sample unsubscribe line for the preview; the real per-recipient link is injected at send time.
   const footerPreview = footer.replace(
     /\{\{\s*unsubscribe\s*\}\}/g,
     `<p style="margin:16px 0 0;font-size:12px;line-height:1.5;color:#aaa">You're receiving this because you have a ${

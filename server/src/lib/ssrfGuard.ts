@@ -1,20 +1,9 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
-/* ------------------------------------------------------------------ *
- *  SSRF guard for server-side fetches of user-supplied URLs.
- *
- *  The onboarding flow fetches whatever website URL a (pre-signup, unauthed)
- *  visitor types, to scrape their business details. Without a check, that URL
- *  could point at the cloud metadata endpoint (169.254.169.254), localhost, or
- *  an internal 10./192.168./172.16 host — turning our server into a proxy into
- *  the private network. This blocks non-http(s) schemes and any host that
- *  resolves to a private/loopback/link-local/reserved address.
- *
- *  Note: this validates the INITIAL target. Callers that follow redirects still
- *  carry a residual redirect-to-internal risk; keep the fetch timeouts + size
- *  caps that bound it, and prefer re-validating hops for anything higher-risk.
- * ------------------------------------------------------------------ */
+// SSRF guard for fetching user-supplied URLs (unauthed onboarding scrapes any site typed in). Blocks
+// non-http(s) and hosts resolving to private/loopback/link-local (cloud metadata) ranges.
+// Validates the INITIAL target only — redirects still carry residual risk; keep timeouts and size caps.
 
 /** True for an IPv4 literal in a range that must never be reached from a fetch. */
 function isPrivateIPv4(ip: string): boolean {
@@ -37,9 +26,7 @@ function isPrivateIPv4(ip: string): boolean {
 function isPrivateIPv6(ip: string): boolean {
   const addr = ip.toLowerCase().replace(/^\[|\]$/g, "");
   if (addr === "::1" || addr === "::") return true; // loopback / unspecified
-  // IPv4-mapped (::ffff:127.0.0.1, which new URL() may also render in hex as
-  // ::ffff:7f00:1). Block the whole ::ffff: space — a legit public host is never
-  // reached via a mapped-IPv6 literal, and parsing every hex form is error-prone.
+  // Block all IPv4-mapped (::ffff:) — URL() may render it in hex, and no legit public host uses it.
   if (addr.startsWith("::ffff:")) return true;
   if (addr.startsWith("fe80")) return true; // link-local
   if (addr.startsWith("fc") || addr.startsWith("fd")) return true; // fc00::/7 unique-local
@@ -54,11 +41,7 @@ function isBlockedIp(ip: string): boolean {
   return true; // not a recognisable IP → block
 }
 
-/**
- * Throw if `rawUrl` isn't a plain http(s) URL to a public host. Resolves the
- * hostname first so a name that points at an internal address is caught too.
- * Returns the parsed URL on success.
- */
+/** Throw unless `rawUrl` is http(s) to a public host (hostname resolved first). Returns the parsed URL. */
 export async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
   let url: URL;
   try {

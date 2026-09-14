@@ -26,9 +26,7 @@ router.get(
   "/",
   asyncHandler(async (req, res) => {
     const crm = await getCrm(await requestTenant(req), req.user!.sub);
-    // The admin-global Nexleon CRM (Admin → Settings) is the company default every
-    // user's leads fall back to. Surface it so the dashboard can pre-fill it and
-    // the user can either keep it or override with their own.
+    // Admin-global Nexleon CRM is the default every user's leads fall back to; surfaced so the dashboard can pre-fill it.
     res.json({
       ...crm,
       defaultNexleonUrl: getEffective("perfex.url").trim() || null,

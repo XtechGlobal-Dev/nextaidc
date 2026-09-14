@@ -25,22 +25,10 @@ import { applyCallDurationCap, getCallDurationCapSetting } from "./callDurationC
 import { replenishPool, releaseNumberPermanently } from "./phones.js";
 import type { AgentConfig } from "../lib/agentConfig.js";
 
-/**
- * Whether this account may have live infrastructure (a Vapi assistant, a Twilio
- * number) created for it. Mirrors the gate inside provisionAgentForUser so every
- * entry point applies the SAME rule: a paid plan or a card-backed trial, with the
- * platform admin exempt (they have no subscription but still need an agent).
- *
- * Exists because provisioning is reachable from several routes — claiming or
- * buying a number, an explicit agent sync — and each one used to trust `requireAuth`
- * alone. The UI funnels customers through plan → card → number, so a legitimate
- * user never trips this; it closes the direct-API path where a no-plan account
- * could mint a real number and a live assistant.
- */
+/** Gate for creating live infra: paid plan or card-backed trial, admin exempt. Closes the direct-API path where a no-plan account could mint a real number. */
 export async function canProvisionForUser(userId: string, role?: string): Promise<boolean> {
-  // ADMIN only, deliberately not every admin role: a brand admin gets a real
-  // agent so they can place test calls, but the SUPER_ADMIN runs the platform
-  // and must never have one provisioned for them.
+  // ADMIN only: a brand admin gets a test agent, but the SUPER_ADMIN runs the
+  // platform and must never have one provisioned.
   if (role === "ADMIN") return true;
   const profile = await tenantForUser(userId)
     .then((db) => db.profile.findUnique({ where: { userId }, select: { subscriptionStatus: true } }))
@@ -49,17 +37,7 @@ export async function canProvisionForUser(userId: string, role?: string): Promis
   return sub === "trialing" || sub === "active";
 }
 
-/**
- * Provision a customer's AI receptionist on the admin's infrastructure: create
- * a live Vapi assistant from their captured agent_config. The phone number is
- * claimed separately by the customer from the quick-setup modal
- * (POST /profile/claim-number), which routes it to this assistant and emails them.
- *
- * Idempotent and best-effort: safe to call more than once (e.g. retried after
- * the admin configures Vapi). A no-op once the assistant is already live. Returns
- * false and leaves the conversion "pending" when Vapi isn't configured yet, so
- * it can be retried later without losing the request.
- */
+/** Creates the live Vapi assistant from agent_config. Idempotent; returns false and leaves the conversion pending when Vapi isn't configured so it can be retried. */
 export async function provisionAgentForUser(userId: string): Promise<boolean> {
   const db = await tenantForUser(userId).catch(() => null);
   if (!db) return false; // the platform's own people have no agent to provision
@@ -70,35 +48,28 @@ export async function provisionAgentForUser(userId: string): Promise<boolean> {
   if (!conversion) return false;
   const isAdmin = conversion.user.role === "ADMIN";
 
-  // A number is "really assigned" only when it's tracked in the pool table for this
-  // user. For admins we ignore the seeded placeholder Profile.receptionistNumber
-  // (never imported to Vapi / no pool row) so they still draw a real, routable number.
+  // Only a pool row counts as assigned; the admin's seeded placeholder
+  // receptionistNumber has no pool row and isn't routable.
   const ownedNumber = await prisma.phoneNumber.findFirst({
     where: { userId },
     select: { number: true },
   });
 
-  // Already provisioned → nothing to do. Customers only need a live assistant (they
-  // claim their number from the quick-setup modal, POST /profile/claim-number). The
-  // admin additionally needs an auto-assigned number, since it has no claim UI — so
-  // for an admin we only short-circuit once a pool number is actually assigned.
+  // Customers claim their own number; the admin has no claim UI, so for them
+  // "done" also requires a pool number.
   const fullyProvisioned = isAdmin ? Boolean(ownedNumber) : true;
   if (conversion.status === "approved" && conversion.vapiAssistantId && fullyProvisioned) {
     return true;
   }
 
-  // Provision paying customers (trial counts) and the platform admin — who has no
-  // subscription/onboarding but still needs a live agent + number to test with.
-  // Never on a bare customer signup.
+  // Paying customers (trial counts) and the admin only — never a bare signup.
   const sub = conversion.user.profile?.subscriptionStatus;
   if (!isAdmin && sub !== "trialing" && sub !== "active") return false;
 
   // Can't provision without Vapi — leave it pending so a later retry can finish.
   if (!integrationsStatus().vapi) return false;
 
-  // Create (or reuse) the live Vapi assistant from the captured config.
-  // Mirror the profile's business name into the config if it's missing (older
-  // signups stored it only on the profile, not the agent config).
+  // Older signups stored the business name only on the profile, so mirror it in.
   const config = conversion.agentConfig as unknown as AgentConfig;
   const businessName = conversion.user.profile?.businessName?.trim();
   if (businessName && !config.identity.businessName?.trim()) {
@@ -113,12 +84,8 @@ export async function provisionAgentForUser(userId: string): Promise<boolean> {
     ownerId: userId,
   });
 
-  // Customers claim their own number from the quick-setup modal
-  // (POST /profile/claim-number), which routes it to the assistant + emails them —
-  // so we do NOT auto-assign here. The platform admin is the exception: it has no
-  // quick-setup flow, so draw an AVAILABLE pool number now and route it to the
-  // assistant. Import on Vapi first so a failure leaves the number AVAILABLE rather
-  // than half-assigned.
+  // No auto-assign for customers (they claim via quick-setup). Admin is the exception.
+  // Import on Vapi first so a failure leaves the number AVAILABLE, not half-assigned.
   if (isAdmin && isTwilioConfigured() && !ownedNumber) {
     try {
       // Their own brand's inventory before the shared pool — a released number
@@ -170,12 +137,7 @@ export async function provisionAgentForUser(userId: string): Promise<boolean> {
   return true;
 }
 
-/**
- * Re-sync a customer's live Vapi assistant cap to their CURRENT remaining
- * minutes, so real inbound calls are cut at the limit as the allowance depletes.
- * Call after usage is recorded or the subscription changes. Best-effort, never
- * throws. Unlimited plans keep a generous cap (Vapi's max).
- */
+/** Re-syncs the live assistant's per-call cap to current remaining minutes. Never throws. */
 export async function syncAssistantCallCap(userId: string): Promise<void> {
   if (!integrationsStatus().vapi) return;
   const conversion = await tenantForUser(userId)
@@ -185,21 +147,15 @@ export async function syncAssistantCallCap(userId: string): Promise<void> {
 
   const ent = await getEntitlement(userId);
 
-  // Freeze/unfreeze the live number for INCOMING calls. A blocked customer (trial
-  // ended / plan minutes used up with auto-renew off / past_due) shouldn't have
-  // their AI answer at all — so detach the assistant from their Vapi number. When
-  // entitled again (e.g. after a renewal) re-route it. Best-effort.
+  // Blocked customers get the assistant detached from their number so the AI
+  // doesn't answer at all; re-routed once entitled again.
   const phone = await prisma.phoneNumber.findFirst({ where: { userId }, select: { number: true } });
   if (phone?.number) {
     await setNumberAssistant(phone.number, ent.blocked ? null : conversion.vapiAssistantId);
   }
 
-  // Per-call cap (belt-and-suspenders for an outbound/web call that still starts).
-  // The platform ceiling is applied on top, so an unlimited plan is no longer an
-  // exemption — it is the account a minute-burner would pick if it were.
-  // `null` (uncapped) is written through rather than skipped: an assistant that
-  // was capped earlier must be released when the reason for the cap goes away,
-  // or lowering a cap would be a one-way door.
+  // Platform ceiling applies on top, so unlimited plans aren't exempt. `null` is
+  // written through, not skipped — otherwise a cap could never be lifted.
   const cap = applyCallDurationCap(remainingCallSeconds(ent), await getCallDurationCapSetting());
   await setAssistantMaxDuration(
     conversion.vapiAssistantId,
@@ -207,19 +163,8 @@ export async function syncAssistantCallCap(userId: string): Promise<void> {
   );
 }
 
-/**
- * Re-stamp every live assistant's per-call cap. Run when the platform ceiling
- * changes, so it applies to the next call rather than waiting for each customer
- * to hit a billing event.
- *
- * Deliberately PATCHes the single `maxDurationSeconds` field per assistant
- * instead of rebuilding the assistant: a full re-push would rewrite prompts and
- * tools, and a bad run there once stripped transfer/booking tools off every live
- * agent. A cap sweep has no business touching either.
- *
- * Best-effort and sequential — one slow/failed assistant must not abort the rest,
- * and a burst of parallel writes to Vapi buys nothing for a background job.
- */
+// resyncAllCallCaps PATCHes only maxDurationSeconds — a full re-push once stripped
+// transfer/booking tools off every live agent. Sequential so one failure can't abort the rest.
 /** Every provisioned agent, from every brand's database. */
 async function liveConversions(): Promise<{ userId: string; vapiAssistantId: string; agentConfig: unknown }[]> {
   const out: { userId: string; vapiAssistantId: string; agentConfig: unknown }[] = [];
@@ -246,9 +191,7 @@ export async function resyncAllCallCaps(): Promise<{ updated: number; failed: nu
     try {
       const ent = await getEntitlement(c.userId);
       const cap = applyCallDurationCap(remainingCallSeconds(ent), setting);
-      // Written even when null. Switching the ceiling OFF has to actually
-      // release the accounts it capped — skipping the write here would leave an
-      // unlimited-plan customer stuck on the old ceiling with nothing to undo it.
+      // Written even when null, or switching the ceiling OFF would leave capped accounts stuck.
       await setAssistantMaxDuration(
         c.vapiAssistantId!,
         cap == null ? null : Math.max(VAPI_MIN_CALL_SECONDS, cap),
@@ -263,21 +206,7 @@ export async function resyncAllCallCaps(): Promise<{ updated: number; failed: nu
   return { updated, failed };
 }
 
-/**
- * Re-push every live assistant's full config to Vapi.
- *
- * One-time backfill for the webhook secret: assistants created before the
- * secret existed carry a `server` config without it, so — once the webhook
- * starts enforcing the secret — their real calls would be rejected until the
- * assistant is rebuilt. Running this once stamps the current `server.secret`
- * (and anything else in the current payload) onto every existing assistant.
- * New assistants already get it at creation, so this never needs re-running for
- * them; re-running is harmless (idempotent — it just re-pushes the same config).
- *
- * Unlike resyncAllCallCaps this is a FULL rebuild (prompts + tools + server), so
- * it's admin-triggered, never automatic. Sequential + best-effort so one bad
- * assistant can't abort the sweep, and to stay well under Vapi's API rate limit.
- */
+/** FULL re-push of every assistant (prompts + tools + server) — backfills the webhook secret onto pre-secret assistants. Admin-triggered only, never automatic; idempotent. */
 export async function resyncAllAssistants(): Promise<{ updated: number; failed: number }> {
   if (!integrationsStatus().vapi) return { updated: 0, failed: 0 };
   const conversions = await liveConversions();
@@ -299,17 +228,7 @@ export async function resyncAllAssistants(): Promise<{ updated: number; failed: 
   return { updated, failed };
 }
 
-/**
- * Settle a customer's entitlement right after a call ends:
- *  1. Reconcile with Stripe. A just-exhausted trial (minutes OR date) ends now,
- *     charges the card saved at onboarding, and converts to the paid plan. An
- *     active plan whose included minutes just ran out renews its cycle early —
- *     charges a fresh full period and tops the minutes back up — so the user is
- *     never blocked (a failed charge → past_due → blocked).
- *  2. Re-sync the live assistant's per-call cap to whatever entitlement remains
- *     (grows to the plan's minutes on conversion, drops to the minimum if blocked).
- * Best-effort and idempotent — a no-op for a healthy mid-trial user.
- */
+/** Post-call settle: reconcile with Stripe (exhausted trial converts, exhausted plan renews early), then re-sync the call cap. Idempotent. */
 export async function settleAfterCall(userId: string): Promise<void> {
   try {
     await reconcileSubscription(userId);
@@ -319,12 +238,7 @@ export async function settleAfterCall(userId: string): Promise<void> {
   await syncAssistantCallCap(userId);
 }
 
-/**
- * Tear down a customer's provisioned resources before their account is deleted:
- * remove the live Vapi assistant and release their number back to the Twilio
- * pool (their DB profile/conversion are removed by the user-delete cascade, so
- * the number automatically frees up for reassignment). Best-effort, never throws.
- */
+/** Tears down a customer's Vapi assistant and number before account deletion. Never throws. */
 export async function deprovisionAgentForUser(userId: string): Promise<void> {
   if (!integrationsStatus().vapi) return;
   const conversion = await tenantForUser(userId)
@@ -335,23 +249,12 @@ export async function deprovisionAgentForUser(userId: string): Promise<void> {
   if (conversion.vapiAssistantId) {
     await deleteAssistant(conversion.vapiAssistantId);
   }
-  // The account is going away, so its number goes back to Twilio for good
-  // rather than into a pool: nobody is left to use it, and the platform should
-  // stop being billed for it. Same permanent path a lapsed grace period takes —
-  // it drops Vapi routing, releases at the carrier and deletes the row (and
-  // keeps the row if Twilio refuses, so a number we still pay for stays on the
-  // books). That covers the Vapi release for this user's number too.
+  // Back to Twilio for good, not a pool — nobody is left to use it. Same path as
+  // a lapsed grace period; it also handles the Vapi release.
   await releaseNumberPermanently(userId);
 }
 
-/**
- * Reconcile the admin's Vapi account against our DB: delete assistants and
- * release phone numbers that no longer belong to ANY customer. Covers the case
- * where a user was removed directly in the DB (bypassing the deprovision flow,
- * which also wipes the conversion/profile that held the Vapi ids) — the orphaned
- * Vapi assistant is removed and its number returns to the assignable pool.
- * Best-effort; returns counts for visibility.
- */
+/** Deletes Vapi assistants/numbers that belong to no customer (e.g. a user removed directly in the DB). Best-effort. */
 export async function syncVapiWithDb(): Promise<{ deletedAssistants: number; releasedNumbers: number }> {
   if (!integrationsStatus().vapi) return { deletedAssistants: 0, releasedNumbers: 0 };
 
@@ -367,10 +270,8 @@ export async function syncVapiWithDb(): Promise<{ deletedAssistants: number; rel
     for (const p of profiles) liveNumbers.add(p.receptionistNumber);
   }
 
-  // Safety bailout: an empty known-set almost always means we're pointed at the
-  // wrong database or a shared Vapi key (e.g. a dev box booting with the prod
-  // key), NOT that every assistant/number is genuinely orphaned. Deleting on an
-  // empty set would wipe the entire Vapi account, so we refuse to reconcile.
+  // Safety bailout: an empty known-set almost always means the wrong DB or a shared
+  // Vapi key (dev box with the prod key). Deleting on it would wipe the whole account.
   if (liveAssistants.size === 0) {
     console.warn(
       "⚠️  Vapi sync skipped: DB has 0 known assistants — refusing to delete all remote assistants (wrong DB or shared key?).",

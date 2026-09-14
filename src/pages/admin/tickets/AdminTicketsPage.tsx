@@ -112,16 +112,8 @@ import type {
   TicketStatus,
 } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  The handler's inbox — one page, both lanes.
- *
- *  A brand admin (or its staff) opens their CUSTOMERS' requests here; the
- *  platform owner opens their BRANDS' requests at the same route under
- *  /superadmin. Which one you get isn't a setting on this page: the API
- *  resolves it from your role and tells us on /lane, along with the
- *  wording to use. That is why the two can never be confused for each
- *  other, and why one page can serve both without an `if` per feature.
- * ------------------------------------------------------------------ */
+// Handler's inbox, both lanes: brand admins see their customers' tickets, the platform owner sees the brands'.
+// The lane is resolved server-side from the role (/lane), never chosen here — so the two can't be confused.
 
 const STATUS_FILTERS = [
   { key: "all", label: "All statuses" },
@@ -134,12 +126,7 @@ const STATUS_FILTERS = [
 
 type StatusFilter = (typeof STATUS_FILTERS)[number]["key"];
 
-/**
- * What the inbox opens on.
- *
- * "All" rather than "Unresolved": an inbox that hides resolved threads by
- * default makes the request you just finished look like it vanished.
- */
+// "All" not "Unresolved" — hiding resolved threads by default makes a just-finished request look like it vanished.
 const DEFAULT_STATUS: StatusFilter = "all";
 
 const ANY_DEPARTMENT = "__any__";
@@ -158,11 +145,7 @@ const PRIORITY_FILTERS: { key: PriorityFilter; label: string }[] = [
   { key: "low", label: "Low" },
 ];
 
-/**
- * What the conversation pane shows: everything, only what the requester can see,
- * or only the notes the team left each other. A long thread with a lot of
- * internal back-and-forth is hard to read either way without this.
- */
+// Thread filter: everything, requester-visible replies only, or internal notes only.
 const MESSAGE_FILTERS = [
   { key: "all", label: "All messages" },
   { key: "replies", label: "Replies only" },
@@ -204,15 +187,8 @@ export default function AdminTicketsPage() {
   const [lane, setLane] = useState<TicketLaneInfo | null>(null);
   const [notForYou, setNotForYou] = useState<string | null>(null);
 
-  /**
-   * What this account may do here.
-   *
-   * A full admin passes everything inside their own lane. STAFF hold the keys
-   * of the ONE lane they work: a brand's staff `tickets.*`, the platform's own
-   * staff `brand_tickets.*` (see handlerLane on the server). Until /lane has
-   * answered, nothing is editable — a beat of read-only beats a flash of the
-   * wrong buttons.
-   */
+  // Admins pass everything in their lane; STAFF use `tickets.*` (brand) or `brand_tickets.*` (platform), see handlerLane.
+  // Nothing is editable until /lane answers — read-only for a beat beats a flash of the wrong buttons.
   const section = lane?.lane === "brand" ? "brand_tickets" : "tickets";
   const canEdit = isAdmin || (!!lane && hasPermission(`${section}.edit`));
   const canCreate = isAdmin || (!!lane && hasPermission(`${section}.create`));
@@ -235,13 +211,7 @@ export default function AdminTicketsPage() {
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<TicketStats | null>(null);
   const [departments, setDepartments] = useState<AdminTicketDepartment[]>([]);
-  /**
-   * Every queue in the lane, not just the ones this actor works.
-   *
-   * The filter uses `departments` (what you can see); reassignment uses this.
-   * Routing a misfiled request to the right team is the point of reassignment,
-   * and the right team is often one you're not on.
-   */
+  // Every queue in the lane, for reassignment — the right team is often one you're not on. The filter uses `departments`.
   const [allDepartments, setAllDepartments] = useState<AdminTicketDepartment[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [listPending, setListPending] = useState(false);
@@ -269,11 +239,7 @@ export default function AdminTicketsPage() {
   const [showSavedReplies, setShowSavedReplies] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Ticket | null>(null);
   const [exporting, setExporting] = useState(false);
-  /**
-   * A reassignment or move waiting on its note. The selects don't change the
-   * request directly: picking a person or a department opens the hand-over
-   * dialog, and the change goes through with whatever note is written there.
-   */
+  // Reassign/move staged until the hand-over note dialog confirms; the selects never patch directly.
   const [handoff, setHandoff] = useState<{
     ticket: Ticket;
     patch: { assignedToId?: string | null; departmentId?: string };
@@ -303,11 +269,7 @@ export default function AdminTicketsPage() {
     return () => window.clearTimeout(id);
   }, [search]);
 
-  /**
-   * Requests can finish out of order — a slow search for "a" landing after the
-   * fast one for "ab" would put the wrong rows under the box. Each load takes a
-   * number, and only the newest is allowed to touch the screen.
-   */
+  // Loads can land out of order; only the newest sequence number may touch the screen.
   const listSeq = useRef(0);
 
   const listParams = useMemo(
@@ -332,9 +294,7 @@ export default function AdminTicketsPage() {
     try {
       const res = await api.admin.tickets.list({ ...listParams, page, pageSize });
       if (seq !== listSeq.current) return;
-      // The request open on screen is being read right now — the server clears
-      // its flag on open — so a list response that raced the open must not put
-      // the "new message" marker back on it.
+      // The open ticket is being read now; a list response that raced the open must not re-mark it unread.
       const open = selectedIdRef.current;
       setTickets(
         open
@@ -436,9 +396,7 @@ export default function AdminTicketsPage() {
     try {
       const data = await api.admin.tickets.get(id);
       setThread(data);
-      // Everyone this could be handed to, with the queues each works — the
-      // picker groups them by team around this request's own. Fetched per thread
-      // so a colleague added a minute ago shows up on the next open.
+      // Possible assignees with their queues; fetched per thread so a just-added colleague shows on next open.
       api.admin.tickets
         .agents()
         .then(setAgents)
@@ -509,11 +467,7 @@ export default function AdminTicketsPage() {
     }
   }
 
-  /**
-   * Sending is optimistic: the reply appears at once and the outbox carries it
-   * until the server confirms, so a slow send shows a clock instead of an empty
-   * box. A failed one stays put with a Retry rather than throwing the text away.
-   */
+  // Optimistic send: the reply shows at once, a slow one shows a clock, a failed one stays with Retry.
   const outbox = useOutbox({
     authorType: "staff",
     authorName: "You",
@@ -596,9 +550,7 @@ export default function AdminTicketsPage() {
     try {
       const { handedOff, ...ticket } = await api.admin.tickets.update(thread.ticket.id, patch);
       if (handedOff) {
-        // It's out of our reach now — another team's queue, or a colleague's
-        // hands — and we can't re-read it. Close the pane rather than leave a
-        // thread on screen that 404s on the next refresh.
+        // Out of our reach now and unreadable — close the pane before it 404s on refresh.
         const what = patch.departmentId
           ? `Moved to ${allDepartments.find((d) => d.id === patch.departmentId)?.name ?? "another team"}`
           : patch.assignedToId
@@ -641,11 +593,7 @@ export default function AdminTicketsPage() {
     }
   }
 
-  /**
-   * Destinations for the reassign picker: your own queues first, then the rest
-   * as hand-offs. Always includes the queue the request is already in, so the
-   * trigger never renders blank.
-   */
+  // Reassign destinations, own queues first. Always includes the current queue so the trigger never renders blank.
   const reassignDepartments = useMemo(() => {
     const source = allDepartments.length > 0 ? allDepartments : departments;
     const enabled = source.filter((d) => d.enabled || d.id === thread?.ticket.department?.id);
@@ -668,11 +616,7 @@ export default function AdminTicketsPage() {
     });
   }
 
-  /**
-   * Stage an assignment, pending the note. `value` is what a picker hands over:
-   * "__unassigned__", an agent id, or "<agent>|<department>" for someone on
-   * another team — the request moves to their queue with them.
-   */
+  // Stage an assignment. `value` is "__unassigned__", an agent id, or "<agent>|<department>" (moves the ticket to their queue too).
   function stageAssign(ticket: Ticket, value: string, people: TicketAgent[]) {
     if (value === "__unassigned__") {
       setHandoff({
@@ -731,12 +675,7 @@ export default function AdminTicketsPage() {
     }
   }
 
-  /**
-   * The assignee picker, grouped by department. The request's own team comes
-   * first — any of them can take it as it is. Everyone else is listed under the
-   * queues they work, and picking one of them hands the request to that queue as
-   * well: a person can only hold a request in a queue they can see.
-   */
+  // Assignees grouped by department; picking someone on another team moves the ticket to their queue, since a person can only hold a ticket in a queue they can see.
   const assigneeGroups = useMemo(
     () => groupAssignees(agents, thread?.ticket.department?.id ?? null, reassignDepartments),
     [agents, reassignDepartments, thread?.ticket.department?.id],
@@ -757,10 +696,7 @@ export default function AdminTicketsPage() {
     priority !== "any" ||
     debouncedSearch !== "";
 
-  /**
-   * What an empty list means depends on why it's empty: a role with no queue, no
-   * traffic yet, or filters that match nothing. Each gets its own words.
-   */
+  // Empty-state copy depends on why: no queue for this role, no traffic yet, or filters matching nothing.
   const listEmpty: { title: string; body: string; action?: ReactNode } = (() => {
     if (stats?.departments === 0) {
       return {
@@ -788,11 +724,7 @@ export default function AdminTicketsPage() {
     };
   })();
 
-  /**
-   * What the thread header shows. The list row already carries the subject,
-   * requester and badges, so they go up the instant a row is clicked and the
-   * fetch only fills in the messages underneath.
-   */
+  // Header uses the list row's data instantly; the fetch only fills in the messages.
   const headerTicket: Ticket | null =
     thread?.ticket ?? (selectedId ? (tickets.find((t) => t.id === selectedId) ?? null) : null);
 
@@ -902,9 +834,7 @@ export default function AdminTicketsPage() {
       )}
 
       {selectedId ? (
-        /* ------------------------------ Thread -----------------------------
-           Opening a request takes over the whole width: the conversation gets
-           the room it needs and the table isn't fighting it for attention. */
+        // Thread view takes the whole width so the table isn't competing with it.
         <div
           className={cn(
             "grid gap-4 lg:items-start",
@@ -947,10 +877,7 @@ export default function AdminTicketsPage() {
                             #{headerTicket.number}
                           </Badge>
                           <span className="font-mono">{headerTicket.reference}</span>
-                          {/* The other half of an escalation. On a brand's inbox:
-                              where it went (their own platform request). On the
-                              platform's: which customer ticket, in the brand's
-                              words — never a link, that thread isn't reachable. */}
+                          {/* Escalation's other half. On the platform lane it's never a link — the customer thread isn't reachable. */}
                           {headerTicket.escalation && (
                             <Link
                               to={`/dashboard/support?ticket=${headerTicket.escalation.id}`}
@@ -1321,13 +1248,8 @@ export default function AdminTicketsPage() {
                                     {a.name}
                                   </SelectItem>
                                 ))}
-                                {/* A current holder no longer on the team stays
-                                    selectable, so the trigger never goes blank.
-                                    The id is always present here — only the
-                                    REQUESTER's copy of a ticket masks it — but it
-                                    is checked rather than asserted, because a
-                                    SelectItem with no value silently breaks the
-                                    whole dropdown. */}
+                                {/* Holder who left the team stays selectable so the trigger never goes blank.
+                                    Id is checked, not asserted — a SelectItem with no value silently breaks the dropdown. */}
                                 {thread.ticket.assignedTo?.id &&
                                   !assigneeGroups.team.some(
                                     (a) => a.id === thread.ticket.assignedTo?.id,
@@ -1363,10 +1285,7 @@ export default function AdminTicketsPage() {
                       </DetailField>
                     </div>
 
-                    {/* Who else is looking at this. A department is a shared
-                        queue, so "assigned to Sam" never means "only Sam can see
-                        it" — say so, or the team quietly assumes a thread isn't
-                        theirs. */}
+                    {/* A department is a shared queue — say so, or "assigned to Sam" reads as "only Sam can see it". */}
                     {thread.ticket.department && assigneeGroups.team.length > 0 && (
                       <p
                         className="flex items-start gap-1.5 border-t border-border bg-muted/40 px-4 py-3 text-xs leading-relaxed text-muted-foreground"
@@ -1799,10 +1718,7 @@ export default function AdminTicketsPage() {
                               </div>
                             )}
                           </td>
-                          {/* Status, priority, department and assignee change
-                              right here for anyone who may edit. Each cell stops
-                              its clicks so the row's own click doesn't open the
-                              request underneath the menu. */}
+                          {/* Inline pickers for editors. Each cell stops propagation so the row click doesn't open the ticket. */}
                           <td
                             className="whitespace-nowrap px-4 py-5"
                             onClick={canEdit ? stopRowClick : undefined}
@@ -2216,12 +2132,7 @@ function stopRowClick(e: SyntheticEvent) {
   e.stopPropagation();
 }
 
-/**
- * Split the people who could hold a request into its own team and everyone else
- * by department. The team can take it as it is; anyone else takes it along to
- * their queue. Full admins work every queue, so they sit on the team and never
- * under another heading.
- */
+// Split assignees into the ticket's team vs others by department. Admins work every queue so they always sit on the team.
 function groupAssignees(
   people: TicketAgent[],
   currentDepartmentId: string | null,
@@ -2242,11 +2153,7 @@ function groupAssignees(
   return { team, others };
 }
 
-/**
- * A table cell you can change in place. The value sits in a compact select-style
- * button — border, chevron, the lot — so it reads as something you can open
- * rather than as plain text.
- */
+// In-place table cell picker, styled as a select so it reads as openable rather than plain text.
 function RowPicker({
   name,
   label,
@@ -2293,11 +2200,7 @@ function MenuHeading({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * The assignee choices for one request, grouped the way the details card groups
- * them. `onPick` gets "__unassigned__", an agent id, or "<agent>|<department>"
- * for someone on another team.
- */
+// Assignee menu items. `onPick` gets "__unassigned__", an agent id, or "<agent>|<department>" for another team.
 function AssigneeMenuItems({
   ticket,
   people,

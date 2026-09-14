@@ -21,19 +21,12 @@ import { getSmsInfoConfig, type SmsInfoEntry } from "./smsInfo.js";
 
 const VAPI_BASE = "https://api.vapi.ai";
 
-/** How long to keep listening after a caller's speech ends on a number, before
- *  handing the turn to the model. Vapi's default is 0.5s, which is shorter than
- *  the natural pause people leave between the groups of a phone number, so a
- *  dictated number arrives as two or three separate turns. 1.5s comfortably
- *  spans that pause, and it is the same wait Vapi already applies when a turn
- *  ends without punctuation — so it adds no worst case the call didn't have. */
+// Vapi's 0.5s default splits a dictated phone number into separate turns; 1.5s spans
+// the natural pause and matches Vapi's own no-punctuation wait, so no new worst case.
 const NUMBER_ENDPOINTING_SECONDS = 1.5;
 
-// Both providers run side-by-side via Vapi — the voice id itself decides which. A
-// Deepgram Aura-2 short name (e.g. "theia") → Vapi's "deepgram" provider (model
-// "aura-2"); an ElevenLabs voice_id → Vapi's "11labs" provider. providerForVoiceId
-// + the resolvers (services/voices.ts) are the single source of truth, so an
-// empty/unknown voiceId resolves to the SAME default voice (Sarah) everywhere.
+// The voice id decides the TTS provider (services/voices.ts is the single source of
+// truth), so an empty/unknown voiceId resolves to the same default everywhere.
 
 /** Who a provisioned assistant belongs to — used ONLY for the Vapi dashboard
  *  label + metadata, never for anything the caller hears. */
@@ -53,16 +46,11 @@ export interface VapiAssistantPayload {
     model: string;
     messages: { role: "system"; content: string }[];
     temperature: number;
-    /** Tools exposed to the LLM (transferCall for human handoff + booking function
-     *  tools). Always sent — an empty array reliably clears a stale tool on a
-     *  PATCH when the owner turns a feature off. */
+    /** Always sent — an empty array is what clears a stale tool on PATCH. */
     tools?: AssistantTool[];
   };
   voice: { provider: string; voiceId: string; model?: string; speed?: number; stability?: number };
-  /** Speech-to-text. Omitted → Vapi's default (English). Multilingual agents set
-   *  Deepgram nova-3 with language "multi" so the caller's speech is transcribed
-   *  correctly when they code-switch away from English mid-call. `fallbackPlan`
-   *  carries the admin-configured backup STT(s) tried when the primary fails. */
+  /** STT. Multilingual agents use nova-3 "multi" so code-switching mid-call still transcribes. */
   transcriber?: {
     provider: string;
     model: string;
@@ -80,17 +68,11 @@ export interface VapiAssistantPayload {
     };
   };
   endCallFunctionEnabled: boolean;
-  /** Deterministic hang-up backstop: if the assistant SPEAKS one of these
-   *  phrases, Vapi ends the call even when the LLM forgets the endCall tool.
-   *  Always sent — [] reliably clears stale phrases on a PATCH when the owner
-   *  turns hang-up off. */
+  /** Hang-up backstop for when the LLM forgets the endCall tool. Always sent — [] clears stale phrases on PATCH. */
   endCallPhrases: string[];
   recordingEnabled: boolean;
   artifactPlan: { recordingEnabled: boolean; recordingFormat: "wav;l16" | "mp3" };
-  /** Tells Vapi to extract structured fields (caller name, callback number,
-   *  email) from the conversation into `analysis.structuredData` on the
-   *  end-of-call report. Inbound calls carry no `customer.name`, so this is the
-   *  only reliable source for the caller's name pushed to the CRM. */
+  /** Structured extraction on the end-of-call report — inbound calls carry no customer.name, so this is the only source for the CRM. */
   analysisPlan?: {
     structuredDataPlan: {
       enabled: boolean;
@@ -108,9 +90,7 @@ export interface VapiAssistantPayload {
   /** Barge-in: stop talking the moment the caller starts speaking and hand the
    *  floor to them (don't finish the sentence first). */
   stopSpeakingPlan?: { numWords: number; voiceSeconds: number; backoffSeconds: number };
-  /** How long Vapi keeps listening before handing the turn to the model. Only
-   *  the number case is set — a caller reading a phone number in groups pauses
-   *  mid-number, and Vapi's 0.5s default treats each group as a finished turn. */
+  /** Endpointing. Only the number case is set — see NUMBER_ENDPOINTING_SECONDS. */
   startSpeakingPlan?: {
     transcriptionEndpointingPlan?: {
       onPunctuationSeconds?: number;
@@ -130,11 +110,8 @@ export interface VapiAssistantPayload {
   metadata?: Record<string, string>;
 }
 
-/** Vapi-dashboard-only label: "<spoken name> - <business or email user> #<id6>".
- *  Vapi's `name` field is never seen by the LLM (only `model.messages` +
- *  `firstMessage` are), so tagging it with the owner lets the admin tell agents
- *  apart on the Vapi dashboard while the agent still just says "Mark" on calls.
- *  Without owner context it returns the plain label (existing behavior). */
+// Dashboard-only label "<name> - <owner> #<id6>". Vapi's `name` never reaches the LLM,
+// so the agent still just says "Mark" on calls.
 function dashboardName(spokenLabel: string, owner?: AssistantOwner | null): string {
   if (!owner?.id) return spokenLabel;
   const tag = ` #${owner.id.slice(-6)}`;
@@ -176,11 +153,8 @@ async function getTransferPlan(ownerId: string | null): Promise<TransferPlan> {
   };
   if (!ownerId) return off;
   try {
-    // Plan gate BEFORE any of the config is read. Attaching the tool is what
-    // actually gives a caller the handoff, so a plan without Call Transfer has
-    // to lose it here — otherwise a downgrade only takes effect whenever the
-    // owner next happens to save the page, and until then they keep a paid
-    // feature on live calls.
+    // Plan gate first: attaching the tool is what gives callers the handoff, so a
+    // downgrade must drop it here, not whenever the owner next saves the page.
     const maxDepartments = (await getPlanFeatures(ownerId)).callTransferDepartments;
     if (maxDepartments === 0) return off;
     const db = await tenantForUser(ownerId);
@@ -197,9 +171,8 @@ async function getTransferPlan(ownerId: string | null): Promise<TransferPlan> {
       fallbackMessage: settings.fallbackMessage,
       transferNumber: settings.transferNumber,
       ringTimeoutSec: settings.ringTimeoutSec,
-      // Clamped to the plan as a backstop. Writes are capped already, but rows
-      // can predate the limits (or an admin can lower a plan under live users),
-      // and the ordering is stable, so the AI always offers the same first N.
+      // Clamped to the plan as a backstop — rows can predate the limit or an admin
+      // can lower a plan under live users. Stable order, so always the same first N.
       departments: departments.slice(0, maxDepartments).map((d) => ({
         name: d.name,
         number: d.number,
@@ -213,17 +186,12 @@ async function getTransferPlan(ownerId: string | null): Promise<TransferPlan> {
   }
 }
 
-/** Live booking context for an owner: whether booking is active (Google connected
- *  AND not paused) and the plain-English availability block to constrain bookings.
- *  Availability is deliberately SEPARATE from the AI Brain's general Business Hours
- *  — it only governs bookings and only exists while connected. Best-effort. */
+/** Whether booking is live for an owner: Google connected AND not paused. */
 export interface BookingContext {
   enabled: boolean;
 }
 
-/** Whether this owner has live Google Calendar booking — connected AND not paused.
- *  The AI already knows the business (master prompt + services) and its hours
- *  (Business Hours block), so no extra booking config is needed. Best-effort. */
+/** Live Google Calendar booking — connected AND not paused. Best-effort. */
 export async function getBookingContext(ownerId: string | null): Promise<BookingContext> {
   const off: BookingContext = { enabled: false };
   if (!ownerId) return off;
@@ -243,10 +211,7 @@ export async function isBookingEnabled(ownerId: string | null): Promise<boolean>
   return (await getBookingContext(ownerId)).enabled;
 }
 
-/** The system prompt a live assistant runs on: the owner's manually edited
- *  prompt when frozen, else a fresh compile on the compact wire scaffold. This
- *  is the pre-summarization base — pass it through summarizePromptForVapi
- *  before pushing (see upsertAssistant / the test-token route). */
+/** Pre-summarization system prompt: the frozen manual edit if any, else a fresh compile on the wire scaffold. */
 export function baseSystemPrompt(config: AgentConfig): string {
   if (!config.advanced.masterPromptDirty) {
     return compileMasterPrompt(config, getVapiPromptTemplate());
@@ -264,10 +229,7 @@ export function baseSystemPrompt(config: AgentConfig): string {
   return prompt;
 }
 
-/** Resolve the customer's ISO country for the regional style: the value stored on
- *  the config (captured at onboarding), else derived from their AI number, else
- *  their mobile. Guarantees the regional style is applied whenever the country is
- *  knowable at all — regardless of which code path triggered the assistant push. */
+// ISO country for the regional style: config, else the AI number, else the mobile.
 async function resolveAssistantCountry(config: AgentConfig, ownerId?: string | null): Promise<string> {
   const explicit = normalizeCountry(config.identity.country);
   if (explicit) return explicit;
@@ -278,37 +240,18 @@ async function resolveAssistantCountry(config: AgentConfig, ownerId?: string | n
   return isoCountryForPhone(profile?.receptionistNumber) || isoCountryForPhone(profile?.mobile);
 }
 
-/** The final system prompt pushed to the live assistant: the LLM-summarized wire
- *  prompt with the caller's REGIONAL STYLE appended. This is the SINGLE place the
- *  regional block is added, and every assistant push goes through it, so the block
- *  is mandatory whenever the country is knowable. The style is added AFTER
- *  summarization on purpose — the exact local phrasing ("no worries", "too easy")
- *  must survive verbatim, and this way it applies uniformly even to manually
- *  edited (frozen) prompts without polluting the customer's editable AI Brain. */
+/** Final wire prompt: summarized, then the regional style appended AFTER summarization so local phrasing survives verbatim and frozen prompts get it too. */
 export async function buildVapiSystemPrompt(config: AgentConfig, ownerId?: string | null): Promise<string> {
   const summarized = await summarizePromptForVapi(baseSystemPrompt(config));
   const iso = await resolveAssistantCountry(config, ownerId);
   const section = regionalStyleSection(getCountryStyle(iso));
   const withStyle = section ? `${summarized.trimEnd()}\n\n${section}` : summarized;
-  // HOW the agent may speak (reply length, one question at a time, how to sign
-  // off) is a platform guarantee, not per-customer content — so it is stamped on
-  // here, verbatim, for EVERY assistant. Doing it at this point is what makes it
-  // universal: an owner who hand-edits their master prompt freezes it, and
-  // baseSystemPrompt then serves that frozen text, so a template change alone
-  // never reaches them. Appending after summarization also puts the rules beyond
-  // the summarizer's reach. Any existing copy is stripped first so a frozen or
-  // reworded version can't contradict this one, and it goes last because these
-  // are the rules the model most needs in recent context.
-  // WIRE_NUMBER_RULES rides along for the same reason: taking a caller's number
-  // without making them repeat it is a platform guarantee, and a frozen prompt
-  // would otherwise never receive it.
+  // Behaviour + number rules are platform guarantees: stamped on EVERY assistant (frozen prompts never
+  // see template changes), after summarization so they survive, with any old copy stripped so it can't contradict.
   return `${stripHowMuchToSay(withStyle)}\n\n${WIRE_BEHAVIOUR_RULES}\n\n${WIRE_NUMBER_RULES}`;
 }
 
-/** The mini "transfer assistant" Vapi runs on the OPERATOR leg during a
- *  `warm-transfer-experimental` transfer. It calls the human, announces the
- *  caller, and connects them only if the human agrees — this is what actually
- *  gates the bridge on a real answer (instead of connecting immediately). */
+// The operator-leg mini assistant: announces the caller and bridges only if the human agrees.
 interface VapiTransferAssistant {
   /** First thing spoken to the human when they pick up. */
   firstMessage: string;
@@ -325,9 +268,7 @@ interface VapiTransferAssistant {
   };
 }
 
-/** Vapi warm-transfer plan. `warm-transfer-experimental` holds the caller,
- *  spins up `transferAssistant` on a separate leg to the human, and only bridges
- *  once that assistant calls its success tool — true answer gating. */
+// warm-transfer-experimental holds the caller and bridges only when the operator-leg assistant calls its success tool.
 interface VapiTransferPlan {
   mode: "warm-transfer-experimental";
   transferAssistant: VapiTransferAssistant;
@@ -343,9 +284,7 @@ interface VapiTransferDestination {
   transferPlan?: VapiTransferPlan;
 }
 
-/** Tool-level spoken messages (NOT per-destination — Vapi only honours these at
- *  the tool root). `request-start` is spoken to the caller as the transfer
- *  begins; `request-failed` is the end message when it can't connect. */
+// Spoken messages live at the tool root — Vapi ignores them per-destination.
 interface VapiToolMessage {
   type: "request-start" | "request-failed";
   content: string;
@@ -359,10 +298,7 @@ export interface VapiTool {
   messages?: VapiToolMessage[];
 }
 
-/** A Vapi custom "function" tool backed by our server. When the LLM calls it, Vapi
- *  POSTs the invocation to `server.url` and speaks the returned `result` back into
- *  the conversation. Used for the booking tools (checkAvailability,
- *  createBooking, cancel/reschedule). */
+/** A server-backed function tool: Vapi POSTs the call to `server.url` and speaks the `result` back. */
 export interface VapiFunctionTool {
   type: "function";
   function: {
@@ -370,10 +306,7 @@ export interface VapiFunctionTool {
     description: string;
     parameters: {
       type: "object";
-      /** `enum` closes a parameter to a fixed set of values — the model can only
-       *  pick values we published, which is how sendInfoSms stays constrained to
-       *  the owner's own catalogue (on the parameter itself, or on an array's
-       *  `items` for a multi-select like `topics`). */
+      /** `enum` (on the param or its array `items`) is how sendInfoSms stays pinned to the owner's catalogue. */
       properties: Record<
         string,
         {
@@ -433,9 +366,7 @@ function toDialE164(raw: string): string {
   return plus + trimmed.replace(/\D/g, "");
 }
 
-/** Enabled departments with a valid dial number, in display order. The single
- *  source of truth for "does this owner use department routing?" — an empty
- *  result means fall back to the one-number setup. */
+// Enabled departments with a valid number, in display order. Empty = no transfer at all.
 function activeDepartments(plan: TransferPlan): TransferDepartmentPlan[] {
   return (plan.departments ?? [])
     .map((d) => ({ ...d, number: toDialE164(d.number) }))
@@ -446,12 +377,7 @@ function activeDepartments(plan: TransferPlan): TransferDepartmentPlan[] {
  *  calling-friendly; overridden with the account's agent LLM when available. */
 const DEFAULT_TRANSFER_LLM = { provider: "openai", model: "gpt-4o" };
 
-/** One warm-transfer destination using `warm-transfer-experimental`: Vapi holds
- *  the caller, spins up a mini assistant on a SEPARATE leg to `number`, which
- *  announces the caller and only connects them if the human agrees. If the human
- *  doesn't answer / declines, the tool-level `request-failed` end message plays.
- *  `label` names the line for the operator announcement (a department name, or
- *  "our team" for the single number). */
+// One warm-transfer destination. `label` is what the operator-leg assistant announces.
 function transferDestination(
   number: string,
   label: string,
@@ -491,31 +417,19 @@ function transferDestination(
   };
 }
 
-/** Build the Vapi transferCall tool from the owner's transfer config. When
- *  departments are configured, each becomes a warm-transfer destination the LLM
- *  routes to by name; otherwise the single fallback number is used. Returns null
- *  when transfer is off or no valid number/department exists. The `llm` runs the
- *  operator-leg transfer assistant (defaults to a capable model). */
+/** The transferCall tool: one warm destination per active department. Null when off or no valid department. `llm` runs the operator-leg assistant. */
 export function buildTransferTool(
   plan: TransferPlan | null | undefined,
   llm: { provider: string; model: string } = DEFAULT_TRANSFER_LLM,
 ): VapiTool | null {
   if (!plan?.enabled) return null;
 
-  // Department routing is the ONLY transfer path: the caller is connected solely
-  // to the departments the owner currently has configured. With no active
-  // department (none configured, or they were all deleted) there is nothing to
-  // dial — return null so no transferCall tool (and no transfer prompt) is pushed
-  // to the assistant. This is deliberate: we do NOT fall back to the legacy
-  // single `transferNumber`, so a deleted department can never keep connecting
-  // callers via a stale hidden number.
+  // Departments are the ONLY transfer path — no fallback to the legacy transferNumber,
+  // so a deleted department can never keep connecting callers via a stale number.
   const depts = activeDepartments(plan);
   if (!depts.length) return null;
 
-  // Vapi's transferCall exposes a single tool-level `request-failed` message,
-  // not one per destination — so the end message that plays when the human
-  // can't be reached is taken from the first active department's message as the
-  // tool-level default. Each destination keeps its OWN ring timeout.
+  // Vapi has one tool-level request-failed message, so the first department's is used.
   const primaryFallback = depts[0].fallbackMessage?.trim() || DEFAULT_TRANSFER_FALLBACK;
   return {
     type: "transferCall",
@@ -534,19 +448,13 @@ export function buildTransferTool(
     ),
     messages: [
       { type: "request-start", content: "Please stay on the line — I'm connecting you now." },
-      // Do NOT hang up after the "couldn't connect" line — hand control back to the
-      // AI so it can take a message (name + reason), tagged with the department the
-      // caller had selected. The message-taking behaviour is driven by
-      // transferPromptSection's "IF THE TRANSFER CAN'T CONNECT" block.
+      // Don't hang up after "couldn't connect" — the AI takes a message instead.
       { type: "request-failed", content: primaryFallback, endCallAfterSpokenEnabled: false },
     ],
   };
 }
 
-/** The prompt block that gives the AI the intelligence to detect a human-handoff
- *  request and use the transfer tool — plus what to say when it can't connect.
- *  With departments configured, it tells the AI to ask which department the
- *  caller needs and route to the matching transferCall destination. */
+/** Prompt block: when to transfer, which department to ask for, and how to take a message when it can't connect. */
 export function transferPromptSection(plan: TransferPlan): string {
   const depts = activeDepartments(plan);
   const base = [
@@ -583,20 +491,7 @@ export function transferPromptSection(plan: TransferPlan): string {
   return base.join("\n");
 }
 
-/** Build the Vapi assistant payload from the structured agent config.
- *  `maxDurationSeconds` caps each call to the owner's remaining minutes.
- *  `systemPrompt` overrides the compiled prompt (used to pass the
- *  LLM-summarized wire copy). `transfer` wires the human-handoff tool + prompt. */
-/** The booking instructions grafted onto the live prompt when the owner has
- *  Google Calendar connected + booking enabled. Kept out of the customer's
- *  editable AI Brain (like the transfer/WhatsApp blocks) — it's a live-agent
- *  behaviour derived from their integration state, not prompt content.
- *
- *  `availability` is the owner's BOOKING-specific hours (may be blank). It is
- *  deliberately distinct from the general Business Hours block: this section only
- *  constrains when the AI may SCHEDULE, and does not change how any other call is
- *  handled — general enquiries, messages and questions are answered as normal at
- *  any time. */
+/** Booking block grafted onto the live prompt. Kept out of the editable AI Brain — it's behaviour derived from integration state, not prompt content. */
 export function bookingPromptSection(config: BookingConfig): string {
   const today = todayInZone(config.timezone);
   const lines: string[] = [
@@ -628,11 +523,7 @@ export function bookingPromptSection(config: BookingConfig): string {
   return lines.join("\n");
 }
 
-/** The booking behaviour + live tools for an owner, resolved from their booking
- *  config. Shared by the live assistant (upsertAssistant), the web-test token
- *  route, and the frontend tool-config endpoint so all three behave identically.
- *  `enabled` is false (and tools empty) when there's no public server URL to point
- *  tools at. */
+/** Booking prompt + tools, shared by the live assistant, the web-test route and the frontend so all three behave the same. */
 export interface BookingToolConfig {
   enabled: boolean;
   canAutoBook: boolean;
@@ -647,11 +538,7 @@ const BOOKING_DISABLED: BookingToolConfig = {
   promptSection: "",
 };
 
-/** Build the Vapi booking function tools for an owner. The availability / create /
- *  cancel / reschedule tools are added only when the owner may auto-book (Google
- *  Calendar connected + auto-booking on). Each tool posts to our dispatcher,
- *  stamped with `?uid=<ownerId>` so it resolves the business (web test calls run a
- *  transient assistant with no persisted id). */
+/** Booking function tools, only when the owner can auto-book. Each posts to our dispatcher with `?uid=` so web test calls (no persisted assistant) still resolve the business. */
 export function buildBookingTools(
   config: BookingConfig,
   ownerId: string,
@@ -766,23 +653,17 @@ export function buildBookingTools(
   return tools;
 }
 
-/** Resolve the full booking behaviour (prompt + tools) for an owner. Returns a
- *  disabled config when there's no public server URL (tools can't be reached) or
- *  nothing to offer. Best-effort. */
+/** Booking prompt + tools for an owner. Best-effort. */
 export async function getBookingToolConfig(ownerId: string | null): Promise<BookingToolConfig> {
   if (!ownerId) return BOOKING_DISABLED;
   const base = webhookServerUrl();
   try {
     const stored = await getBookingConfig(ownerId);
-    // INVARIANT: the prompt must only ever describe abilities the AI actually
-    // has. With no public server URL the booking tools would be unreachable, so
-    // drop canAutoBook too — otherwise the prompt would tell the AI to call a
-    // createBooking tool that isn't attached. What's left is take-a-message,
-    // which needs no callback at all.
+    // INVARIANT: the prompt only describes abilities the AI has. No public URL means no
+    // reachable tools, so drop canAutoBook too; take-a-message needs no callback.
     const config = base ? stored : { ...stored, canAutoBook: false };
     const tools = base ? buildBookingTools(config, ownerId, base) : [];
-    // The booking prompt section always ships (take-a-message needs no tools);
-    // the tools array is simply empty when the AI can't auto-book.
+    // The prompt section always ships; tools are just empty when it can't auto-book.
     return {
       enabled: true,
       canAutoBook: config.canAutoBook,
@@ -794,17 +675,8 @@ export async function getBookingToolConfig(ownerId: string | null): Promise<Book
   }
 }
 
-/* ------------------------------------------------------------------ *
- *  "Text Info to Callers" — the sendInfoSms tool.
- *
- *  One tool, not one per item: the owner's enabled topics become an `enum` on a
- *  `topics` array parameter. Ten toggles would otherwise mean ten tools, which
- *  degrades the model's routing and bloats every assistant sync. Passing an array
- *  also lets a caller who asks for several things at once get them in ONE text.
- *  The message body is NOT a parameter — it's rendered server-side from the
- *  owner's own template, so a caller can never talk the agent into texting
- *  arbitrary text.
- * ------------------------------------------------------------------ */
+// sendInfoSms: ONE tool with the topics as an enum array (ten tools would hurt routing).
+// The body is never a parameter — rendered server-side so a caller can't dictate the text.
 
 export interface SmsInfoToolConfig {
   enabled: boolean;
@@ -889,17 +761,13 @@ export function smsInfoPromptSection(entries: SmsInfoEntry[]): string {
   ].join("\n");
 }
 
-/** Resolve the owner's SMS-on-request behaviour (prompt + live tool). Disabled
- *  when the owner has it off, nothing can render, or there's no public server
- *  URL for the tool to call back on. Best-effort. */
+/** SMS-on-request prompt + tool. Disabled when off, unrenderable, or no public URL. Best-effort. */
 export async function getSmsInfoToolConfig(ownerId: string | null): Promise<SmsInfoToolConfig> {
   if (!ownerId) return SMS_INFO_DISABLED;
   const base = webhookServerUrl();
   if (!base) return SMS_INFO_DISABLED; // no reachable server → don't attach the tool
   try {
-    // Plan gate, enforced here and not only in the UI: the owner's toggle can
-    // outlive their entitlement (they had it, then moved to a plan without it),
-    // and without this the tool would still be attached to their live assistant.
+    // Plan gate here, not just the UI — the toggle can outlive the entitlement.
     if (!(await getPlanFeatures(ownerId)).smsToCaller) return SMS_INFO_DISABLED;
     const config = await getSmsInfoConfig(ownerId);
     if (!config.enabled || !config.entries.length) return SMS_INFO_DISABLED;
@@ -913,13 +781,7 @@ export async function getSmsInfoToolConfig(ownerId: string | null): Promise<SmsI
   }
 }
 
-/** Sign-off phrases that hard-end the call when the assistant says them (the
- *  endCallPhrases backstop). Deliberately excludes anything that appears in a
- *  normal greeting (e.g. "thanks for calling") so a call can't end at hello.
- *
- *  MUST contain the sign-off the prompt tells the agent to use. When it didn't,
- *  the agent worked out that its scripted warm sign-off left the line open and
- *  fell back to a bare "Goodbye." — the one phrase here that actually hung up. */
+/** Sign-offs that hard-end the call. Nothing that appears in a greeting (or calls end at hello), and MUST include the prompt's scripted sign-off or the agent falls back to a bare "Goodbye." */
 export const END_CALL_PHRASES = [
   "goodbye",
   "have a good one",
@@ -935,13 +797,8 @@ export const END_CALL_PHRASES = [
   "enjoy the rest of your day",
 ];
 
-/** The stock CLOSING block used to say "Don't hang up first — wait for a clear
- *  end signal", which flatly contradicts the ENDING THE CALL block grafted on
- *  when hang-up is allowed. Given both, the agent signs off ("Take care.") and
- *  leaves the line open — the reported bug. The templates no longer say it, but
- *  frozen template snapshots, admin overrides and hand-edited master prompts
- *  still do, so strip that one sentence from the wire prompt when hang-up is on.
- *  The rest of CLOSING is untouched. */
+// Old CLOSING blocks said "Don't hang up first", which contradicts ENDING THE CALL and
+// left the line open. Frozen/hand-edited prompts still carry it, so strip that sentence.
 const DONT_HANG_UP_FIRST_RE = /\s*Don['’]t hang up first[^.]*\.\s*/gi;
 
 export function stripDontHangUpFirst(prompt: string): string {
@@ -949,9 +806,7 @@ export function stripDontHangUpFirst(prompt: string): string {
   return stripped === prompt ? prompt : stripped.replace(/[ \t]+\n/g, "\n").trimEnd();
 }
 
-/** Grafted onto the live prompt when hang-up is allowed (like the transfer and
- *  booking blocks) — teaches the LLM to actually invoke the endCall tool after
- *  signing off, instead of leaving the line open until the silence timeout. */
+/** Grafted on when hang-up is allowed — teaches the LLM to actually call endCall after signing off. */
 export function endCallPromptSection(): string {
   return [
     "## ENDING THE CALL",
@@ -962,6 +817,7 @@ export function endCallPromptSection(): string {
   ].join("\n");
 }
 
+/** The Vapi assistant payload for a config. `systemPrompt` overrides the compiled prompt (the summarized wire copy); the tool configs graft their prompt blocks and tools. */
 export function buildAssistantPayload(
   config: AgentConfig,
   opts?: {
@@ -969,9 +825,7 @@ export function buildAssistantPayload(
     owner?: AssistantOwner | null;
     systemPrompt?: string;
     transfer?: TransferPlan | null;
-    /** Booking behaviour + live function tools (from getBookingToolConfig). When
-     *  the owner can auto-book, grafts the booking prompt + attaches the
-     *  checkAvailability/createBooking/cancel/reschedule tools. */
+    /** Booking prompt + tools (from getBookingToolConfig). */
     booking?: BookingToolConfig | null;
     /** "Text Info to Callers" behaviour + the sendInfoSms tool (from
      *  getSmsInfoToolConfig). */
@@ -979,13 +833,8 @@ export function buildAssistantPayload(
   },
 ): VapiAssistantPayload {
   const basePrompt = opts?.systemPrompt?.trim() || baseSystemPrompt(config);
-  // Give the LLM the human-handoff instructions whenever transfer is live, so it
-  // knows WHEN to invoke the tool we attach below.
-  // The operator-leg transfer assistant MUST reliably call its
-  // transferSuccessful/transferCancel tools to gate the bridge — so it runs on a
-  // known tool-calling-solid model (OpenAI gpt-4o, Vapi's documented default),
-  // NOT the account's conversational agent LLM (which may be xai/grok etc. and
-  // fail the tool calls, causing Vapi to fall back to an immediate blind bridge).
+  // The operator-leg assistant runs on gpt-4o, NOT the account's LLM — a model that
+  // flubs the transferSuccessful/transferCancel tool calls makes Vapi blind-bridge.
   const transferTool = buildTransferTool(opts?.transfer);
   const withTransfer = transferTool
     ? `${basePrompt.trimEnd()}\n\n${transferPromptSection(opts!.transfer!)}`
@@ -999,19 +848,13 @@ export function buildAssistantPayload(
   const withInfoSms = opts?.infoSms?.enabled
     ? `${withBooking.trimEnd()}\n\n${opts.infoSms.promptSection}`
     : withBooking;
-  // Teach the AI to actually hang up after a goodbye — only when the endCall
-  // tool exists (allowHangUp), so we never instruct a tool that isn't there.
-  // Drop any leftover "don't hang up first" line first, or the two instructions
-  // cancel out and the agent politely waits for the caller to hang up instead.
+  // Only when endCall exists (never instruct a missing tool); strip "don't hang up
+  // first" or the two instructions cancel out.
   const systemPrompt = config.advanced.allowHangUp
     ? `${stripDontHangUpFirst(withInfoSms).trimEnd()}\n\n${endCallPromptSection()}`
     : withInfoSms;
 
-  // Use the assistant name the user set (so renaming in the AI Brain syncs to
-  // Vapi); fall back to "{Business} Receptionist", then a generic label.
-  // Vapi caps the assistant `name` at 40 chars — a longer name (e.g. a verbose
-  // scraped business title from Amazon/Flipkart) makes the create/update 400 and
-  // no assistant is provisioned. Trim to fit, dropping any partial trailing word.
+  // Vapi caps `name` at 40 chars — a long scraped business title 400s the whole provision.
   const businessName = config.identity.businessName?.trim();
   const assistantLabel = (
     config.identity.assistantName?.trim() ||
@@ -1021,30 +864,15 @@ export function buildAssistantPayload(
     .slice(0, NAME_MAX)
     .trim();
 
-  // Always greet first with a real message — an empty greetingMessage left the
-  // assistant silent on connect (it waited for the caller). resolveGreeting also
-  // re-derives a generated greeting still carrying a previous business name, so a
-  // rename reaches live calls even for configs saved before that fix.
+  // An empty greeting left the assistant silent on connect; resolveGreeting also
+  // re-derives a stale generated greeting so a business rename reaches live calls.
   const greeting = resolveGreeting(config.identity.greetingMessage, businessName);
 
-  // Voice provider is per-agent + sticky: use the provider stamped on the config,
-  // else derive it from the stored voiceId (so an existing ElevenLabs agent keeps
-  // ElevenLabs even after the admin flips the global toggle back). Deepgram Aura-2
-  // has no speed/stability knobs (Advanced sliders don't apply); ElevenLabs honours
-  // them. Both are proxied by Vapi.
-  // The LLM is the admin-selected platform default (Admin → Settings → Default
-  // Agent Model). Falls back to the built-in default when unset. Stamped on every
-  // create AND sync, so changing it rolls out to existing assistants on their next
-  // AI-Brain save/sync too.
+  // Admin default LLM, stamped on every create AND sync so a change rolls out on the next save.
   const llm = getAgentLlm();
 
-  // Multilingual (plan-gated, picked in the AI Brain). Non-empty → the whole
-  // voice pipeline must handle non-English speech, not just the prompt:
-  //  - STT: Deepgram nova-3 `language: "multi"` transcribes code-switching
-  //    (English ↔ the caller's language) — without it Hindi speech arrives as
-  //    garbled English and the LLM can never follow the caller.
-  //  - TTS: Deepgram Aura-2 speaks English only, so multilingual agents always
-  //    use ElevenLabs (eleven_turbo_v2_5 covers every supported language).
+  // Multilingual changes the whole pipeline: STT goes to nova-3 "multi" (or Hindi arrives
+  // as garbled English) and TTS must be ElevenLabs (Deepgram Aura-2 is English-only).
   const languages = sanitizeAgentLanguages(
     config.identity.languages,
     providerForVoiceId(config.identity.voiceId),
@@ -1064,32 +892,17 @@ export function buildAssistantPayload(
       : { provider: "deepgram", voiceId: deepgramVoiceFor(config.identity.voiceId), model: "aura-2" };
 
   return {
-    // Always sent (never omitted): a PATCH with the key missing leaves the old
-    // transcriber in place, so an agent that toggled languages on/off would be
-    // stuck with a stale language setting forever.
-    // Chosen from the enabled languages — Deepgram for the set it covers, Google's
-    // multilingual model for Punjabi/Mandarin, which Deepgram's "multi" can't hear.
-    // The admin's fallback plan is grafted on when set — only with backups that can
-    // actually hear this agent's language tier (see buildTranscriberFallbackPlan).
+    // Always sent — a PATCH without the key keeps the old transcriber, so a language
+    // toggle would never land. Google's model covers Punjabi/Mandarin, which "multi" can't hear.
     transcriber: (() => {
       const primary = transcriberFor(languages);
-      // Deepgram accuracy boosts: smart formatting (numbers/addresses) always, and
-      // keyterm prompting with the business's own vocabulary — nova-3 supports
-      // keyterm for English only, so it's attached only in "en" mode.
+      // nova-3 keyterm prompting is English-only.
       const keyterm =
         primary.provider === "deepgram" && primary.language === "en"
           ? transcriberKeyterms(config)
           : [];
-      // `numerals` is what actually turns a spoken "eight five eight zero four"
-      // into "85804". smartFormat alone does NOT do it — Deepgram's own note on
-      // that flag is that it "can sometimes format numbers as times", which is
-      // why the dedicated flag exists. Without it the LLM receives the caller's
-      // phone number as English words and has to reassemble it, which is where
-      // the endless "sorry, can you repeat that?" loops came from.
-      // Applied to every Deepgram config, not just "en": Deepgram supports
-      // numerals in most of the nova-3 multi set too. Hindi and Japanese are the
-      // exceptions — Deepgram documents them as unsupported and ignores the flag
-      // rather than erroring, so those agents are no worse off than before.
+      // `numerals` turns spoken digits into "85804" — smartFormat alone doesn't, and the LLM got numbers
+      // as words (the "can you repeat that?" loops). Unsupported languages (Hindi, Japanese) just ignore it.
       const boosted =
         primary.provider === "deepgram"
           ? { ...primary, smartFormat: true, numerals: true, ...(keyterm.length ? { keyterm } : {}) }
@@ -1106,9 +919,7 @@ export function buildAssistantPayload(
       model: llm.model,
       messages: [{ role: "system", content: systemPrompt }],
       temperature: config.advanced.creativity,
-      // Always sent so turning transfer/booking/SMS OFF (→ fewer/no tools)
-      // reliably strips a stale tool on the PATCH, the same way the transcriber is
-      // always sent. transferCall first, then booking, then sendInfoSms.
+      // Always sent so turning a feature OFF strips its stale tool on PATCH.
       tools: [
         ...(transferTool ? [transferTool] : []),
         ...(opts?.booking?.tools ?? []),
@@ -1119,31 +930,18 @@ export function buildAssistantPayload(
     endCallFunctionEnabled: config.advanced.allowHangUp,
     endCallPhrases: config.advanced.allowHangUp ? END_CALL_PHRASES : [],
     recordingEnabled: true,
-    // MP3 rather than Vapi's default `wav;l16`. A one-minute call is ~1 MB
-    // instead of ~10, and owners forward these recordings to customers and
-    // insurers who expect a file every phone and email client will just play.
-    // Nothing downstream hardcodes the format — the download names itself from
-    // the upstream content-type — so old WAV recordings keep working untouched.
+    // MP3, not wav;l16: ~1 MB/min instead of ~10, and owners forward these to people who
+    // expect a file that just plays. Old WAV recordings keep working (format comes from content-type).
     artifactPlan: { recordingEnabled: true, recordingFormat: "mp3" },
-    // Barge-in: the moment the caller speaks, stop talking and let them take over
-    // (don't finish the sentence first). numWords:0 → yield on the first word.
+    // Barge-in on the first word.
     stopSpeakingPlan: { numWords: 0, voiceSeconds: 0.2, backoffSeconds: 1 },
-    // Callers read a phone number in chunks — "eight five eight zero four…
-    // five six five nine six" — and the transcriber punctuates each chunk as if
-    // the thought were finished. At Vapi's 0.5s default the agent answers half a
-    // number and then asks for it again, which is exactly the re-confirm loop
-    // owners were hearing. Only the number case is stretched; the punctuation
-    // and no-punctuation timings keep Vapi's defaults so ordinary replies stay
-    // as snappy as before. The cost is a beat of extra silence when a caller's
-    // turn genuinely ends on a number ("yeah, 3 o'clock") — worth it against
-    // making them recite their number twice.
+    // Only the number case is stretched (see NUMBER_ENDPOINTING_SECONDS); other timings
+    // keep Vapi's defaults so ordinary replies stay snappy.
     startSpeakingPlan: {
       transcriptionEndpointingPlan: { onNumberSeconds: NUMBER_ENDPOINTING_SECONDS },
     },
-    // Live control channel (call.monitor.controlUrl). Vapi defaults this on, but
-    // the pre-cap wrap-up (services/callWrapUp.ts) is entirely dependent on it —
-    // an account-level default flipping off would silently turn every capped call
-    // back into a mid-sentence hang-up, so it's stated rather than assumed.
+    // Stated, not assumed: the pre-cap wrap-up (callWrapUp.ts) depends on controlUrl, and
+    // an account default flipping off would turn every capped call into a mid-sentence hang-up.
     monitorPlan: { controlEnabled: true },
     // Ambient call sound. "default" (or unset) → omit so Vapi applies its own
     // default (office on phone); "off"/"office" force the choice.
@@ -1178,12 +976,8 @@ export function buildAssistantPayload(
               description:
                 "A very short (3-6 word) description of why the caller rang — e.g. 'Booking a haircut', 'Quote for bathroom reno', 'Complaint about late delivery'. Used as the one-line 'Purpose' in the owner's summary SMS. Empty string if unclear.",
             },
-            // Only the two categories that genuinely need judgement are asked
-            // for. lead-vs-enquiry is decided server-side from whether the
-            // caller volunteered contact details, and "booking" is decided from
-            // whether an appointment was actually created — never from what was
-            // said, because "I'd like to book" is not a booking. See
-            // lib/callIntent.ts.
+            // Only the categories needing judgement. lead and booking are decided
+            // server-side from what actually happened (lib/callIntent.ts) — "I'd like to book" isn't a booking.
             intent: {
               type: "string",
               enum: ["support", "spam", ""],
@@ -1212,19 +1006,13 @@ export function buildAssistantPayload(
     opts.maxDurationSeconds > 0
       ? { maxDurationSeconds: Math.floor(opts.maxDurationSeconds) }
       : {}),
-    // Route post-call events to our webhook so each call triggers the owner email
-    // + call log. Uses the public API base (VAPI_SERVER_URL, falling back to
-    // PUBLIC_API_URL) — set this in prod (e.g. the Render URL) or real inbound
-    // phone calls never get logged.
+    // Without a public URL in prod, real inbound calls never get logged.
     ...(webhookServerUrl()
       ? {
           server: {
             url: `${webhookServerUrl()}/api/calls/webhook/vapi`,
-            // Shared secret Vapi echoes back in the `x-vapi-secret` header on
-            // every server message, so our webhook can prove the event really
-            // came from Vapi and not a forged "call ended" POST (which would
-            // otherwise drain a customer's minutes / trigger a charge). Omitted
-            // when unset so local/dev keeps working; verified in calls.routes.ts.
+            // Vapi echoes this in x-vapi-secret so the webhook can reject a forged "call
+            // ended" POST (which could drain minutes or trigger a charge). Verified in calls.routes.ts.
             ...(getEffective("vapi.webhookSecret").trim()
               ? { secret: getEffective("vapi.webhookSecret").trim() }
               : {}),
@@ -1247,9 +1035,7 @@ export function buildAssistantPayload(
   };
 }
 
-/** Public base URL Vapi posts call events to (and booking tools call back on),
- *  trimmed of a trailing slash. Empty string when no public URL is configured
- *  (e.g. local dev w/o a tunnel) — callers must not attach live tools then. */
+/** Public base URL for Vapi callbacks, or "" (local dev without a tunnel) — attach no live tools then. */
 export function webhookServerUrl(): string {
   return (env.VAPI_SERVER_URL || env.PUBLIC_API_URL || "").replace(/\/$/, "");
 }
@@ -1288,16 +1074,7 @@ export type VapiRecordingKind =
   | "assistant"
   | "video";
 
-/**
- * Stream a call's recording straight from Vapi's authenticated download endpoint.
- * As of the 2026 recording-auth change, `storage.vapi.ai` URLs are no longer
- * publicly fetchable — audio must be pulled via `GET /call/{id}/{kind}-recording`
- * with the API key. That endpoint 302-redirects to a short-lived signed URL;
- * `fetch` follows it automatically (undici drops our Authorization header on the
- * cross-origin hop, which is correct — the signed URL needs no auth). Returns the
- * upstream Response so the caller can stream/proxy it. Never throws — returns null
- * when Vapi isn't configured, the id is missing, or the fetch errors.
- */
+/** Streams a recording via Vapi's authenticated endpoint (storage.vapi.ai URLs stopped being public in 2026). It 302s to a signed URL; undici correctly drops our auth header on the hop. Null on any failure. */
 export async function fetchVapiRecording(
   callId: string,
   kind: VapiRecordingKind = "mono",
@@ -1347,21 +1124,10 @@ export async function upsertAssistant(
   opts?: { maxDurationSeconds?: number | null; ownerId?: string | null },
 ): Promise<string> {
   const owner = await assistantOwner(opts?.ownerId);
-  // Compress the prompt for the wire (invisible to the customer — their AI Brain
-  // keeps the full prompt) and append the caller's regional style verbatim. Pass
-  // the owner so the country can be derived from their number when not on config.
+  // Owner is passed so the country can come from their number when not on the config.
   const systemPrompt = await buildVapiSystemPrompt(config, opts?.ownerId ?? owner?.id);
-  // Wire the human-transfer tool + prompt from the owner's live settings so a
-  // real inbound caller who asks for a person is bridged to their support line.
   const transfer = await getTransferPlan(opts?.ownerId ?? owner?.id ?? null);
-  // Website-first booking: the AI always pitches + texts the website when a site
-  // exists, and can auto-book only when the owner's toggle is on AND Google is
-  // connected. Resolves the live function tools (pointed at our dispatcher with the
-  // owner id stamped in) + the booking prompt. Empty when no public server URL.
   const booking = await getBookingToolConfig(opts?.ownerId ?? owner?.id ?? null);
-  // "Text Info to Callers": the caller asks for the website/email/address and the
-  // AI offers to text it. Resolves the owner's enabled topics into one tool
-  // pointed at our dispatcher. Empty when the owner has it off.
   const infoSms = await getSmsInfoToolConfig(opts?.ownerId ?? owner?.id ?? null);
   const payload = buildAssistantPayload(config, {
     ...opts,
@@ -1388,9 +1154,7 @@ export async function upsertAssistant(
       });
       return (updated.id as string) ?? existingId;
     } catch (e) {
-      // The stored assistant no longer exists on Vapi (deleted/recreated) — don't
-      // fail the whole flow. Fall through to create a fresh one; the caller persists
-      // the new id so numbers bind to a real, routable assistant (not a dead id).
+      // Assistant gone on Vapi: fall through and create a fresh one; the caller persists the new id.
       if (!(e instanceof HttpError) || e.status !== 404) throw e;
     }
   }
@@ -1398,20 +1162,7 @@ export async function upsertAssistant(
   return created.id as string;
 }
 
-/**
- * Patch only a live assistant's per-call duration cap (seconds). Called as a
- * user's remaining minutes change so real inbound calls are cut at the limit.
- * Best-effort — never throws.
- */
-/**
- * Set (or clear) an assistant's per-call cap.
- *
- * `null` means "no cap" — but Vapi's `maxDurationSeconds` is not nullable, so
- * removing a cap is expressed as its maximum (12 hours), which no real call
- * reaches. This matters: without it, lowering a cap would be one-way. An account
- * capped while a platform ceiling was on would stay capped after the admin
- * switched the ceiling off, because there would be no value to write back.
- */
+/** Sets or clears the per-call cap. Vapi's field isn't nullable, so "no cap" is written as the 12h maximum — otherwise lowering a cap would be one-way. Never throws. */
 export async function setAssistantMaxDuration(
   assistantId: string,
   maxDurationSeconds: number | null,
@@ -1432,11 +1183,7 @@ export async function setAssistantMaxDuration(
   }
 }
 
-/**
- * Fetch a call's recording URL from Vapi. Web-call recordings are processed a
- * few seconds after the call ends, so the live end-of-call report often lacks
- * it — this reads it back from the call record. Returns null if not ready.
- */
+/** Recording URL from the call record — the end-of-call report often lacks it (processed a few seconds later). Null if not ready. */
 export async function getCallRecording(callId: string): Promise<string | null> {
   const data = (await vapiFetch(`/call/${callId}`, { method: "GET" })) as Record<string, unknown>;
   const artifact = (data.artifact ?? {}) as Record<string, unknown>;
@@ -1452,10 +1199,7 @@ export async function getCallRecording(callId: string): Promise<string | null> {
   return url || null;
 }
 
-/**
- * Import a Twilio number into Vapi and route it to an assistant. Uses the
- * admin's Twilio credentials. Returns the Vapi phone-number id.
- */
+/** Imports a Twilio number into Vapi and routes it to an assistant. Returns the Vapi phone-number id. */
 export async function importTwilioNumber(opts: {
   number: string;
   assistantId: string;
@@ -1491,10 +1235,7 @@ export async function importTwilioNumber(opts: {
     });
     return created.id as string;
   } catch (e) {
-    // Each phone number can belong to a single voice-provider account. If it was
-    // imported under a different account (e.g. an earlier API key / a teammate's
-    // account), this key can't see it to release it — so the import 400s with
-    // "already in use by another org". Surface a clean message instead of raw JSON.
+    // A number imported under another Vapi account can't be seen or released with this key.
     const msg = e instanceof Error ? e.message : "";
     if (/already in use by another org/i.test(msg)) {
       throw new HttpError(
@@ -1523,11 +1264,7 @@ export async function listVapiPhoneNumbers(): Promise<{ id: string; number: stri
     : [];
 }
 
-/**
- * Route (or un-route) an already-imported Vapi number to an assistant. Pass
- * `null` to detach the assistant so the number STOPS answering incoming calls —
- * used to freeze a blocked customer's line. Best-effort, never throws.
- */
+/** Routes a Vapi number to an assistant; `null` detaches it so the line stops answering (freezing a blocked customer). Never throws. */
 export async function setNumberAssistant(
   number: string,
   assistantId: string | null,
@@ -1567,10 +1304,7 @@ export async function deleteAssistant(assistantId: string): Promise<void> {
   }
 }
 
-/**
- * Release a Twilio number from Vapi so it can be re-imported for another
- * customer (returns it to the assignable pool). Best-effort — never throws.
- */
+/** Releases a number from Vapi so it can be re-imported for another customer. Never throws. */
 export async function releaseVapiNumber(number: string): Promise<void> {
   try {
     const list = (await vapiFetch(`/phone-number`, { method: "GET" })) as unknown as Array<{

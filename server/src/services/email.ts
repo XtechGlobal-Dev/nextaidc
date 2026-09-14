@@ -14,17 +14,13 @@ import { renderEmail, getEmailBranding, isUnsubscribable } from "./emailTemplate
 import { currentBrandId } from "../lib/brandContext.js";
 import { cachedBrand } from "./brands.js";
 
-/* One transport per distinct SMTP identity. A white-label brand may bring its
- * own relay, so a single cached transport would send Brand B's mail through
- * Brand A's server; keying the cache by the credentials keeps each brand on its
- * own connection while still reusing it across sends. */
+// Keyed by SMTP credentials: a brand with its own relay must never send through
+// another brand's server.
 const transporters = new Map<string, Transporter>();
 
-/** Build (or reuse) an SMTP transport from the effective settings for a brand
- *  (brand override → platform DB → env). */
+/** SMTP transport for a brand (brand override → platform DB → env). */
 function transport(brandId?: string | null): Transporter {
-  // Brand-aware: a tenant with its own relay can send even when the platform
-  // itself has no SMTP configured.
+  // Brand-aware: a tenant's own relay works even with no platform SMTP.
   if (!integrationConfiguredFor("email", brandId))
     throw notImplemented("Email is not configured (add SMTP settings in Admin → Settings)");
   const host = getEffective("smtp.host", brandId);
@@ -41,8 +37,7 @@ function transport(brandId?: string | null): Transporter {
       // Omit auth entirely for relays that don't require it.
       auth: user || pass ? { user, pass } : undefined,
     });
-    // Bounded on purpose: brands are few, but a stale identity should not pin a
-    // connection forever. Cheapest correct policy — clear and rebuild.
+    // Bounded so a stale identity can't pin a connection forever.
     if (transporters.size > 16) transporters.clear();
     transporters.set(sig, existing);
   }
@@ -50,14 +45,11 @@ function transport(brandId?: string | null): Transporter {
 }
 
 function fromAddress(brandId?: string | null): string {
-  // Last resort when nothing is configured anywhere: name the deployment's own
-  // domain rather than the one this codebase was first written for.
+  // Fallback names the deployment's own domain, never the original one.
   return getEffective("smtp.from", brandId) || `${platformDomain} <support@${platformDomain}>`;
 }
 
-/** Inbox that receives support-chat handoffs: the dedicated setting when set,
- *  otherwise the bare address from the From header. Always non-empty, so the
- *  chat widget can also surface it as a "email us directly" fallback. */
+/** Support-handoff inbox: the dedicated setting, else the From address. Always non-empty so the widget can show it. */
 export function supportInboxAddress(): string {
   const brandId = currentBrandId();
   const explicit = getEffective("smtp.supportInbox", brandId).trim();
@@ -74,9 +66,7 @@ export async function sendEmail(opts: {
   text?: string;
   from?: string;
   headers?: Record<string, string>;
-  /** Send as this white-label brand. Defaults to the request's ambient brand,
-   *  so ordinary call sites need no change; pass it explicitly from background
-   *  work (schedulers, webhooks), where there is no request to inherit from. */
+  /** Brand to send as. Defaults to the ambient one; pass explicitly from background work. */
   brandId?: string | null;
 }) {
   const { from, brandId, ...rest } = opts;
@@ -89,14 +79,11 @@ export async function sendEmail(opts: {
   );
 }
 
-/** Build the public unsubscribe link + one-click List-Unsubscribe headers for a
- *  recipient. Returns null when the user has opted out (caller should skip the
- *  send) or when the address isn't a known user (send normally, no link). */
+/** Unsubscribe link + one-click headers. "opted-out" means skip the send; null means unknown address, send with no link. */
 async function unsubscribeContext(
   to: string,
 ): Promise<{ url: string; headers: Record<string, string> } | "opted-out" | null> {
-  // The recipient may be one of a brand's people (in that brand's database —
-  // the directory says which) or one of the platform's own (in Main).
+  // Recipient may live in a brand's DB (directory says which) or in Main.
   const hit = await prisma.customerDirectory
     .findFirst({ where: { email: to }, select: { userId: true, brandId: true } })
     .catch(() => null);
@@ -111,27 +98,20 @@ async function unsubscribeContext(
   return {
     url,
     headers: {
-      // RFC 2369 + RFC 8058 one-click: lets Gmail/Apple Mail surface a native
-      // "Unsubscribe" button that POSTs to the URL without the user visiting it.
+      // RFC 2369 + RFC 8058 one-click, so Gmail/Apple Mail show a native button.
       "List-Unsubscribe": `<${url}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
   };
 }
 
-/**
- * Render an editable system-email template and send it. No-op (returns false)
- * when the template is disabled by an admin or unknown. Applies the branded
- * "From name" from Admin → System Emails on top of the SMTP from address.
- */
+/** Renders an editable system-email template and sends it. Returns false when the template is disabled or unknown. */
 export async function sendTemplate(
   key: string,
   to: string,
   vars: Record<string, string | number | undefined>,
 ): Promise<boolean> {
-  // Notification emails honour the per-recipient unsubscribe: skip opted-out
-  // users entirely, and give everyone else a tokenized footer link + one-click
-  // List-Unsubscribe header.
+  // Notification mails honour opt-out; everyone else gets a tokenized link + header.
   let unsubscribeUrl: string | undefined;
   let headers: Record<string, string> | undefined;
   if (isUnsubscribable(key)) {
@@ -146,9 +126,7 @@ export async function sendTemplate(
   const rendered = await renderEmail(key, vars, { unsubscribeUrl });
   if (!rendered || !rendered.enabled) return false;
 
-  // Apply the From name, keeping the SMTP envelope address. On a white-label
-  // brand the brand's own name wins — mail from a tenant must not arrive
-  // wearing the platform's name — otherwise the editable platform From name.
+  // Brand name wins over the platform From name: tenant mail must not wear the platform's name.
   const brandId = currentBrandId();
   let from: string | undefined;
   try {
@@ -176,8 +154,7 @@ function fmtDate(d: Date): string {
   return formatDateDMY(d);
 }
 
-/** Tell the owner their lapsed trial bought them a grace window — their number
- *  stays reserved until graceEndsAt, after which it's released to the pool. */
+/** Lapsed trial got a grace window; number stays reserved until graceEndsAt. */
 export function graceStartedEmail(opts: {
   ownerEmail: string;
   fullName: string;
@@ -193,8 +170,7 @@ export function graceStartedEmail(opts: {
   });
 }
 
-/** Nudge during the grace window: recharge soon or lose the number. `final`
- *  flips to the last-24-hours template. */
+/** Grace-window nudge; `final` flips to the last-24-hours template. */
 export function graceWarningEmail(opts: {
   ownerEmail: string;
   fullName: string;
@@ -334,8 +310,7 @@ export function callSummaryEmail(opts: {
   transcript?: string;
   recordingUrl?: string;
 }) {
-  // Append the caller's number to the name (used in both the subject and body)
-  // so the owner can see exactly which number rang — no template change needed.
+  // Number rides along with the name so no template change is needed.
   const callerLabel = opts.callerNumber?.trim()
     ? `${opts.callerName} (${opts.callerNumber.trim()})`
     : opts.callerName;
@@ -347,9 +322,7 @@ export function callSummaryEmail(opts: {
   });
 }
 
-/** Support-chat handoff — the widget user asked for a human, so mail the
- *  conversation to the support inbox. Details come from what the assistant
- *  collected in-chat (any may be missing); the transcript is the ground truth. */
+/** Mails a chat handoff to the support inbox. Details may be missing; the transcript is the ground truth. */
 export function supportHandoffEmail(opts: {
   accountEmail: string;
   accountName: string;
@@ -401,9 +374,7 @@ export function supportHandoffEmail(opts: {
   });
 }
 
-/** Confirmation to the customer that their chat handoff reached the team — the
- *  widget tells them to "keep an eye on your inbox", so back that up with a
- *  real email at the address they gave the assistant. */
+/** Customer-side handoff confirmation; the widget promises an email, so send one. */
 export function handoffAckEmail(opts: { to: string; name: string; topic?: string; summary?: string }) {
   const { to, name, topic, summary } = opts;
   const what = summary || topic;

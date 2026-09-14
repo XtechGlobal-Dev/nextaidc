@@ -1,19 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Turning API Center telemetry into alerts.
- *
- *  A dashboard only helps someone who is looking at it. Rules here watch the
- *  same numbers the screens show and raise an event when one crosses a line, so
- *  a provider that starts failing at 2am is waiting on the Alerts screen in the
- *  morning rather than being discovered by a customer.
- *
- *  Two behaviours keep this from becoming noise nobody reads:
- *
- *   - **Cooldown.** A firing rule won't fire again for `cooldownMin`. Without it,
- *     a provider down for an hour produces one event per evaluation.
- *   - **Auto-resolve.** When the metric comes back inside its threshold the open
- *     event is closed automatically. An operator should only ever see alerts
- *     that are still true.
- * ------------------------------------------------------------------ */
+// API Center telemetry -> alert events. Rules respect a per-rule cooldown (else a
+// long outage fires every evaluation) and open events auto-resolve once the metric recovers.
 
 import { prisma } from "../prisma.js";
 import { providerDefOrFallback } from "./apiProviders.js";
@@ -39,14 +25,8 @@ export const METRIC_UNIT: Record<AlertMetric, string> = {
   no_traffic: "min",
 };
 
-/**
- * The rules a fresh install starts with, seeded once.
- *
- * All are fleet-wide (`provider: null`) on purpose: a rule per provider would
- * have to be remembered every time a vendor is added, and the one that gets
- * forgotten is always the one that breaks. Thresholds mirror
- * {@link THRESHOLDS} so an alert fires exactly when the dashboard turns amber.
- */
+// Seeded once on a fresh install. All fleet-wide (provider: null) so a new vendor
+// can't be forgotten; thresholds mirror THRESHOLDS so alerts match the dashboard's amber.
 const DEFAULT_RULES = [
   {
     provider: null,
@@ -151,13 +131,7 @@ export interface EvaluationResult {
   resolved: number;
 }
 
-/**
- * Evaluate every enabled rule against the current snapshot.
- *
- * Runs on the scheduler and is also triggered when the Alerts screen loads, so
- * an operator never looks at a stale board. Never throws — a failed evaluation
- * is logged by its absence, not by taking the scheduler down.
- */
+/** Evaluates every enabled rule against the current snapshot. Never throws — a bad run must not take the scheduler down. */
 export async function evaluateAlertRules(): Promise<EvaluationResult> {
   const result: EvaluationResult = { fired: 0, resolved: 0 };
   try {
@@ -194,9 +168,7 @@ export async function evaluateAlertRules(): Promise<EvaluationResult> {
         const alreadyOpen = openEvents.some((e) => e.ruleId === rule.id && e.provider === row.id);
         if (alreadyOpen) continue;
 
-        // Cooldown is per rule: a rule that just fired for one provider stays
-        // quiet briefly rather than announcing a fleet-wide vendor outage
-        // twenty times in a row.
+        // Cooldown is per rule, not per provider, so a fleet-wide outage doesn't fire twenty times.
         if (rule.lastFiredAt && now.getTime() - rule.lastFiredAt.getTime() < rule.cooldownMin * 60_000) continue;
 
         await prisma.apiAlertEvent.create({

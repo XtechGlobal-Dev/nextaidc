@@ -1,16 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Usage must survive every billing action that does NOT start a new cycle, and a
-// new cycle must only ever be granted when someone actually paid for it.
-//
-// Bug 1: `periodAdvanced` treated a missing stored `currentPeriodEnd` as "new
-// period", so an auto-renew toggle or a downgrade — both of which fire
-// `customer.subscription.updated` → applyActivePlanMinutes — wiped 100/200 to 0/200.
-//
-// Bug 2 (the mirror image): `exhausted` treated a spent allowance as a boundary,
-// so the SAME no-money events handed a fresh allowance to a customer with
-// auto-renew off who had used everything up. Only `resetUsage` (which every
-// paid path passes) and a real period advance may reset now.
+// Usage must survive non-cycle billing events. Past bugs: a null stored currentPeriodEnd
+// read as "new period" (auto-renew toggle wiped usage), and a spent allowance read as a boundary (free refill).
 
 vi.mock("../prisma.js", () => ({
   prisma: { profile: { findUnique: vi.fn(), update: vi.fn() } },
@@ -123,10 +114,8 @@ describe("applyActivePlanMinutes — usage MUST reset on a real new cycle", () =
   });
 
   it("resets on an early auto-renew, the way the renewal path actually calls it", async () => {
-    // renewActivePlanIfExhausted zeroes the counter with an atomic claim BEFORE
-    // calling here, then states the reset and passes the overage explicitly. So
-    // the real early-renewal call arrives with usage already 0 and resetUsage set
-    // — it never relied on this function inferring anything from exhaustion.
+    // The renewal path claims (zeroes) the counter first, then calls here with
+    // resetUsage set and overage explicit — it never inferred anything from exhaustion.
     findUnique.mockResolvedValue(used100of200({ planSecondsUsed: 0 }));
 
     await applyActivePlanMinutes("u1", {
@@ -139,9 +128,8 @@ describe("applyActivePlanMinutes — usage MUST reset on a real new cycle", () =
   });
 
   it("still carries overage into the new cycle", async () => {
-    // 201 min used of 200 → 1 min carried, so the new cycle shows 1/200 not 0/200.
-    // The overage rides in on carryOverSeconds because the claim already zeroed
-    // the stored counter (see the comment at the call site).
+    // 201 of 200 used → 1 min carried, arriving via carryOverSeconds because the
+    // claim already zeroed the stored counter.
     findUnique.mockResolvedValue(used100of200({ planSecondsUsed: 0 }));
 
     await applyActivePlanMinutes("u1", {
@@ -156,11 +144,8 @@ describe("applyActivePlanMinutes — usage MUST reset on a real new cycle", () =
 });
 
 describe("applyActivePlanMinutes — an exhausted allowance is not a paid cycle", () => {
-  /* Running out of minutes is a STATE, not a billing event. Treating it as a
-   * boundary meant any customer.subscription.updated that arrived while the
-   * allowance was spent — toggling auto-renew, scheduling a downgrade, a price
-   * swap, none of which move money — handed the customer a fresh allowance for
-   * free. Reported as: "auto-renew off, minutes exhausted, minutes came back". */
+  // Running out is a STATE, not a billing event. Treating it as a boundary gave a
+  // free refill on any no-money subscription.updated ("minutes exhausted, minutes came back").
 
   it("does not re-credit a spent allowance on a non-cycle event", async () => {
     findUnique.mockResolvedValue(used100of200({ planSecondsUsed: 200 * 60 }));

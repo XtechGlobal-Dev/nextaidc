@@ -69,33 +69,14 @@ import {
   withRequester,
 } from "../services/tickets.js";
 
-/* ------------------------------------------------------------------ *
- *  The handler's inbox.
- *
- *  ONE router, mounted once, serving both lanes — because which inbox
- *  you get is decided by who you are, not by which URL you called:
- *
- *    a brand ADMIN or its STAFF  → `support`: their customers' requests
- *    the SUPER_ADMIN             → `brand`:   their brands' requests
- *
- *  That is what makes the two connections impossible to cross. There is
- *  no query parameter, header or body field that selects a lane, so the
- *  platform owner cannot reach a tenant's customer conversations and a
- *  tenant's admin cannot reach another tenant's queue — the same wall
- *  BRAND_SCOPED_SECTIONS / PLATFORM_ONLY_SECTIONS already put around
- *  the customer list and the audit log.
- *
- *  Within a lane, `scopeFilter` narrows every read to the caller's
- *  tenant, granted departments and the tickets nobody else has taken.
- * ------------------------------------------------------------------ */
+// The handler's inbox. One router, two lanes picked by WHO you are, never by a param: brand ADMIN/STAFF get
+// `support` (their customers), SUPER_ADMIN gets `brand` (their brands). scopeFilter then narrows every read to the caller's reach.
 
 const router = express.Router();
 
 router.use(requireAuth, requireAdminOrStaff);
 
-/** Everything below needs to know which side of the ladder the caller is on —
- *  and, with it, which database that side's tickets live in (phase 4): a
- *  brand's inbox in the brand's own, the platform's in the control plane. */
+/** Resolves the caller's lane and with it the DB the tickets live in (brand inbox in the brand DB, platform's in the control plane). */
 async function withLane(req: Request, _res: Response, next: NextFunction) {
   const lane = handlerLane(req.user!.role, req.user!.brandId ?? null);
   if (!lane) return next(forbidden("Your account doesn't handle support requests."));
@@ -129,21 +110,12 @@ function actorOf(req: Request): TicketActor {
   };
 }
 
-/**
- * The tenant a handler's own departments and saved replies belong to.
- *
- * On `brand` that is the platform (null) — the queues brand admins file into
- * are the platform's. On `support` it is the handler's own brand, and null for
- * a platform-level admin, whose customers carry no brand either.
- */
+/** Tenant of the handler's own departments/saved replies: null on `brand` (the platform's queues), their brand on `support`. */
 function ownTenant(actor: TicketActor): string | null {
   return departmentTenant(actor.lane, actor.brandId);
 }
 
-/** Which queues EXIST is the platform's call on both lanes: the super admin
- *  manages the platform's own from here, and every brand's from that brand's
- *  page (see brands.routes). A brand admin reaches this router's department
- *  routes only to decide who works a queue — see PATCH. */
+/** Which queues exist is the platform's call on both lanes; a brand admin only decides who works one (see PATCH). */
 function assertPlatformOwner(actor: TicketActor): void {
   assertCan(actor, "view");
   if (!isSuperAdminRole(actor.role)) {
@@ -180,9 +152,7 @@ router.get(
     const scope = await departmentScope(db, actor);
     const mineIds = scope === null ? null : new Set(scope);
 
-    // "all" exists to make reassignment possible, so it widens only for someone
-    // who can actually reassign. A view-only member gets their own queues back
-    // instead of the names of every queue in the building.
+    // "all" only widens for someone who can reassign; a view-only member just gets their own queues.
     const widen =
       which === "all" && (isAdminRole(actor.role) || actor.permissions.includes("tickets.edit"));
 
@@ -199,25 +169,14 @@ router.get(
   }),
 );
 
-/**
- * Keep only the ids that are real STAFF accounts of the caller's own tenant.
- *
- * Silently dropping a stale id beats 400-ing the whole save: the picker can lag
- * behind a colleague who was deleted a moment ago, and that shouldn't cost the
- * admin the rest of their edit. Full admins are excluded — they already work
- * every queue, so "granting" them one would be a no-op row that then reads as a
- * real membership on screen.
- */
+/** Keeps only real STAFF ids of the caller's tenant. Stale ids are dropped, not 400'd; full admins are excluded since they already work every queue. */
 async function validStaffIds(db: TenantClient, ids: string[], actor: TicketActor): Promise<string[]> {
   if (ids.length === 0) return [];
   const rows = await db.user.findMany({
     where: {
       id: { in: ids },
       role: "STAFF",
-      // A cross-tenant grant would put another brand's staff member on this
-      // brand's queue — the one thing department membership must never do. On
-      // the support lane the database IS the brand; on the platform's lane the
-      // control plane holds every account, so its own people are picked out.
+      // Never a cross-tenant grant. On support the DB is the brand; on the brand lane pick out the platform's own people.
       ...(actor.lane === "brand" ? PLATFORM_ONLY : {}),
     },
     select: { id: true },
@@ -275,10 +234,7 @@ router.patch(
     assertCan(actor, "view");
     if (!isAdminRole(actor.role)) throw forbidden("Only an admin can manage departments.");
     const { staffIds, ...data } = departmentSchema.partial().parse(req.body);
-    // A brand admin STAFFS their queues; the platform decides what the queues
-    // are. Anything but membership from a brand admin is refused rather than
-    // ignored, so a stale client can't look like it saved a rename that never
-    // happened.
+    // Brand admins only staff queues. Refuse (don't ignore) other fields so a stale client can't fake a saved rename.
     if (!isSuperAdminRole(actor.role) && Object.keys(data).length > 0) {
       throw forbidden(
         "Departments are set up by the platform — ask them to rename or change one. You can still change who works it.",
@@ -342,14 +298,7 @@ router.delete(
 
 /* ------------------------------- Inbox ----------------------------------- */
 
-/**
- * Who can be handed a ticket in the given department — everyone who works that
- * queue, plus the lane's full admins.
- *
- * With no `departmentId` this widens to everyone who works ANY queue the caller
- * can see: the inbox's assignee filter, and the reassign picker while the
- * destination department is still being chosen.
- */
+/** Assignable people for a department (its workers + the lane's admins); with no departmentId, everyone in any queue the caller can see. */
 router.get(
   "/agents",
   asyncHandler(async (req, res) => {
@@ -366,10 +315,7 @@ router.get(
         fullName: true,
         email: true,
         role: true,
-        // Which queues each person works (role grant plus personal grant), so
-        // the picker can group them by team and say when assigning to someone
-        // also hands the ticket to their department. The role's grants are
-        // fetched by id below — a role is a plain id on the account.
+        // Queues per person (role grant + personal grant) so the picker can group by team. Role grants fetched by id below.
         staffRoleId: true,
         ticketDepartments: { select: { id: true, name: true, lane: true } },
       },
@@ -404,19 +350,7 @@ router.get(
   }),
 );
 
-/**
- * Accounts this handler may raise a request FOR — the picker on the "log a
- * request that came in another way" form.
- *
- * Its own endpoint rather than reusing the customer search, because the two
- * lanes look for different people and one of them can't use that search at all:
- * the super admin is refused the `customers` section by design, so a shared
- * lookup would 403 on exactly the lane that needs it most.
- *
- *   support — the caller's own tenant's customers (and resellers).
- *   brand   — the brand admins, each labelled with the brand they run, which is
- *             the thing the platform owner is actually choosing between.
- */
+/** Accounts the handler may raise a request FOR. Not the customer search: the super admin is refused `customers`, and the brand lane picks brand admins instead. */
 router.get(
   "/requesters",
   asyncHandler(async (req, res) => {
@@ -425,9 +359,7 @@ router.get(
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
 
     if (actor.lane === "brand") {
-      // Brand admins live in their brands' databases; Main's thin directory
-      // names each with their brand — which is the thing the platform owner
-      // is actually choosing between.
+      // Brand admins live in their brand DBs; Main's directory names each with their brand.
       const rows = await prisma.customerDirectory.findMany({
         where: {
           role: "ADMIN",
@@ -524,10 +456,7 @@ const EMPTY_STATS = {
   firstResponse: { avgSeconds: null as number | null, prevAvgSeconds: null as number | null },
 };
 
-/**
- * Counts and headline metrics for the inbox tiles — always within the caller's
- * reach, so a staff member's numbers describe the same world their list does.
- */
+/** Inbox tile metrics, always within the caller's reach so the numbers match their list. */
 router.get(
   "/stats",
   asyncHandler(async (req, res) => {
@@ -578,14 +507,7 @@ router.get(
   }),
 );
 
-/**
- * How long a requester waited for the first reply, averaged over the last 30
- * days and the 30 before that.
- *
- * Raw SQL because this is a per-ticket MIN over a join, which Prisma's groupBy
- * can't express. The lane goes in as a CAST rather than a bare parameter:
- * Postgres will not implicitly compare an enum column to text.
- */
+/** Avg first-reply wait, last 30 days vs the 30 before. Raw SQL (per-ticket MIN over a join); the lane is CAST because Postgres won't compare an enum to text. */
 async function firstResponseTiming(
   db: TenantClient,
   actor: TicketActor,
@@ -738,12 +660,7 @@ const listQuery = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-/**
- * The inbox filters as a Prisma `where` — shared by the table and the CSV
- * export, so the file always holds exactly what the screen showed. Null when a
- * filter points outside the caller's reach: that must read as "nothing", never
- * widen to "everything".
- */
+/** Inbox filters as a Prisma where, shared by table and CSV. Null when a filter is out of reach — that means "nothing", never "everything". */
 function listWhere(
   query: z.infer<typeof listQuery>,
   actor: TicketActor,
@@ -771,10 +688,7 @@ function listWhere(
   if (query.unread === "true") where.unreadForStaff = true;
 
   if (query.q) {
-    // "#42" (or just "42") is how a team refers to a ticket — match the number
-    // as well as the text fields. A brand's name is matched through the brands
-    // cache: the ticket names its brand by id, and the brand table is the
-    // platform's, not something this database can join.
+    // "#42" matches the number too. Brand names go through the cache — the brand table is the platform's, not joinable here.
     const asNumber = /^#?\d{1,9}$/.test(query.q) ? Number(query.q.replace("#", "")) : null;
     const brandIds = actor.lane === "brand" ? brandIdsMatching(query.q) : [];
     where.OR = [
@@ -1086,15 +1000,7 @@ const createSchema = z.object({
   attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS_PER_MESSAGE).default([]),
 });
 
-/**
- * Raise a ticket on someone's behalf — a request that came in by phone, or a
- * conversation that started somewhere else and needs a thread to live in.
- *
- * The requester must be an account that actually raises tickets in this lane
- * (see requesterLane) AND one the caller can already reach. Without both
- * checks this route would be a way to mint a thread in another tenant, or to
- * put words in an account's mouth that it never said.
- */
+/** Raise a ticket on someone's behalf. Requester must raise tickets in this lane AND be reachable by the caller, or this mints threads in other tenants. */
 router.post(
   "/",
   asyncHandler(async (req, res) => {
@@ -1103,10 +1009,7 @@ router.post(
     const data = createSchema.parse(req.body);
     const db = dbOf(req);
 
-    // Who the request is FOR. On the support lane that is one of the brand's
-    // own customers, in the brand's database — there is nobody else in it, so
-    // the tenant wall is the database itself. On the platform's lane it is a
-    // brand admin, found in Main's thin directory with their brand.
+    // Support lane: a customer in the brand DB (the DB itself is the tenant wall). Brand lane: a brand admin from Main's directory.
     const requester =
       actor.lane === "brand"
         ? await prisma.customerDirectory
@@ -1190,14 +1093,7 @@ const escalateSchema = z.object({
   note: z.string().trim().max(MAX_MESSAGE_CHARS, MESSAGE_TOO_LONG).default(""),
 });
 
-/**
- * Hand a customer's ticket up to the platform.
- *
- * Brand admins only: the ticket that goes up is raised in THEIR name on the
- * `brand` lane, and a brand's staff have no standing to ask the platform
- * anything. The customer's thread stays here, in this inbox; what the
- * platform gets is the admin's account of it, linked both ways.
- */
+/** Escalate a customer ticket to the platform. Brand admins only — it's raised in THEIR name; the customer thread stays here, linked both ways. */
 router.post(
   "/:id/escalate",
   asyncHandler(async (req, res) => {
@@ -1236,9 +1132,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const actor = actorOf(req);
     assertCan(actor, "view");
-    // The messages are keyed by the same id, so they are fetched alongside the
-    // ticket rather than after it. If the ticket turns out to be outside the
-    // caller's reach, the 404 from the first read discards them unseen.
+    // Messages fetched alongside the ticket; an out-of-reach 404 discards them unseen.
     const db = dbOf(req);
     const [ticket, messages, merges] = await Promise.all([
       loadTicketForHandler(db, req.params.id, actor),
@@ -1253,10 +1147,7 @@ router.get(
       }),
     ]);
 
-    // Stamps `staffReadAt` and nudges the requester's tab, so the "Seen" tick
-    // under their last message appears without them reloading. Not awaited: the
-    // response already reports the thread as read, and the write is one more
-    // round trip nobody should have to wait on.
+    // Stamps staffReadAt and nudges the requester's tab. Not awaited — the response already says "read".
     void markThreadRead(db, ticket, "staff").catch(() => {});
 
     res.json({
@@ -1296,9 +1187,7 @@ const replySchema = z.object({
   replyToId: z.string().nullable().optional(),
 });
 
-/** The display name a reply is stored under, for the handler-side view. The
- *  handler is in the lane's own database: a brand's team in the brand's, the
- *  platform's people in the control plane. */
+/** Display name a reply is stored under; the handler lives in the lane's own DB. */
 async function myName(db: TenantClient, actor: TicketActor, fallback: string): Promise<string> {
   const me = await db.user.findUnique({
     where: { id: actor.id },
@@ -1335,9 +1224,7 @@ router.post(
         data: {
           // A reply puts the ball back in the requester's court.
           status: ticket.status === "open" ? "pending" : ticket.status,
-          // Whoever answers owns it — not just the first responder. The ticket
-          // sits under the name the requester last heard from, so a colleague
-          // who steps in takes it over from the previous assignee.
+          // Whoever answers owns it — a colleague stepping in takes over from the previous assignee.
           assignedToId: actor.id,
         },
         include: ticketInclude,
@@ -1345,9 +1232,7 @@ router.post(
       void notifyRequester(withRequester(updated), {
         title: `${laneCopy(actor.lane).handlerLabel} replied · ${updated.reference}`,
         message: data.body.slice(0, 140) || "Sent you an attachment",
-        // The bell always rings; mail only once the conversation has been quiet
-        // for an hour. `ticket` is the row from before this reply, so its
-        // lastMessageAt says when the thread last spoke.
+        // Bell always; mail only after an hour of quiet. `ticket` is the pre-reply row, so lastMessageAt is the previous message.
         ...(shouldEmailForMessage(ticket)
           ? { templateKey: "ticket_reply", templateVars: { reply_preview: data.body.slice(0, 400) } }
           : {}),
@@ -1365,9 +1250,7 @@ function handlerActor(req: Request, name: string): MessageActor {
     type: "staff",
     name,
     userId: actor.id,
-    // Removing a REQUESTER's message (a mistyped card number, a screenshot they
-    // regret) is a moderation act, so it rides on `*.delete` rather than on
-    // ordinary reply rights. Your own message is always yours to take back.
+    // Removing a REQUESTER's message is moderation, so it needs `*.delete`. Your own message is always yours to take back.
     canModerate: isAdminRole(actor.role) || actor.permissions.includes("tickets.delete"),
   };
 }
@@ -1474,9 +1357,7 @@ router.patch(
     const data = patchSchema.parse(req.body);
     const db = dbOf(req);
     const ticket = await loadTicketForHandler(db, req.params.id, actor);
-    // Departments belong to a tenant, and a ticket never changes tenant — so
-    // the queue it can move to is decided by the TICKET's brand, not the
-    // handler's. That matters for a platform-level admin working across brands.
+    // A ticket never changes tenant, so the target queue is decided by the TICKET's brand, not the handler's.
     const deptTenant = departmentTenant(actor.lane, ticket.brandId);
 
     const update: Prisma.TicketUpdateInput = {};
@@ -1487,9 +1368,7 @@ router.patch(
       update.closedAt = data.status === "closed" ? new Date() : null;
     }
     if (data.departmentId) {
-      // A ticket filed to the wrong queue is the normal case, not the exception,
-      // so any handler may route it onward — including to a department they
-      // don't work themselves. That hands access away rather than taking any.
+      // Any handler may route onward, even to a queue they don't work — that hands access away, not takes it.
       const departmentId = await resolveDepartment(db, data.departmentId, {
         lane: actor.lane,
         brandId: deptTenant,
@@ -1501,17 +1380,12 @@ router.patch(
     }
     const movingDepartment = !!data.departmentId && data.departmentId !== ticket.departmentId;
     if (movingDepartment && data.assignedToId === undefined && ticket.assignedToId) {
-      // Handing the ticket to another team also hands over ownership. Leaving
-      // the old department's agent as assignee would park it with someone who
-      // can no longer see it — and because mail goes to the assignee, the team
-      // that just received it would never be told.
+      // Moving teams drops the assignee — otherwise it's parked with someone who can't see it and mail never reaches the new team.
       update.assignedTo = { disconnect: true };
     }
     if (data.assignedToId !== undefined) {
       if (data.assignedToId) {
-        // The DESTINATION department decides who is eligible, so validate
-        // against the department the ticket is about to be in — otherwise
-        // "move to Billing and give it to Sam" fails on a single request.
+        // Validate against the DESTINATION department, or "move to Billing and give it to Sam" fails in one request.
         const targetDepartment = data.departmentId ?? ticket.departmentId;
         const eligible = await db.user.findFirst({
           where: {
@@ -1537,9 +1411,7 @@ router.patch(
       ])
     )[0];
 
-    // Did the handler just route it out of their own reach? The client needs to
-    // know: the thread it is showing is one it can no longer re-fetch, so it has
-    // to close the pane rather than sit on a ticket that 404s on refresh.
+    // Routed out of their own reach? The client must close the pane rather than sit on a ticket that 404s on refresh.
     const scope = await departmentScope(db, actor);
     const handedOff =
       scope !== null &&
@@ -1576,9 +1448,7 @@ router.patch(
       data.status !== ticket.status &&
       (data.status === "resolved" || data.status === "closed")
     ) {
-      // The moment work finishes is the moment to ask how it went — so the
-      // notification that says "resolved" IS the prompt to rate, and its link
-      // opens the star card rather than just the thread.
+      // The "resolved" notification doubles as the rating prompt; its link opens the star card.
       const askForRating = !updated.rating && isRateable(data.status);
       void notifyRequester(withRequester(updated), {
         title: `Request ${updated.reference} ${data.status}`,
@@ -1609,9 +1479,7 @@ router.patch(
         excludeUserId: actor.id,
       });
     }
-    // The new holder is told directly. When a move leaves nobody holding it, the
-    // "moved here" mail above already reached the receiving team, so only a
-    // plain unassign needs telling here.
+    // Tell the new holder. A move with no holder already mailed the receiving team, so only a plain unassign needs telling.
     if (assigneeChanged && (updated.assignedToId || !movingDepartment)) {
       void notifyTicketHandoff(db, updated, {
         actorId: actor.id,

@@ -2,14 +2,8 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs guard script, no types, imported for its pure half.
 import { dangerousOperations, isPartitionChild } from "../../scripts/schemaDrift.mjs";
 
-/* ------------------------------------------------------------------ *
- *  The pre-deploy guard's decision logic.
- *
- *  Two ways to get this wrong, and both end with it being useless:
- *    - miss a destructive plan → the thing it exists to prevent happens;
- *    - flag routine column additions → someone deletes the guard within a
- *      week, and then the thing it exists to prevent happens anyway.
- * ------------------------------------------------------------------ */
+// Pre-deploy guard logic. It must catch destructive plans but stay quiet on
+// routine changes — a noisy guard gets deleted.
 
 describe("catches what would destroy the call history", () => {
   it("flags a plan that drops call_logs", () => {

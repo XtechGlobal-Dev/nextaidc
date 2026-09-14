@@ -1,33 +1,8 @@
-/* ------------------------------------------------------------------ *
- *  Brand routing — which tenant this page load belongs to, and how it
- *  got there. A brand has two kinds of front door:
- *
- *    host — acme.example.com, or the brand's own verified domain. The
- *           server resolves the tenant from the request's Origin, so
- *           nothing in the URL names it and the app lives at plain
- *           /dashboard. The brand's domain serves ONLY this SPA; every
- *           API call still goes to the platform's API host.
- *
- *    path — example.com/{brandname}/…  Every brand shares the platform's
- *           host and the first path segment names the tenant. That
- *           segment is resolved ONCE at boot and becomes the router's
- *           basename, so no link, redirect or navigate() call anywhere
- *           in the app has to know about it: React Router prefixes them
- *           all. Needs no DNS, so it is the door that still works while
- *           a wildcard record propagates or on a preview deployment.
- *
- *  Either way the API is told which brand the page is, via an X-Brand
- *  header — redundant on a host door, essential on a path one.
- * ------------------------------------------------------------------ */
+// Brand routing: which tenant this page load belongs to. "host" door = the brand's own domain, server
+// resolves it from Origin; "path" door = /{slug}/..., resolved once at boot as the router basename. Both send X-Brand.
 
-/**
- * First segments that are the platform's own and can never be a brand.
- *
- * Checked before the network so a normal page load doesn't wait on a lookup,
- * and so a brand could never take over `/login` even if someone slipped that
- * slug past the reserved-name check at creation time. Keep in step with the
- * top-level routes in App.tsx and with RESERVED_SLUGS on the server.
- */
+/** Platform-owned first segments that can never be a brand; checked before the network so `/login` can't be
+ *  hijacked by a slipped slug. Keep in step with App.tsx top-level routes and RESERVED_SLUGS on the server. */
 export const RESERVED_PATH_SEGMENTS = new Set([
   "dashboard",
   "superadmin",
@@ -94,15 +69,8 @@ export function brandBasename(): string | undefined {
   return door?.mode === "path" ? `/${door.slug}` : undefined;
 }
 
-/**
- * An in-app path with the brand prefix applied, for a FULL page navigation.
- *
- * `window.location` bypasses the router, so its `basename` does not apply and a
- * bare "/login" would drop a path-door customer onto the PLATFORM's page. Every
- * `window.location` that targets an in-app path goes through here; anything
- * navigating inside the router (Link, navigate, Navigate) must NOT, or the
- * prefix lands twice.
- */
+/** Brand-prefixed path for FULL page navigations only: `window.location` bypasses the router basename.
+ *  Never use for Link/navigate, or the prefix lands twice. */
 export function brandPath(path: string): string {
   const base = brandBasename() ?? "";
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;

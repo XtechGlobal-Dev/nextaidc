@@ -42,9 +42,7 @@ import { isAdminRole } from "../lib/roles.js";
 
 const router = express.Router();
 
-/** The business name the stored config was last saved with — the baseline a
- *  rename is propagated from, so onboarding-generated text that named the old
- *  business (scenarios, FAQs, facts) follows the rename instead of going stale. */
+/** Business name the config was last saved with — the baseline a rename propagates from. */
 function storedBusinessName(conversion: { agentConfig: unknown }): string {
   const identity = (conversion.agentConfig as { identity?: { businessName?: string } })?.identity;
   return (identity?.businessName ?? "").trim();
@@ -63,10 +61,7 @@ async function getConversion(userId: string) {
   });
 }
 
-/** True when the assistant name is still an auto-generated default the owner
- *  never personalised — the seeded "Sophie", the "{Business} Receptionist"
- *  fallback, a gender-matched name we assigned earlier (so a later voice change
- *  can re-match it), or blank. Only then may a gender-matched name be picked. */
+/** True when the name is still an auto default (seeded, "{Business} Receptionist", a gender name we assigned, or blank) — only then may we re-pick it. */
 function isDefaultAssistantName(name: string | undefined, businessName: string | undefined): boolean {
   const n = (name ?? "").trim();
   if (!n) return true;
@@ -88,11 +83,7 @@ async function getCompileContext(userId: string): Promise<CompileContext> {
   return { country: p?.country || undefined, industry: p?.industry || undefined };
 }
 
-/** Rename a still-default assistant to match its voice's gender using the
- *  admin-configured names (male → "Mark", female → "Jessica" by default). Runs
- *  at onboarding AND on every AI-Brain save, so switching to a male voice flips
- *  an auto-assigned "Jessica" to "Mark" (and back). No-op when the owner chose
- *  their own name or the voice's gender is unknown. Mutates + returns the config. */
+/** Renames a still-default assistant to match its voice's gender (admin-configured names). No-op for an owner-chosen name or unknown gender. Mutates + returns config. */
 async function applyGenderDefaultName(config: AgentConfig): Promise<AgentConfig> {
   if (!config.identity) return config;
   if (!isDefaultAssistantName(config.identity.assistantName, config.identity.businessName)) return config;
@@ -110,9 +101,7 @@ router.get(
   asyncHandler(async (req, res) => {
     let conversion = await getConversion(req.user!.sub);
 
-    // Auto-retry provisioning while the agent is incomplete: still pending (Vapi
-    // wasn't configured at subscribe time), or live but without an assigned
-    // number yet (e.g. the Twilio pool was empty / the import had failed).
+    // Retry provisioning while incomplete: still pending, or live with no number yet (pool was empty).
     const profile = await (await requestTenant(req)).profile.findUnique({
       where: { userId: req.user!.sub },
       select: {
@@ -126,9 +115,7 @@ router.get(
     const incomplete =
       conversion.status === "pending" ||
       (conversion.status === "approved" && !profile?.receptionistNumber);
-    // Customers auto-provision here; the admin provisions only when they first
-    // build + save their AI Brain (see the PUT handler), so simply opening the
-    // page doesn't spin up an admin agent on the default config.
+    // Admins only provision on their first AI Brain save, so opening the page doesn't spin up an agent on the default config.
     if (incomplete && !isAdminRole(req.user!.role)) {
       const provisioned = await provisionAgentForUser(req.user!.sub);
       if (provisioned) conversion = await getConversion(req.user!.sub);
@@ -140,12 +127,8 @@ router.get(
       automations?: unknown;
       rules?: { timezone?: string };
     };
-    // Resolve the operating timezone here rather than at each creation site: a
-    // config can be seeded by signup, by getConversion above, or by the call
-    // webhook, and legacy rows predate the field. Doing it on read means every
-    // path ends up with a real zone, and it doesn't depend on the owner opening
-    // the Rules tab. A stored value (incl. a normalised legacy label) is kept as
-    // the owner's choice and never overwritten.
+    // Resolve the timezone on read: configs are seeded from several places and legacy rows predate
+    // the field. A stored value is the owner's choice and is never overwritten.
     const resolvedZone =
       normalizeTimeZone(stored.rules?.timezone) ||
       resolveBusinessTimeZone({
@@ -160,19 +143,12 @@ router.get(
       rules: { ...(stored.rules ?? {}), timezone: resolvedZone },
       automations: normalizeAutomations(stored.automations),
     };
-    // Give a still-default assistant its gender-matched admin default name
-    // ("Jessica"/"Mark") on READ, not just on save. Onboarding seeds the name as
-    // "{business} Receptionist"; without this the first AI-Brain load showed that
-    // placeholder and only flipped to the real name a few seconds later when the
-    // post-onboarding save applied it. Applying it here makes the first render
-    // correct. Idempotent — a name the owner personalised (or already a default
-    // gender name) is left unchanged.
+    // Apply the gender default name on READ too, or the first AI Brain load shows the
+    // "{business} Receptionist" placeholder until the post-onboarding save. Idempotent.
     const nameBefore = (agentConfig as AgentConfig).identity?.assistantName;
     await applyGenderDefaultName(agentConfig as unknown as AgentConfig);
     const nameChanged = (agentConfig as AgentConfig).identity?.assistantName !== nameBefore;
-    // Persist a newly-resolved zone or name so the prompt synced to Vapi matches
-    // what the owner is shown — otherwise the live agent keeps compiling with the
-    // old value until their next manual save.
+    // Persist a newly resolved zone/name, or the live agent keeps the old value until the next manual save.
     if (normalizeTimeZone(stored.rules?.timezone) !== resolvedZone || nameChanged) {
       await (await requestTenant(req)).conversion.update({
         where: { id: conversion.id },
@@ -212,30 +188,9 @@ router.get(
 
 const putSchema = z.object({ agentConfig: z.any() });
 
-/**
- * Make the master prompt SERVER-OWNED: discard whatever the client sent for it
- * and restore the stored values in its place.
- *
- * The prompt is the product — it is what makes the assistant work — so a
- * customer may read it but never rewrite it. A read-only textarea alone is
- * decoration: the config travels to the browser and comes back on a plain PUT,
- * so deleting the attribute in devtools, editing the store from the console, or
- * simply POSTing the JSON with curl would all have saved a hand-written prompt.
- * Refusing it HERE is the only version of this rule that holds, for the same
- * reason the voice and language gates a few lines below live on the server.
- *
- * It restores the STORED prompt rather than recompiling from scratch on
- * purpose. Customers who hand-edited before this rule existed have
- * `masterPromptDirty` set, and forcing a recompile would silently delete
- * guidance their live agent has been running on for months. Their text is
- * frozen exactly as it is; they simply can't add to it. Everyone else stays on
- * the auto-compiled path, so editing Identity, Knowledge or Rules still flows
- * into the prompt exactly as before — that is now the only way to change it.
- *
- * Admins are exempt, including while impersonating (`imp`, minted only by the
- * ADMIN-only impersonate route), so support can still repair a broken prompt
- * for a customer who asks.
- */
+/** Master prompt is server-owned: drop whatever the client sent and restore the STORED values (a read-only textarea
+ *  is bypassable with curl). Restores rather than recompiles so pre-rule hand edits (masterPromptDirty) aren't wiped.
+ *  Admins are exempt, including while impersonating, so support can repair a broken prompt. */
 export function lockMasterPrompt(
   config: AgentConfig,
   conversion: { agentConfig: unknown },
@@ -259,19 +214,12 @@ router.put(
     const { agentConfig } = putSchema.parse(req.body);
     let config = agentConfig as AgentConfig;
 
-    // Defence-in-depth: clamp names to 40 so the stored config (and the Vapi
-    // assistant built from it) can never overflow Vapi's 40-char name limit,
-    // even if a client bypasses the input cap.
+    // Clamp names server-side too — Vapi has a 40-char name limit and a client can bypass the input cap.
     if (config.identity) {
       config.identity.assistantName = clampName(config.identity.assistantName);
       config.identity.businessName = clampName(config.identity.businessName);
-      // The greeting stores the business name baked in, so renaming the business
-      // used to leave the agent greeting callers with the OLD name on every live
-      // call. Re-derive it here (only for greetings we generated — a custom one is
-      // kept as-is) so the fix persists and flows into the prompt + Vapi payload.
-      // Clamped for the same reason the names above are: the greeting is
-      // owner-editable free text that lands in the master prompt and the Vapi
-      // payload, so a client bypassing the input cap must not bloat every call.
+      // The greeting bakes the business name in, so re-derive generated greetings on rename (custom ones are kept).
+      // Clamped like the names: it lands in every call's prompt, so a client bypass must not bloat it.
       config.identity.greetingMessage = clampGreeting(
         resolveGreeting(config.identity.greetingMessage, config.identity.businessName),
       );
@@ -285,18 +233,13 @@ router.put(
         : [];
     }
 
-    // Same reasoning as languages above, for "SMS to Caller": force the master
-    // switch off when the plan doesn't include it. Deleting a `disabled`
-    // attribute in the browser (or PUTting the config straight at this route)
-    // would otherwise store it as ON — which the UI would then show as active
-    // even though the send path refuses it.
+    // Same for "SMS to Caller": force it off when the plan lacks it, or a devtools bypass
+    // stores ON and the UI shows it active even though the send path refuses.
     if (config.automations && !(await getPlanFeatures(req.user!.sub)).smsToCaller) {
       config.automations.clientPostCallSms = false;
     }
 
-    // Voice picked/changed on save: re-match a still-default assistant name
-    // (Jessica/Mark or the admin overrides) to the voice's gender. Runs before
-    // the prompt compile so the new name flows into the ## IDENTITY block.
+    // Re-match a still-default name to the voice's gender. Before the compile so it reaches the ## IDENTITY block.
     await applyGenderDefaultName(config);
 
     // Fetch profile context for location/industry-aware prompt compilation.
@@ -308,21 +251,15 @@ router.put(
     // hand-edited prompt (renameBusinessInConfig only rewrites a dirty one).
     lockMasterPrompt(config, conversion, req.user!);
 
-    // Renaming the business must carry through the text that baked the old name
-    // in — the onboarding-generated scenarios/FAQs/facts ("existing customer of
-    // Acme") kept naming the previous business on every live call. The DB holds
-    // the name this config was last saved under, which is the reliable baseline
-    // (the client may have renamed across several edits). Runs before the prompt
-    // compile so the corrected text flows into the prompt and the Vapi payload.
+    // Carry a rename through onboarding-generated text that baked the old name in. The DB name is the
+    // baseline (the client may have renamed across several edits). Before the compile so the prompt gets it.
     config = renameBusinessInConfig(config, storedBusinessName(conversion), config.identity?.businessName);
 
     // Use the conversion's frozen template snapshot (or the current global one for
     // brand-new conversions that haven't been snapshotted yet).
     const effectiveTemplate = conversion.promptTemplateSnapshot ?? getPromptTemplate();
 
-    // When the prompt hasn't been manually edited, keep it auto-compiled from the
-    // structured config. Manual edits are no longer length-capped — the owner can
-    // write as much custom guidance as they like.
+    // Auto-compile unless hand-edited. Manual edits are deliberately not length-capped.
     if (!config.advanced.masterPromptDirty) {
       config.advanced.masterPrompt = compileMasterPrompt(config, effectiveTemplate, compileCtx);
     }
@@ -336,28 +273,21 @@ router.put(
         ? await resolveElevenLabsVoiceId(config.identity.voiceId)
         : deepgramVoiceFor(config.identity.voiceId);
 
-    // Voice Bank gate: a user may only switch *to* a voice their plan's category
-    // includes (the default voice is always allowed). Trial / no-category plans keep
-    // the picker locked client-side; this guards an API bypass. A voice they already
-    // have (unchanged id) is grandfathered in so a save without a voice change works.
+    // Voice Bank gate against API bypass: only switching TO a voice is checked, so an
+    // unchanged (grandfathered) voice never blocks a save.
     if (config.identity.voiceId !== prevVoiceId) {
       if (!(await canSelectVoice(req.user!.sub, config.identity.voiceId))) {
         throw badRequest("This voice isn't available on your current plan.");
       }
     }
 
-    // Whether this agent is still missing a live assistant or a number. The admin
-    // (who never onboarded) lands here on their first save, so saving the AI Brain
-    // doubles as their onboarding: create the assistant + draw a pool number.
+    // Still missing an assistant or number? For the admin (never onboarded) this save doubles as onboarding.
     const profile = await (await requestTenant(req)).profile.findUnique({
       where: { userId: req.user!.sub },
       select: { receptionistNumber: true, mobile: true },
     });
 
-    // Backfill the customer's country for the regional style when onboarding
-    // never captured it (legacy configs, admins who skip the number step) —
-    // derive it from their AI number, else their own mobile. Explicit onboarding
-    // selection always wins; this only fills a blank.
+    // Backfill a blank country from the AI number, else their mobile. An explicit choice always wins.
     if (!normalizeCountry(config.identity.country)) {
       const iso = isoCountryForPhone(profile?.receptionistNumber) || isoCountryForPhone(profile?.mobile);
       if (iso) config.identity.country = iso;
@@ -373,12 +303,8 @@ router.put(
     const incomplete =
       conversion.status !== "approved" || !conversion.vapiAssistantId || !hasNumber;
 
-    // Admin self-provisioning guard. The admin's first AI-Brain save draws a pool
-    // number for the new assistant. Block the save until Twilio is configured AND
-    // an AVAILABLE pool number exists — otherwise we'd create/update a live Vapi
-    // assistant with no number behind it (an orphan that can't receive calls).
-    // Only gates the admin while still incomplete (no number yet); once they have
-    // a number, later saves just update the assistant and pass through.
+    // Admin's first save draws a pool number, so block it until Twilio is configured and a
+    // number is available — otherwise we'd create an orphan assistant that can't take calls.
     if (isAdmin && incomplete) {
       if (!isTwilioConfigured()) {
         throw badRequest(
@@ -405,10 +331,7 @@ router.put(
       },
     });
 
-    // The business name lives in two places — the agent config (AI Brain) and the
-    // account Profile (Settings / header). Editing it in the AI Brain used to leave
-    // the profile showing the old name, so mirror the change across on save. Only
-    // when it's actually set, so a blank AI-Brain field never wipes the profile.
+    // Mirror the business name to the Profile (it used to go stale there). Only when set, so a blank never wipes it.
     const newBusinessName = config.identity.businessName?.trim();
     if (newBusinessName) {
       await (await requestTenant(req)).profile
@@ -416,15 +339,11 @@ router.put(
         .catch(() => {});
     }
 
-    // Auto-deploy to Vapi so the live assistant always matches the saved config.
-    // Best-effort: a Vapi outage must never block saving the config, but surface
-    // why the live push failed so the user can retry instead of assuming it synced.
+    // Best-effort Vapi push: an outage must never block the save, but report why it failed.
     let vapiAssistantId = conversion.vapiAssistantId;
     let synced = false;
     let syncError: string | undefined;
-    // Whether the scheduler will finish the job (see services/vapiSync.ts). Only
-    // true when there IS a live assistant now running the previous config — that's
-    // the case where doing nothing would leave callers silently out of date.
+    // True only when a live assistant is now running the stale config (see services/vapiSync.ts).
     let syncQueued = false;
     if (integrationsStatus().vapi) {
       try {
@@ -449,9 +368,7 @@ router.put(
       } catch (e) {
         syncError = e instanceof Error ? e.message : "Vapi sync failed";
         console.error(`[agent] Vapi sync failed for user ${req.user!.sub}:`, syncError);
-        // A failed FIRST provision leaves no live agent, so nothing is stale and
-        // there is nothing to converge on — the account simply isn't live yet, and
-        // the response says so. Only queue a retry for an existing assistant.
+        // Only queue a retry for an existing assistant — a failed first provision leaves nothing stale.
         if (conversion.vapiAssistantId) {
           await markVapiSyncPending(await requestTenant(req), conversion.id, e);
           syncQueued = true;
@@ -479,10 +396,7 @@ router.put(
   }),
 );
 
-// Persist the agent config without touching Vapi — used by the guided onboarding
-// finish step to save the services/FAQs/facts it collected straight to the DB, so
-// they're there when the AI Brain first hydrates. Provisioning + the live deploy
-// happen later (on subscribe / a real Save), so this stays a pure DB write.
+// Save the config without provisioning (onboarding finish step). Provisioning happens on subscribe / a real Save.
 router.post(
   "/persist",
   requireAuth,
@@ -493,10 +407,7 @@ router.post(
     if (config.identity) {
       config.identity.assistantName = clampName(config.identity.assistantName);
       config.identity.businessName = clampName(config.identity.businessName);
-      // The greeting stores the business name baked in, so renaming the business
-      // used to leave the agent greeting callers with the OLD name on every live
-      // call. Re-derive it here (only for greetings we generated — a custom one is
-      // kept as-is) so the fix persists and flows into the prompt + Vapi payload.
+      // The greeting bakes the business name in, so re-derive generated greetings on rename (custom ones are kept).
       config.identity.greetingMessage = resolveGreeting(
         config.identity.greetingMessage,
         config.identity.businessName,
@@ -508,9 +419,7 @@ router.post(
           )
         : [];
     }
-    // Give a still-default assistant a gender-matched name that suits its picked
-    // voice (admin-configurable). Runs before the prompt is compiled so the new
-    // name flows into the ## IDENTITY block.
+    // Gender-matched default name, before the compile so it reaches the ## IDENTITY block.
     await applyGenderDefaultName(config);
     const compileCtxPersist = await getCompileContext(req.user!.sub);
     const conversionPersist = await getConversion(req.user!.sub);
@@ -536,10 +445,7 @@ router.post(
         dataCaptureFields: config.knowledge.captureFields as object,
       },
     });
-    // If a live assistant already exists, push this config to it too — otherwise
-    // content collected here (onboarding FAQs/scenarios) sits in the DB while the
-    // live agent keeps answering with its old prompt until a manual Save. Best-
-    // effort: a Vapi outage must never fail the persist itself.
+    // Push to an existing live assistant too, or it keeps its old prompt until a manual Save. Best-effort.
     if (conversion.vapiAssistantId && integrationsStatus().vapi) {
       try {
         const id = await upsertAssistant(config, conversion.vapiAssistantId);
@@ -555,9 +461,7 @@ router.post(
           `[agent] persist: Vapi sync failed for user ${req.user!.sub}:`,
           e instanceof Error ? e.message : e,
         );
-        // This endpoint has no UI to report a failure to (onboarding just moves on),
-        // so the retry queue is the only thing standing between an outage here and
-        // an agent permanently missing the FAQs onboarding just collected.
+        // No UI to report to here (onboarding moves on), so the retry queue is the only safety net.
         await markVapiSyncPending(await requestTenant(req), conversion.id, e);
       }
     }
@@ -614,9 +518,7 @@ router.post(
   requireAuth,
   requireCustomerAccount,
   asyncHandler(async (req, res) => {
-    // Pushes the config to Vapi, CREATING the assistant when there isn't one yet
-    // — so it has to respect the same entitlement rule as provisionAgentForUser
-    // rather than provisioning any authenticated account that calls it.
+    // This CREATES the assistant when missing, so it must follow the same entitlement rule as provisionAgentForUser.
     if (!(await canProvisionForUser(req.user!.sub, req.user!.role)))
       throw badRequest("Your AI assistant goes live once you choose a plan.");
     const conversion = await getConversion(req.user!.sub);
@@ -628,9 +530,7 @@ router.post(
         { ownerId: req.user!.sub },
       );
     } catch (e) {
-      // This one reports the failure to the caller, but an explicit "make it live"
-      // that dies on an outage should still be finished for them in the background
-      // rather than needing a second manual attempt.
+      // Reports the failure, but still queue a retry so an outage doesn't need a second manual attempt.
       if (conversion.vapiAssistantId) await markVapiSyncPending(await requestTenant(req), conversion.id, e);
       throw e;
     }
@@ -649,16 +549,9 @@ router.post(
   requireCustomerAccount,
   asyncHandler(async (req, res) => {
     const conversion = await getConversion(req.user!.sub);
-    // The browser places this call itself with the public Vapi key, so this
-    // payload IS the authorisation — once handed over, the server is no longer in
-    // the call path and can't stop anything. A blocked entitlement therefore has
-    // to be refused outright rather than merely capped: getCallDurationCap below
-    // would still return a working (10-second) assistant, and nothing forces the
-    // client to report the call back for metering.
-    //
-    // Deliberately not the validateTrial middleware — that calls
-    // reconcileSubscription on every request (a Stripe round-trip), and parallel
-    // reconciles have already caused a double-charge once.
+    // This payload IS the authorisation (the browser places the call itself), so a blocked entitlement
+    // must be refused outright, not capped. Not validateTrial: its per-request reconcileSubscription
+    // is a Stripe round-trip and parallel reconciles once double-charged.
     if (!isAdminRole(req.user!.role)) {
       const ent = await getEntitlement(req.user!.sub);
       if (ent.blocked) {
@@ -667,10 +560,7 @@ router.post(
         return;
       }
     }
-    // Compile from the caller's CURRENT AI Brain draft when the client sends it,
-    // so a test call still reflects unsaved edits (what the old client-side build
-    // did). Never persisted — it only shapes this one-off test payload. Falls back
-    // to the stored config when absent or obviously not an AgentConfig.
+    // Use the unsaved AI Brain draft when sent so a test call reflects it. Never persisted.
     const draft = (req.body as { agentConfig?: AgentConfig } | undefined)?.agentConfig;
     const config = (
       draft?.identity && draft?.advanced && draft?.knowledge && draft?.rules
@@ -692,10 +582,7 @@ router.post(
         systemPrompt,
         booking,
         infoSms,
-        // A web test call runs on an INLINE assistant, so whatever ships in this
-        // payload is the whole config — including the per-call ceiling. Stamped
-        // here so the browser is handed a capped assistant rather than being
-        // trusted to impose the cap on itself.
+        // Inline assistant: this payload is the whole config, so stamp the cap here rather than trusting the browser.
         maxDurationSeconds: await getCallDurationCap(req.user!.sub),
       }),
     });

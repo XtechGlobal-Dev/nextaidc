@@ -1,23 +1,5 @@
-/**
- * A monotonic counter that identifies the CURRENT signed-in session. It bumps
- * on every account change — login, logout, and admin impersonation enter/exit —
- * via resetUserStores().
- *
- * Why it exists: a store's async `hydrate()` (or a background poll / SSE refresh)
- * can be fired under account A, then resolve AFTER account B has signed in on the
- * same tab. Without a guard, A's response lands in B's freshly-reset store and
- * the UI flashes A's data for a second or two until B's own hydrate overwrites it.
- *
- * Usage: snapshot the epoch before the request, then drop the write if it changed
- * by the time the response arrives —
- *
- *   hydrate: async () => {
- *     const mark = sessionMark();
- *     const data = await api.thing.get();
- *     if (sessionChanged(mark)) return; // response belongs to a previous account
- *     set({ ... });
- *   }
- */
+// Monotonic session counter, bumped on every account change via resetUserStores(). A hydrate/poll fired
+// under account A can resolve after B signs in and flash A's data; snapshot sessionMark() before the await, drop the write if sessionChanged().
 let epoch = 0;
 
 /** Advance to a new session. Called by resetUserStores() on every account change. */

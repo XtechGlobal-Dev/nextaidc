@@ -4,21 +4,8 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { isChunkLoadError, reloadForStaleChunk } from "@/lib/chunkReload";
 
-/**
- * `errorElement` for the data router. Without it, a route render error or a stale
- * lazy-chunk import failure (common right after a deploy) makes React Router show
- * its OWN unstyled default page — raw black-on-white error text, no app CSS — for
- * a moment before anything else happens. That flash is what users were seeing.
- *
- * The top-level <ErrorBoundary> in main.tsx can't help here: the data router
- * catches these errors before they reach a React error boundary, so the fallback
- * has to live on the route via `errorElement`.
- *
- * Behaviour:
- *  - Stale-chunk failure → reload ONCE to pull the fresh build (guarded against
- *    loops by reloadForStaleChunk), showing a neutral spinner, not an error.
- *  - Anything else → a branded "Something went wrong" card with a Reload action.
- */
+/** Route `errorElement`. The data router swallows errors before any React error boundary, so without this
+ *  users saw React Router's unstyled default page flash. Stale chunk reloads once (spinner); else a Reload card. */
 export function RouteError() {
   const error = useRouteError();
   const chunk = isChunkLoadError(error);

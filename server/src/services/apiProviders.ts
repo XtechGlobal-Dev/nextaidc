@@ -1,16 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Provider registry — the one place that knows what a third-party API
- *  *is*, as opposed to how it has behaved (services/apiCenter.ts) or
- *  whether we hold its keys (services/settings.ts).
- *
- *  Adding a provider to the API Center is a matter of adding a row here:
- *  the grid, the category groups, the cost model, the status poller, the
- *  quota maths and the drawer are all driven off this table. No screen
- *  needs to change to support the next dozen vendors.
- *
- *  Deliberately static and dependency-free so it can be imported from a
- *  route, a service or a script without pulling in Prisma.
- * ------------------------------------------------------------------ */
+// Provider registry: what each third-party API *is*. Adding a row here is all the API Center
+// needs for a new vendor. Kept static and dependency-free so scripts can import it without Prisma.
 
 export type ApiCategory =
   | "ai"
@@ -73,12 +62,7 @@ export const AUTH_LABEL: Record<AuthMethod, string> = {
   none: "Unauthenticated",
 };
 
-/**
- * What one billable unit is for this vendor. Cost is always
- * `units × unitCostUsd`; for `request` providers `units` is simply the call
- * count, which is why a flat per-call price is a usable estimate there and a
- * poor one for token- or minute-priced vendors (see {@link ProviderDef.costConfidence}).
- */
+/** One billable unit. Cost is always units x unitCostUsd; for `request` providers units = call count, so flat pricing is only a rough estimate for usage-priced vendors. */
 export type BillingUnit =
   | "request"
   | "1k_tokens"
@@ -100,15 +84,7 @@ export const UNIT_LABEL: Record<BillingUnit, string> = {
   none: "not metered",
 };
 
-/**
- * How much to trust the cost figure this provider produces.
- *  - `metered`   — the tracer records real billable units (tokens, characters,
- *                  seconds), so cost is arithmetic, not guesswork.
- *  - `estimated` — cost is `calls × list price`. Right order of magnitude for
- *                  flat-rate endpoints, wrong for anything usage-priced.
- *  - `none`      — no price is known; the UI shows "—", never a zero that reads
- *                  as "this is free".
- */
+/** metered = tracer records real units; estimated = calls x list price; none = no price known (UI shows a dash, never a zero that reads as "free"). */
 export type CostConfidence = "metered" | "estimated" | "none";
 
 /** Response headers a vendor uses to advertise rate-limit headroom, when it does. */
@@ -127,30 +103,18 @@ export interface ProviderDef {
   blurb: string;
   /** Id in services/settings.ts INTEGRATIONS, when the keys live there. */
   integrationId?: string;
-  /**
-   * Whether this platform actually routes traffic through the vendor today.
-   * Unwired rows still render (greyed, "Not configured") so the roadmap is
-   * visible and so adding the integration later needs no UI work.
-   */
+  /** Whether we route traffic through this vendor today. Unwired rows still render greyed so wiring one up later needs no UI work. */
   wired: boolean;
   authMethod: AuthMethod;
   docsUrl: string;
   dashboardUrl?: string;
-  /**
-   * statuspage.io v2 summary endpoint. Polled by services/providerStatus.ts;
-   * a vendor without one (or whose endpoint moves) reports "unknown" rather
-   * than a fabricated "operational".
-   */
+  /** statuspage.io v2 summary endpoint. Missing or moved means "unknown", never a fabricated "operational". */
   statusApiUrl?: string;
   statusPageUrl?: string;
   /** Vendor API version this codebase pins/targets, when it pins one. */
   apiVersion?: string;
   unit: BillingUnit;
-  /**
-   * Published list price at the time of writing, in USD, used only as the
-   * seed for the admin-editable value in api_provider_settings. Treated
-   * throughout the UI as an estimate to confirm, never as billing truth.
-   */
+  /** List price at time of writing (USD). Only seeds the admin-editable api_provider_settings value; an estimate, never billing truth. */
   defaultUnitCostUsd?: number;
   costConfidence: CostConfidence;
   rateLimitHeaders?: RateLimitHeaders;
@@ -534,12 +498,7 @@ export function providerDef(id: string): ProviderDef | undefined {
   return BY_ID.get(id);
 }
 
-/**
- * A definition for any provider key, including ones that only ever show up in
- * the traffic log ("unknown", a vendor added to a tracer before this table).
- * Returning a synthesised row rather than `undefined` keeps every consumer —
- * grid, drawer, cost maths — free of null checks.
- */
+/** Definition for any provider key, synthesising one for ids seen only in the traffic log so consumers need no null checks. */
 export function providerDefOrFallback(id: string): ProviderDef {
   return (
     BY_ID.get(id) ?? {

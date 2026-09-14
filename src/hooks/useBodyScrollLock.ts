@@ -1,14 +1,7 @@
 import { useEffect } from "react";
 
-/**
- * Locks <body> scroll while `locked` is true — for custom overlays/drawers
- * (mobile sidebar, slide-over panels, custom modals) that don't already trap
- * scroll the way Radix dialogs/sheets do.
- *
- * Reference-counted so several overlays open at once (or overlapping mount/unmount
- * transitions) never clobber each other: the original overflow is only restored
- * once the last lock is released.
- */
+// Body scroll lock for custom overlays that Radix doesn't trap. Reference-counted so
+// overlapping overlays don't clobber each other — overflow is restored on the last release.
 let lockCount = 0;
 let savedOverflow = "";
 let savedPaddingRight = "";

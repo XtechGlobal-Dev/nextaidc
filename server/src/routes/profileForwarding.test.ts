@@ -2,13 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  End-to-end test of PATCH /api/profile's call-forwarding contract:
- *  forwardingMode passthrough, the forwardingConfirmed boolean → the
- *  forwardingConfirmedAt timestamp mapping, and enum validation.
- *  Real Express + real route handler; env/prisma/auth are stubbed so
- *  the import graph never touches a real DB.
- * ------------------------------------------------------------------ */
+// PATCH /api/profile forwarding contract: mode passthrough, confirmed boolean →
+// confirmedAt mapping, enum validation. Real Express; env/prisma/auth stubbed.
 
 const cap = vi.hoisted(() => ({ data: null as Record<string, unknown> | null }));
 

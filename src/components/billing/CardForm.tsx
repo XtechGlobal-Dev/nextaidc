@@ -22,9 +22,7 @@ interface PaymentFormProps extends CardAnalyticsProps {
   onDone: () => void;
   onReject: () => void;
   submitLabel?: string;
-  /** The user deliberately bought a plan, so charge and activate on confirm.
-   *  Every caller does this today; the flag stays explicit so a future
-   *  store-a-card-only flow can opt out without changing the default. */
+  /** Charge and activate on confirm. Kept explicit so a future store-card-only flow can opt out. */
   activateNow?: boolean;
 }
 
@@ -51,26 +49,19 @@ function PaymentForm({
       return;
     }
 
-    // Confirm the saved card belongs to this account. Card uniqueness is no longer
-    // enforced (the same card may fund multiple accounts — sign-up is gated by a
-    // unique mobile number instead), so this only rejects a genuinely bad method.
+    // Card uniqueness isn't enforced any more (sign-up is gated by mobile number), so this only rejects a bad method.
     const pmId =
       typeof setupIntent?.payment_method === "string"
         ? setupIntent.payment_method
         : setupIntent?.payment_method?.id;
-    // No payment method id means the SetupIntent didn't give us a card to confirm,
-    // so nothing was activated server-side. This used to fall through to the
-    // success toast — the user was told their plan was live when the server had
-    // never been told anything at all.
+    // No pm id = nothing activated server-side. This used to fall through to the success toast.
     if (!pmId) {
       toast.error("We couldn't read your card details. Please try again.");
       setBusy(false);
       return;
     }
 
-    // The server is the only thing that knows whether the card was actually
-    // billed, so the toast follows its answer — it can never claim a trial
-    // started when the user was in fact charged, or vice versa.
+    // Only the server knows whether the card was billed, so the toast follows its answer.
     let charged: boolean;
     try {
       const res = await api.billing.confirmCard(pmId, activateNow);
@@ -80,18 +71,13 @@ function PaymentForm({
         err instanceof ApiError ? err.message : "Could not verify your card. Please try another.",
       );
       setBusy(false);
-      // A declined charge leaves the subscription untouched server-side, so the
-      // user can simply enter another card here. Only bounce them back to the
-      // start when there's no usable subscription to retry against.
+      // A declined charge leaves the subscription intact, so only bounce when there's nothing to retry against.
       if (!activateNow) onReject();
       return;
     }
 
-    // A named event for "the card was accepted", rather than leaning on GTM's
-    // generic `gtm.formSubmit` auto event. That one fires the moment ANY form on
-    // the page is submitted — including a card that goes on to be declined — so
-    // it over-counts and can't be told apart from other forms. This fires once,
-    // only after Stripe confirmed the card AND the server accepted it.
+    // Named event instead of GTM's `gtm.formSubmit`, which fires for any form (declined cards included).
+    // Fires once, only after Stripe and the server both accepted.
     trackEvent("card_added", {
       ...(plan ? planAnalyticsParams(plan) : {}),
       plan_context: context,
@@ -99,9 +85,7 @@ function PaymentForm({
       charged,
     });
 
-    // Never claims a trial "started": the free trial begins at signup (see the
-    // card-less trial branch in getEntitlement), so saying it starts here — after
-    // the user picked a plan and entered a card — was both wrong and confusing.
+    // Never say a trial "started" here; the trial begins at signup (see getEntitlement).
     toast.success(charged ? "Payment successful — your plan is active 🎉" : "Card saved 🎉");
     onDone();
   }
@@ -132,12 +116,7 @@ export interface CardFormProps extends CardAnalyticsProps {
   activateNow?: boolean;
 }
 
-/**
- * The card-collection step, shared by the /subscribe page and the in-dashboard
- * number-setup wizard. Wraps Stripe Elements around the SetupIntent, confirms the
- * card, and enforces the one-card-per-account rule. The parent starts the
- * subscription (to get `clientSecret`) and decides what happens on done/reject.
- */
+/** Card-collection step around a Stripe SetupIntent. Parent starts the subscription (for `clientSecret`) and owns done/reject. */
 export function CardForm({
   clientSecret,
   onDone,

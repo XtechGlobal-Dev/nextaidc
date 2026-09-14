@@ -67,14 +67,8 @@ import {
   saveBrandIntegrations,
 } from "../services/settings.js";
 
-/* ------------------------------------------------------------------ *
- *  Super-admin only: the white-label brand (tenant) control panel.
- *
- *  Everything here is gated by requireSuperAdmin, not requireAdmin — a
- *  brand ADMIN runs their own tenant but must never be able to create,
- *  inspect or re-theme another one, nor read the messaging credentials
- *  behind any brand.
- * ------------------------------------------------------------------ */
+// White-label brand (tenant) control panel. requireSuperAdmin, not requireAdmin — a brand ADMIN must
+// never create, inspect or re-theme another tenant, nor read any brand's messaging credentials.
 
 const router = express.Router();
 router.use(requireAuth, requireSuperAdmin);
@@ -109,36 +103,17 @@ function isAssetSlot(v: string): v is AssetSlot {
   return Object.prototype.hasOwnProperty.call(ASSET_SLOTS, v);
 }
 
-/**
- * The address a brand's users sign in at.
- *
- * Its own subdomain by default — `acme.hello22.ai` — which the `*.<platform
- * domain>` wildcard record and its wildcard certificate already cover, so a new
- * brand is reachable the moment it is created with no DNS to add and no
- * certificate to issue. A brand whose vanity domain has been VERIFIED uses that
- * instead (see brandOrigin); a domain still waiting on the client's records
- * keeps pointing here, because a link to a hostname that doesn't resolve is
- * worse than a link to the one that does.
- */
+/** Sign-in address: the wildcard-covered subdomain by default, the vanity domain only once VERIFIED — an unresolved hostname is worse than the one that works. */
 export function brandLoginUrl(brand: Pick<Brand, "slug" | "customDomain" | "domainStatus">): string {
   return brandOrigin(brand as Brand) ?? `${appBaseUrl}/${brand.slug}`;
 }
 
-/**
- * The path-routed address — `app.hello22.ai/acme`.
- *
- * Kept alongside the subdomain rather than replaced by it: it needs no DNS at
- * all, so it is the address that still works while a wildcard record is
- * propagating, on a preview deployment, or in local development where there is
- * no wildcard to resolve against.
- */
+/** Path-routed address (`app.hello22.ai/acme`). Needs no DNS, so it still works on previews and in local dev. */
 export function brandPathUrl(slug: string): string {
   return `${appBaseUrl}/${slug}`;
 }
 
-/* -------------------------------- Catalog -------------------------------- *
- *  Declared BEFORE /:id so "catalog" and "slug-check" aren't read as brand ids.
- * ------------------------------------------------------------------------- */
+// Catalog. Declared BEFORE /:id so "catalog" and "slug-check" aren't read as brand ids.
 
 /** Colour presets + font catalog the brand editor's pickers are built from. */
 router.get(
@@ -179,16 +154,8 @@ async function brandCounts(brandIds: string[]): Promise<Map<string, BrandView["c
   return directoryCounts(brandIds);
 }
 
-/**
- * What still stands between this brand and "finished" — the gaps an operator
- * otherwise only finds by opening every tab. Each item names the tab that
- * closes it. A brand with no vanity domain has no domain item at all: the
- * subdomain is live on its own, so there is nothing to chase.
- */
-/**
- * What the brand's page shows about its database — no connection strings, no
- * live round-trip (that's `checkBrandDatabase`, behind its own endpoint).
- */
+/** Setup gaps, each naming the tab that closes it. No vanity domain means no domain item — the subdomain is live on its own. */
+/** Database summary for the brand page — no connection strings, no live round-trip (that's checkBrandDatabase). */
 export async function tenantDbSummary(brandId: string) {
   const row = await prisma.brandDatabase.findUnique({ where: { brandId } });
   const latestVersion = latestTenantMigration();
@@ -310,9 +277,7 @@ router.get(
   }),
 );
 
-// Validate the hex here rather than leaning on a bare length cap: a length
-// error ("at most 9 characters") is meaningless to someone who typed "red", and
-// it fires before the service's friendlier message ever gets a chance to.
+// Validate hex here: a bare length error is meaningless to someone who typed "red" and fires before the service's friendlier one.
 const hexColor = z
   .string()
   .trim()
@@ -326,9 +291,7 @@ const themeSchema = {
   darkModeDefault: z.boolean().optional(),
 };
 
-// Shape only — the service (brandSetup.ts) does the real validation: URL
-// schemes, ISO countries, IANA zones, the module catalogue. Kept loose here so
-// one message, not two layers of them, tells the operator what was wrong.
+// Shape only — brandSetup.ts does the real validation, so the operator gets one message, not two layers.
 const setupSchema = {
   legalName: z.string().trim().max(200).optional(),
   legalAddress: z.string().trim().max(500).optional(),
@@ -362,9 +325,7 @@ const setupSchema = {
 const brandBodySchema = z.object({
   name: z.string().trim().min(2, "Brand name must be at least 2 characters").max(60),
   slug: z.string().trim().max(40).optional().default(""),
-  // Optional/nullable here because this schema is shared with PATCH (which
-  // omits both fields entirely — see below). POST enforces its own
-  // required version so every brand is created with a claimed domain.
+  // Optional here because the schema is shared with PATCH; POST enforces its own required version.
   customDomain: z.string().trim().max(120).optional().nullable(),
   status: z.enum(["active", "suspended"]).optional(),
   // The create form asks for this as "About / Description" — a paragraph, not
@@ -394,10 +355,7 @@ router.post(
   "/brands",
   asyncHandler(async (req, res) => {
     const body = brandBodySchema.parse(req.body);
-    // The address picker in the "New brand" wizard enforces "exactly one of
-    // subdomain or custom domain" client-side; a brand's address is set once,
-    // at creation, and never editable afterward (slug and customDomain are
-    // both locked out of PATCH below).
+    // A brand's address is set once at creation; slug and customDomain are locked out of PATCH.
 
     // Check the admin's email BEFORE creating the brand — otherwise a duplicate
     // address leaves an orphan tenant behind that the operator has to clean up.
@@ -415,18 +373,13 @@ router.post(
       req.user!.sub,
     );
 
-    // Register a vanity domain with the edge straight away, so the certificate
-    // is already waiting by the time the client publishes their records. The
-    // brand is usable on its subdomain regardless, so a failure here is
-    // reported alongside the created brand rather than failing the creation.
+    // Register with the edge now so the cert is waiting when the client publishes DNS. Failure is reported, not fatal — the subdomain works regardless.
     let domainEdge = { ok: true, message: "" };
     if (brand.customDomain) domainEdge = await attachDomainToEdge(brand.customDomain);
 
     let adminCreated: { id: string; email: string; emailSent: boolean } | null = null;
     let adminError = "";
-    // The admin lives in the brand's own database, which createBrand has just
-    // provisioned. If that failed, the brand stands (with Retry on its page)
-    // and the admin is added from the Team tab once the database is ready.
+    // The admin lives in the just-provisioned brand DB. If that failed, the brand stands (Retry on its page) and the admin is added later.
     const tenant = body.admin ? await tenantFor(brand.id).catch(() => null) : null;
     if (body.admin && !tenant) {
       adminError =
@@ -513,10 +466,7 @@ router.get(
 router.patch(
   "/brands/:id",
   asyncHandler(async (req, res) => {
-    // Subdomain and custom domain are set once at creation and locked from
-    // then on — omitted here entirely rather than merely ignored, so a caller
-    // that tries to sneak them through gets a clear rejection instead of a
-    // silently-dropped field.
+    // slug/customDomain are locked after creation — omitted (not ignored) so sneaking them in gets a clear rejection.
     const body = brandBodySchema.partial().omit({ admin: true, slug: true, customDomain: true }).parse(req.body);
     const brand = await updateBrand(req.params.id, body);
     void audit({
@@ -564,17 +514,8 @@ router.delete(
   }),
 );
 
-/* ---------------------------- Brand domains ------------------------------- *
- *  A brand's SUBDOMAIN needs nothing here — the wildcard record and its
- *  wildcard certificate already cover it, so it serves the moment the brand
- *  row exists. These endpoints exist only for a domain the CLIENT owns,
- *  where the DNS is theirs to publish and ours only to check.
- *
- *  The division of labour is the point of the whole feature: the operator
- *  types a hostname, we mint the proof token, register the hostname with the
- *  edge and hand back two copy-paste records. The brand client's entire job
- *  is pasting those two records into their registrar.
- * ------------------------------------------------------------------------- */
+// Brand domains. Only for a CLIENT-owned vanity domain (the subdomain is wildcard-covered and needs nothing here):
+// we mint the proof token, register with the edge and hand back two records; the client pastes them into their registrar.
 
 async function brandOr404(id: string): Promise<Brand> {
   const brand = await prisma.brand.findUnique({ where: { id } });
@@ -582,22 +523,12 @@ async function brandOr404(id: string): Promise<Brand> {
   return brand;
 }
 
-/**
- * What the Domain panel needs beyond the check itself: where the brand answers
- * today, its always-live fallbacks, and where its API lives — which is the same
- * place for every brand. A brand's domain serves the SPA only; the API, the
- * provider webhooks, the Google OAuth callback and the public call pages all
- * stay on the platform's API host, so there is nothing API-side to set up and
- * the panel can say so.
- */
+/** Domain panel payload. A brand domain serves the SPA only — API, webhooks and OAuth stay on the platform host, so there's nothing API-side to set up. */
 function domainPayload(brand: Brand) {
   return {
     origin: brandOrigin(brand),
     platformHost: platformSubdomainHost(brand.slug),
-    // Always the wildcard subdomain, even once a custom domain is verified and
-    // `origin` has moved on to it — this is what the "Platform subdomain" card
-    // links to, and it must stay live regardless. Carries the dev frontend's
-    // port on the loopback apex, where a bare host has nothing to answer it.
+    // Always the wildcard subdomain, even after a custom domain is verified — it must stay live. Carries the dev port on loopback.
     platformUrl: platformSubdomainUrl(brand.slug),
     pathUrl: brandPathUrl(brand.slug),
     apiOrigin: platformApiOrigin(),
@@ -606,17 +537,8 @@ function domainPayload(brand: Brand) {
   };
 }
 
-/**
- * The records to publish and where the claim currently stands.
- *
- * Plain GET is cheap — stored state, no DNS query — so it can be polled. With
- * `?live=1` a PENDING claim is checked for real first: only the verdict is
- * stored, not which record produced it, so a panel painted from stored state
- * would show both records as outstanding even when one has already landed.
- * The live check persists like any other but is not audited — to the operator
- * it is a read — and falls back to the stored state if it cannot run, so the
- * panel always opens.
- */
+/** Records to publish + claim status. Plain GET is stored state (pollable); `?live=1` really checks a PENDING claim first
+ *  (stored state can't say which record landed), persists but isn't audited, and falls back to stored state on failure. */
 router.get(
   "/brands/:id/domain",
   asyncHandler(async (req, res) => {
@@ -637,29 +559,15 @@ router.get(
 
 const domainSchema = z.object({ domain: z.string().trim().max(253) });
 
-/**
- * Claim (or replace, or clear) a brand's vanity domain.
- *
- * Registering the hostname with the edge happens HERE rather than at
- * verification time, and deliberately so: the certificate cannot be issued
- * until the hostname is known to the edge AND the client's DNS points at it,
- * and the client will point their DNS as soon as we hand them the records.
- * Doing our half first means the two arrive in the right order and the
- * certificate lands on its own, with nobody waiting on anybody.
- *
- * An edge failure is reported, not thrown: the claim itself is valid, the
- * records are still correct, and the operator can retry from the same panel.
- */
+/** Claim a vanity domain. Edge registration happens HERE, not at verify: the cert needs the edge to know the host before
+ *  the client's DNS points at it, and they'll point DNS as soon as we hand over records. Edge failure is reported, not thrown. */
 router.put(
   "/brands/:id/domain",
   asyncHandler(async (req, res) => {
     const { domain } = domainSchema.parse(req.body);
     const before = await brandOr404(req.params.id);
 
-    // Locked once claimed: a brand's custom domain is set once, at creation,
-    // and this route only still exists to let a brand created before the
-    // requirement claim its one domain. Once one is on file, neither
-    // replacing nor clearing it is allowed here.
+    // Locked once claimed. This route only survives so brands created before the requirement can claim their one domain.
     if (before.customDomain) {
       throw badRequest(
         "This brand's custom domain is locked. Delete and recreate the brand to change it.",
@@ -692,21 +600,14 @@ router.put(
   }),
 );
 
-/**
- * Check the domain for real — live DNS lookups plus the edge's own verdict —
- * and persist the result. This is what promotes a claim to `verified`, at
- * which point every link this brand sends starts using it.
- */
+/** Live DNS + edge check, persisted. This is what promotes a claim to `verified`, after which every brand link uses it. */
 router.post(
   "/brands/:id/domain/verify",
   asyncHandler(async (req, res) => {
     const brand = await brandOr404(req.params.id);
     if (!brand.customDomain) throw badRequest("This brand has no custom domain to verify.");
 
-    // Re-attach on every verify. The usual reason a check fails is that the
-    // hostname was never registered with the edge — the token was missing when
-    // it was claimed, or someone removed it there — and silently fixing that is
-    // better than telling the operator to go and do it by hand.
+    // Re-attach on every verify — the usual failure is a hostname never registered with the edge, so quietly fix it.
     const edge = await attachDomainToEdge(brand.customDomain);
     const check = await verifyBrandDomain(brand);
 
@@ -725,22 +626,14 @@ router.post(
     res.json({
       ...check,
       ...domainPayload(fresh),
-      // The check's own edge verdict stands. Registering the hostname is a
-      // side errand: a failure there is reported, but must not overwrite what
-      // the edge itself said — with no host token the attach "fails" on every
-      // run while the check (rightly) skips the edge, and a domain that had
-      // just been promoted to verified would read as stuck on its certificate.
+      // The check's edge verdict stands; an attach failure must not overwrite it (with no host token the
+      // attach "fails" every run and a freshly verified domain would read as stuck on its cert).
       edgeMessage: edge.message,
     });
   }),
 );
 
-/* ---------------------------- Pricing & wallet ---------------------------- *
- *  The platform owner's view of a brand's addons and of what the platform
- *  owes it. The brand's own admin reaches the same data through
- *  routes/brandAdmin.routes.ts, scoped to its brand and subject to the
- *  brand's editability and cap; the super admin here is subject to neither.
- * ------------------------------------------------------------------------- */
+// Pricing & wallet, platform-owner view. Unlike brandAdmin.routes.ts, the super admin here isn't subject to the brand's editability or cap.
 
 router.get(
   "/brands/:id/pricing",
@@ -1155,11 +1048,7 @@ router.post(
   }),
 );
 
-/** Remove an admin from the brand. Every account belongs to a brand, so there
- *  is no "untenanted" state to move them to: leaving the brand means the
- *  account goes. A brand admin has no customer workspace (no agent, no
- *  number), so the plain delete is the whole teardown — the same as the staff
- *  and reseller deletes. */
+/** Remove an admin from the brand. No "untenanted" state exists, so the account goes; with no workspace the plain delete is the whole teardown. */
 router.delete(
   "/brands/:id/admins/:userId",
   asyncHandler(async (req, res) => {
@@ -1183,13 +1072,7 @@ router.delete(
   }),
 );
 
-/* ------------------------------------------------------------------ *
- *  Dedicated tenant databases (data residency).
- *
- *  SUPER_ADMIN only, and deliberately not exposed to a brand's own admins:
- *  moving a tenant's data between regions is a contractual act, not a setting
- *  a customer toggles. Every route here audits.
- * ------------------------------------------------------------------ */
+// Dedicated tenant databases (data residency). SUPER_ADMIN only — moving data between regions is contractual, not a toggle. Every route audits.
 
 /** Regions a tenant project can be created in — read live from Neon rather than
  *  hardcoded, so the picker can't offer a region the account cannot use. */
@@ -1213,24 +1096,14 @@ router.get(
       res.json(summary);
       return;
     }
-    // The connection strings are the keys to a customer's entire call history.
-    // They are never returned, not even to a super admin, not even redacted.
-    // The stored error is what provisioning last failed with; the health
-    // check's is whether the database answers right now. Both matter and they
-    // are different questions, so neither overwrites the other.
+    // Connection strings are never returned, not even to a super admin, not even redacted.
+    // Stored error = last provisioning failure; health error = does it answer now. Neither overwrites the other.
     const health = await checkBrandDatabase(req.params.id);
     res.json({ ...summary, health });
   }),
 );
 
-/**
- * Retry a brand's database setup.
- *
- * Long-running and inline on purpose — the operator pressing Retry is watching,
- * and a silent background failure would leave a brand nobody notices is stuck.
- * Resumes whatever the last attempt got as far as; never makes a second
- * database.
- */
+/** Retry database setup. Inline on purpose (the operator is watching); resumes the last attempt and never makes a second database. */
 router.post(
   "/brands/:id/tenant-db",
   asyncHandler(async (req, res) => {
@@ -1265,13 +1138,7 @@ router.post(
   }),
 );
 
-/* -------------------------- Support departments --------------------------- *
- *  Which queues a brand's customers can file into is the platform's call: the
- *  super admin creates, renames, orders and retires them from here, and the
- *  brand's admin only decides who works each one (from their own inbox). A
- *  brand starts with the queues the platform gives it — General and Sales —
- *  and asks for more. Every row here is lane `support`, owned by the brand.
- * -------------------------------------------------------------------------- */
+// Support departments. Which queues exist is the platform's call; the brand admin only staffs them. All rows are lane `support`, owned by the brand.
 
 /** A brand's customer queues live in that brand's own database (phase 4);
  *  managing them from here means opening it. */

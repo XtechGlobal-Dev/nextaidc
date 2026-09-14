@@ -1,18 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Token type isolation.
- *
- *  Every token (login, impersonation, oauth_state, unsubscribe) is signed
- *  with the SAME JWT_SECRET, so a valid signature alone does NOT prove a
- *  token was minted for the purpose it's being used for. Each verifier must
- *  additionally check the token's `kind`.
- *
- *  Regression guard for the account-takeover bug: the non-expiring
- *  unsubscribe token in an email link was accepted as a full session token,
- *  because verifyToken checked the signature but not the kind. Anyone holding
- *  an admin's unsubscribe link could log in as that admin, forever.
- * ------------------------------------------------------------------ */
+// Token type isolation: every token shares JWT_SECRET, so each verifier must check `kind`. Regression
+// guard for the account takeover where a non-expiring unsubscribe link verified as a full login.
 
 vi.mock("../env.js", () => ({
   // Brand hosts resolve against these; the real module exports them, so a

@@ -22,19 +22,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuthStore } from "@/stores/useAuthStore";
 import type { AuthUser } from "@/lib/api";
 
-/* A brand ADMIN holds both the Admin nav and a real customer workspace. Listing
- * both side by side doubled the sidebar, so for admins the customer modules
- * fold into a single "User Dashboard" entry that opens a panel over the
- * sidebar. These tests pin that rule per role:
- *
- *   - ADMIN        → one "User Dashboard" button; the modules only appear
- *                    inside the panel it opens, and the panel closes again
- *                    from its close button, Escape, a click outside, or a
- *                    navigation.
- *   - USER         → the modules stay inline, no folding.
- *   - STAFF /      → no customer workspace at all, so neither the button nor
- *     SUPER_ADMIN    the modules.
- */
+// For ADMINs the customer modules fold into one "User Dashboard" panel (listing both navs doubled the
+// sidebar). USER keeps them inline; STAFF/SUPER_ADMIN get neither.
 
 const CUSTOMER_MODULES = [
   "Dashboard",

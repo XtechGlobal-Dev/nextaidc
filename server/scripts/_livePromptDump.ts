@@ -3,25 +3,8 @@ import { loadSettings, getEffective } from "../src/services/settings.js";
 import { buildVapiSystemPrompt, buildAssistantPayload } from "../src/services/vapi.js";
 import type { AgentConfig } from "../src/lib/agentConfig.js";
 
-/* ------------------------------------------------------------------ *
- *  READ-ONLY: show the system prompt an agent actually runs on, and
- *  report which anti-rambling rules survived the LLM summarizer.
- *
- *  Two prompts matter, and they are NOT the same thing:
- *
- *   1. TEST CALL — the browser "Test call" button. Compiled FRESH on
- *      every call from the deployed code (see /test-token in
- *      agent.routes.ts), so it needs no assistant, no Save Changes and
- *      no resync. This exists from the moment a user onboards, before
- *      they ever buy a plan or get a number.
- *
- *   2. LIVE ASSISTANT — what real inbound phone calls use. This is a
- *      STORED copy on Vapi, frozen at the last push, so it goes stale
- *      until a save or scripts/resyncAgents.ts pushes again. Only
- *      exists once the agent has been provisioned.
- *
- *  Makes no writes. Run with no argument to list accounts.
- * ------------------------------------------------------------------ */
+// READ-ONLY: dump the prompt an agent runs on and which anti-rambling rules survived the summarizer. TEST CALL is
+// compiled fresh per call; LIVE ASSISTANT is stored on Vapi and stale until a save/resync. No argument lists accounts.
 
 // A brand's workspace lives in the brand's database (phase 6): BRAND=<slug> picks it.
 import { prisma } from "./_brandDb.js";
@@ -85,9 +68,8 @@ async function main() {
   const cfg = c.agentConfig as unknown as AgentConfig;
   console.log(`account: ${EMAIL}   config saved: ${c.updatedAt.toISOString()}`);
 
-  // 1. What the browser "Test call" button will use, right now. buildAssistantPayload
-  //    is the LAST mile — it grafts on ENDING THE CALL (and transfer/booking/SMS
-  //    blocks), so checking buildVapiSystemPrompt alone misses whatever it adds.
+  // 1. Test call prompt. buildAssistantPayload grafts on ENDING THE CALL and the tool blocks, so
+  //    checking buildVapiSystemPrompt alone misses them.
   const wire = await buildVapiSystemPrompt(cfg, c.userId);
   const payload = buildAssistantPayload(cfg, { systemPrompt: wire });
   const testPrompt = (payload.model.messages[0] as { content: string }).content;

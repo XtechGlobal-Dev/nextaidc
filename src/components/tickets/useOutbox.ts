@@ -7,26 +7,11 @@ import type {
   TicketReplyRef,
 } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Optimistic sending, shared by every ticket surface.
- *
- *  A message appears in the conversation the moment you press send,
- *  carrying a clock until the server confirms it — which is what makes
- *  a chat feel like a chat rather than a form. If the send fails the
- *  bubble stays put and turns red with a Retry, instead of the text
- *  being thrown back into the box for you to type again.
- *
- *  The files are already in the bucket by then (the composer uploads
- *  while you type), so a retry re-posts the same descriptors and costs
- *  nothing extra.
- * ------------------------------------------------------------------ */
+// Optimistic sending for ticket surfaces: the bubble shows immediately and turns red with Retry on failure.
+// Files are already uploaded by then, so a retry re-posts the same descriptors.
 
 export interface OutboxDraft {
-  /**
-   * The thread this was written in, captured at submit time. A reply must land
-   * where it was typed even if the reader has opened another ticket since — and
-   * a retry, minutes later, must still go to the right conversation.
-   */
+  /** Captured at submit so a reply (or a later retry) lands in the thread it was typed in, not the one now open. */
   ticketId: string;
   body: string;
   attachments: AttachmentDescriptor[];
@@ -43,9 +28,7 @@ interface OutboxItem {
   message: TicketMessage;
 }
 
-/** What a just-uploaded file looks like on the pending bubble. The URL is the
- *  real one — the bytes landed before the message was sent — so images render
- *  immediately rather than after a round trip. */
+/** Pending-bubble attachment. The URL is real (bytes landed before send), so images render immediately. */
 function localAttachment(d: AttachmentDescriptor): TicketAttachment {
   return {
     id: uid("pending-att"),

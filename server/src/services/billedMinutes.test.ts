@@ -1,18 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Billed minutes moved from a JavaScript fold over every call row to a
- *  single SQL aggregate. That is only safe because of one arithmetic
- *  identity, and this suite pins it down:
- *
- *      SUM(CEIL(s / 60))  ===  SUM(billableSeconds(s)) / 60
- *
- *  Rounding has to happen PER CALL — sixty 5-second calls are sixty
- *  billed minutes, not five — so summing raw seconds and rounding once
- *  at the end is a materially different (and much cheaper) number. If
- *  anyone ever "simplifies" the SQL to SUM("durationSec") / 60, the
- *  first test here fails loudly.
- * ------------------------------------------------------------------ */
+// Pins SUM(CEIL(s / 60)) === SUM(billableSeconds(s)) / 60. Rounding is PER CALL (sixty 5s calls
+// = sixty minutes, not five), so "simplifying" the SQL to SUM(durationSec) / 60 fails the first test.
 
 const h = vi.hoisted(() => ({ queryRaw: vi.fn() }));
 

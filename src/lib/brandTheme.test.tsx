@@ -2,14 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { applyBrandTheme, hexToHsl } from "@/lib/brandTheme";
 import type { PublicBrand } from "@/lib/api";
 
-/* ------------------------------------------------------------------ *
- *  Painting the app as a brand.
- *
- *  The whole white-label look rides on overriding a handful of CSS
- *  custom properties, so what matters is that the right properties get
- *  set, that the soft tints stay the SAME hue as the brand colour, and
- *  that leaving a brand puts everything back.
- * ------------------------------------------------------------------ */
+// White-label theming: the right custom properties get set, tints stay the brand hue, leaving a brand restores everything.
 
 function brand(over: Partial<PublicBrand["theme"]> = {}): PublicBrand {
   return {

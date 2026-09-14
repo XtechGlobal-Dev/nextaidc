@@ -3,11 +3,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { api, type BrandPricing } from "@/lib/api";
 import { BrandPricingSection } from "@/pages/admin/brands/BrandPricingSection";
 
-/**
- * A brand admin's own price list. The platform sets each plan's base price;
- * this page is where the brand adds its charge on top — if the platform has
- * allowed it, and within any cap it set.
- */
+/** Brand admin's own price list: platform base price + the brand's addon, only if the platform allows it and within its cap. */
 export default function AdminBrandPricingPage() {
   const [pricing, setPricing] = useState<BrandPricing | null>(null);
 

@@ -2,12 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  API contract pilot: this route's responses go through sendValidated()
- *  against the shared @shared/contracts/voices schemas — a passing
- *  assertion here confirms the live response matches what src/lib/api.ts
- *  types against on the frontend.
- * ------------------------------------------------------------------ */
+// Responses go through sendValidated(), so a pass here also proves the live response
+// matches the shared contract the frontend types against.
 
 const h = vi.hoisted(() => ({
   getVoiceCatalogFor: vi.fn(),

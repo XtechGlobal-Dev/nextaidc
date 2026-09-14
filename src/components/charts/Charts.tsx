@@ -15,19 +15,8 @@ import {
   type PlotArea,
 } from "./primitives";
 
-/* ------------------------------------------------------------------ *
- *  Chart kit — hand-rolled, themable, interactive SVG charts.
- *
- *  Every chart here follows the same rules:
- *   - one y-axis, never two;
- *   - recessive grid and axes, thin marks, so the data carries the eye;
- *   - a hover layer by default (crosshair + tooltip on time series, per-mark
- *     tooltip on bars) — a chart in a browser that can't be interrogated is
- *     throwing away the medium;
- *   - colour comes from CSS custom properties, so light/dark and any future
- *     rebrand happen in one place;
- *   - identity is never colour-alone: two or more series always ship a legend.
- * ------------------------------------------------------------------ */
+// Hand-rolled SVG chart kit. Rules: one y-axis, colours from CSS custom properties (theming in one place),
+// hover tooltips by default, and two or more series always get a legend so identity is never colour alone.
 
 /* ----------------------------- Tooltip ----------------------------- */
 
@@ -86,10 +75,7 @@ function ChartEmpty({ height, message }: { height: number; message: string }) {
 
 /* ---------------------------- Sparkline ---------------------------- */
 
-/**
- * A bare trend line for a card — no axes, no interaction, no legend. It answers
- * "which way is this going", nothing more; the number beside it carries the value.
- */
+/** Bare trend line for a card: no axes, interaction or legend. The number beside it carries the value. */
 export function Sparkline({
   values,
   className,
@@ -153,13 +139,7 @@ export interface TimeSeriesDef {
   format?: (v: number) => string;
 }
 
-/**
- * Multi-series line/area chart over time with a shared crosshair.
- *
- * One y-scale for every series by design — two scales on one chart invite the
- * reader to compare shapes that have no common ground. If two measures don't
- * share a scale, they belong in two charts.
- */
+/** Multi-series time chart with a shared crosshair. One y-scale by design; measures that don't share one belong in two charts. */
 export function TimeSeriesChart({
   labels,
   series,
@@ -357,13 +337,7 @@ export interface BarDatum {
   hint?: string;
 }
 
-/**
- * Horizontal bars — the right form for ranking named things (cost per provider,
- * requests per endpoint), because the labels are text and text reads horizontally.
- *
- * Values are labelled directly at the end of every bar, which is also the relief
- * the palette's light-mode contrast requires.
- */
+/** Horizontal bars for ranking named things. Values are labelled at the bar end; the light palette needs that for contrast. */
 export function BarChart({
   data,
   format = compactNumber,
@@ -412,10 +386,7 @@ export function BarChart({
 
 /* -------------------------- Stacked bars --------------------------- */
 
-/**
- * A single 100%-wide bar split into segments — the fleet's health mix, or a
- * category's. Segments carry a 2px surface gap so adjacent colours never touch.
- */
+/** 100%-wide bar split into segments, with a 2px gap so adjacent colours never touch. */
 export function StackedBar({
   segments,
   className,
@@ -447,11 +418,7 @@ export function StackedBar({
 
 /* ----------------------------- Donut ------------------------------- */
 
-/**
- * Fleet health at a glance. A donut earns its place here — and almost nowhere
- * else — because the parts genuinely sum to a meaningful whole (every provider
- * is in exactly one state) and there are only ever four of them.
- */
+/** Health donut. Justified only because the parts sum to a real whole (one state per provider) and there are just four. */
 export function Donut({
   segments,
   size = 132,

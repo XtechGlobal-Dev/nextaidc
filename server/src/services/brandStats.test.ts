@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  The brand stats rollup and the overview built from it.
- *
- *  Two properties matter: the rollup reads each tenant and writes Main,
- *  skipping a tenant it cannot read without losing the others; and the
- *  overview is built from Main ALONE — no tenant is opened to draw it.
- * ------------------------------------------------------------------ */
+// Rollup reads each tenant and writes Main, skipping an unreadable tenant without losing
+// the others; the overview is built from Main ALONE — no tenant is opened to draw it.
 
 const h = vi.hoisted(() => ({
   tenants: [] as { brandId: string; db: unknown }[],

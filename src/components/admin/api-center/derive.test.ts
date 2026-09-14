@@ -2,15 +2,8 @@ import { describe, expect, it } from "vitest";
 import { deriveSeries, deriveTotals } from "./derive";
 import type { ApiCenterSnapshot, ProviderRow, SeriesPoint } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  The filtered-view arithmetic.
- *
- *  These are the numbers a filter changes, so a mistake here shows up as
- *  "the analytics are wrong" rather than as a crash. The two things worth
- *  pinning down are that rates are weighted by traffic (a provider with three
- *  calls must not swing a fleet percentile) and that per-bucket series sum
- *  element-wise across providers.
- * ------------------------------------------------------------------ */
+// Filtered-view arithmetic. Pins down that rates are traffic-weighted (a tiny provider can't swing a
+// fleet percentile) and that per-bucket series sum element-wise.
 
 function provider(over: Partial<ProviderRow> & { id: string }): ProviderRow {
   return {

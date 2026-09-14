@@ -2,24 +2,8 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
-/* ------------------------------------------------------------------ *
- *  Ensure the platform SUPER_ADMIN exists.
- *
- *  Unlike `ensureAdmin`, this runs on an already-populated database: an
- *  existing deployment has plenty of ADMINs but no super admin, and the
- *  full seed would also touch plans and templates. This touches exactly
- *  one row.
- *
- *  Credentials come from the environment, falling back to the documented
- *  defaults:
- *    SEED_SUPER_ADMIN_EMAIL     (default superadmin@ai.com)
- *    SEED_SUPER_ADMIN_PASSWORD  (default Super@001)
- *    SEED_SUPER_ADMIN_NAME      (default "Super Admin")
- *
- *  Idempotent: run it again to reset the password to the configured one.
- *
- *  Usage:  npm run ensure-super-admin      (from server/)
- * ------------------------------------------------------------------ */
+// Upsert the SUPER_ADMIN on an already-populated DB (the full seed would also touch plans/templates).
+// Credentials from SEED_SUPER_ADMIN_{EMAIL,PASSWORD,NAME}; re-running resets the password.
 
 const prisma = new PrismaClient();
 

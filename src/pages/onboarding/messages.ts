@@ -1,12 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Central onboarding spoken lines.
- *
- *  Kept here (instead of inline per step) so OnboardingPage can prefetch
- *  the WHOLE set the moment onboarding opens — every step's voice then
- *  plays instantly from cache (no per-step generation delay). Because the
- *  steps render these same constants, the prefetched audio always matches
- *  what's spoken (no text drift).
- * ------------------------------------------------------------------ */
+// Onboarding spoken lines live here so OnboardingPage can prefetch all the audio up front,
+// and the steps render the same constants so the cached audio never drifts from the text.
 
 export const ONBOARDING_SPEECH = {
   step1:

@@ -21,22 +21,8 @@ import { ApiCenterEmpty, EnvBadge, SectionHeading, Segmented, SummaryBar } from 
 import type { ApiCenterSnapshot, ApiLogPage, ErrorGroup, ProviderRow } from "@/types/apiCenter";
 import type { ApiCenterView } from "@/components/admin/api-center/ApiCenterContext";
 
-/* ------------------------------------------------------------------ *
- *  Activity — traffic, latency, failures and the raw log.
- *
- *  Replaces four screens (Usage, Latency, Errors, Logs) with one chart whose
- *  series change with the view. They were always the same time axis over the
- *  same requests; splitting them across tabs made you re-find your place in
- *  time every time you changed question.
- *
- *  Only the view that needs extra data fetches it: Errors pulls grouped
- *  failures, Logs pages the raw rows. Traffic and Latency come free from the
- *  snapshot the shell already holds.
- *
- *  Each view is a top-level component, NOT a function nested in the page — a
- *  nested one is a new component type on every render, so the live tick would
- *  remount it and silently reset the log's pagination.
- * ------------------------------------------------------------------ */
+// Activity: traffic, latency, failures and the raw log on one time axis. Only Errors/Logs fetch extra data.
+// Views are top-level components, not nested functions — nesting would remount on each live tick and reset log pagination.
 
 type View = "traffic" | "latency" | "errors" | "logs";
 
@@ -439,9 +425,7 @@ function LogsView({ snapshot, onOpenProvider }: ViewProps) {
     };
   }, [query]);
 
-  /** Fetch with the auth header, then hand the browser a blob — a plain <a href>
-   *  can't carry the bearer token, and a token in the query string would leak
-   *  into browser history and any proxy log. */
+  // Fetch with the auth header then blob it — a plain <a href> can't carry the bearer token, and a query-string token leaks into history/proxy logs.
   const download = async () => {
     setDownloading(true);
     try {

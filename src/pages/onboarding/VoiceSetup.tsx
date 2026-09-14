@@ -7,11 +7,7 @@ import { cn } from "@/lib/utils";
 import { speak, stopSpeaking, prefetchSpeech, ttsSupported } from "@/lib/speech";
 import { useOnboardingStore, type OnboardingData } from "@/stores/useOnboardingStore";
 
-/* ------------------------------------------------------------------ *
- *  VoiceSetup — Emma *speaks* each question (text-to-speech) and the
- *  user *types* the answer. A friendly, guided alternative to filling
- *  the manual onboarding forms.
- * ------------------------------------------------------------------ */
+// VoiceSetup: Emma speaks each question (TTS), the user types the answer — guided alternative to the manual forms.
 
 type FieldKey = "businessName" | "businessDescription" | "services" | "phone" | "email";
 

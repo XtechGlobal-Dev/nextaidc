@@ -2,25 +2,8 @@ import "dotenv/config";
 import { prisma } from "../src/prisma.js";
 import { EMAIL_TEMPLATE_DEFS, GLOBAL_VARS } from "../src/services/emailTemplates.js";
 
-/* ------------------------------------------------------------------ *
- *  One-time: force the stored email templates back to the code
- *  defaults for a targeted set of keys (subject + body + variables +
- *  metadata).
- *
- *  Why this exists: the boot seeder (`seedEmailTemplates`) never
- *  overwrites an existing subject/body so an admin's edits are
- *  preserved — which also means a change to a default body in code
- *  won't reach an already-seeded row. This script DELIBERATELY
- *  overwrites subject/body/variables, but only for the keys listed
- *  below (or passed as CLI args), so unrelated admin customisations
- *  stay untouched. The on/off (`enabled`) state is preserved.
- *
- *  Usage:
- *    npm run refresh-email-templates                       # staff perm emails
- *    npm run refresh-email-templates -- staff_welcome ...  # specific keys
- *
- *  Idempotent — safe to run more than once.
- * ------------------------------------------------------------------ */
+// Force listed email templates back to code defaults (the boot seeder never overwrites, so code changes
+// don't reach seeded rows). Keys from CLI args or DEFAULT_KEYS; `enabled` is preserved.
 
 const DEFAULT_KEYS = ["staff_permissions_updated", "staff_role_permissions_updated"];
 const keys = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_KEYS;

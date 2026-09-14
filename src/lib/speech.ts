@@ -1,25 +1,7 @@
 import { env } from "@/lib/env";
 
-/* ------------------------------------------------------------------ *
- *  speech — speaks short snippets via the server TTS proxy (the same
- *  provider + voices the live agent uses: Deepgram Aura-2 by default,
- *  ElevenLabs when the admin flips the global toggle). We fetch the FULL
- *  clip before playing so the audio always plays to the end (a
- *  progressively-streamed <audio> can fire "ended" early and clip the
- *  voice). To keep it snappy, clips are cached and can be prefetched, so
- *  a warmed line plays instantly. Only one clip plays at a time, and a
- *  monotonic token guarantees only the most recent speak() ever plays.
- *
- *  Playback goes through a shared, kept-alive Web Audio context with a
- *  short silent lead-in. Windows/Chrome (and most Bluetooth outputs) power
- *  the audio device down after a brief silence; the first ~200–400ms of the
- *  next sound is then swallowed while it spins back up — which clipped the
- *  first word of every spoken line ("Analyzing" → "…lyzing"). Routing the
- *  clip through a context that's always running (an inaudible zero-gain
- *  tone) and scheduling it a beat after the device is confirmed running
- *  guarantees it plays from the very first syllable. A plain <audio>
- *  element is the fallback when Web Audio can't be used.
- * ------------------------------------------------------------------ */
+// TTS via the server proxy. Full clip fetched before play (streamed <audio> can fire "ended" early); played through
+// a kept-alive Web Audio context with a silent lead-in, since idle output devices swallowed the first word of every line.
 
 export const ttsSupported = typeof window !== "undefined" && typeof Audio !== "undefined";
 
@@ -31,9 +13,7 @@ interface SpeakOpts {
   /** Explicit provider so the preview uses the right engine (the picker knows it).
    *  Omitted → the server derives it (ElevenLabs id → ElevenLabs, else global). */
   provider?: "deepgram" | "elevenlabs";
-  /** Fires when the clip could not be produced or played, with the reason the
-   *  server gave (e.g. an ElevenLabs "voice not found"). Without this a failed
-   *  preview is indistinguishable from a silent one. onEnd still fires after. */
+  /** Fires with the server's reason when the clip fails, so a failed preview isn't mistaken for a silent one. onEnd still fires. */
   onError?: (message: string) => void;
 }
 
@@ -53,18 +33,15 @@ async function readError(res: Response): Promise<string> {
   return body.slice(0, 200) || `Preview failed (${res.status})`;
 }
 
-/** Silence scheduled before every clip so any device warm-up falls on the lead,
- *  never on speech. Long enough to cover the worst-case spin-up, short enough to
- *  stay imperceptible. */
+/** Silent lead-in so device warm-up never lands on speech; long enough for worst-case spin-up, short enough to be imperceptible. */
 const LEAD_IN_SEC = 0.14;
 
 let latest = 0;
 let currentAudio: HTMLAudioElement | null = null;
 let currentSource: AudioBufferSourceNode | null = null;
 
-/* Shared context, kept running by a zero-gain tone so the output device never
- * idles. Created lazily; resumes once the page has a user gesture (every audio
- * flow here follows a click, so this reliably reaches "running"). */
+// Shared context kept running by a zero-gain tone so the output device never idles.
+// Lazily created; resumes after a user gesture (every audio flow here follows a click).
 let warmCtx: AudioContext | null = null;
 
 function ensureCtx(): AudioContext | null {

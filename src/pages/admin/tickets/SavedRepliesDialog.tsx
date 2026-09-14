@@ -27,16 +27,8 @@ import { api, ApiError } from "@/lib/api";
 import { MAX_MESSAGE_CHARS } from "@/lib/ticketFiles";
 import type { AdminTicketDepartment, TicketSavedReply } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Saved replies — the canned answers offered in the reply box.
- *
- *  Everyone who can view requests can read the list; adding and
- *  changing follows the lane's `edit` capability. A staff member shapes
- *  the replies of the departments they work; one offered on "All
- *  departments" is the admin's, since it lands in every queue's
- *  composer. Which of those applies is decided server-side and arrives
- *  as `canEdit` per row — the UI just honours it.
- * ------------------------------------------------------------------ */
+// Saved replies. Viewers read; editing follows the lane's `edit` capability, and "All departments" replies are admin-only.
+// Which applies is decided server-side and arrives as `canEdit` per row — the UI just honours it.
 
 const ALL_DEPARTMENTS = "__all__";
 

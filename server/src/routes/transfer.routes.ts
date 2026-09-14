@@ -1,13 +1,4 @@
-/**
- * Human Call Transfer API (tenant-side).
- *
- *   GET    /api/transfer                → the owner's transfer settings
- *   PATCH  /api/transfer                → update enable / number / timeout / message
- *   GET    /api/transfer/departments    → list departments
- *   POST   /api/transfer/departments    → add a department
- *   PATCH  /api/transfer/departments/:id → update a department
- *   DELETE /api/transfer/departments/:id → remove a department
- */
+// Human Call Transfer API (tenant-side): the owner's transfer settings and departments.
 import express from "express";
 import { asyncHandler, HttpError } from "../lib/http.js";
 import { requireAuth, requireCustomerAccount } from "../middleware/auth.js";
@@ -33,13 +24,8 @@ const router = express.Router();
 
 router.use(requireAuth, requireCustomerAccount);
 
-/**
- * Departments this owner's plan allows right now — 0 when it excludes transfer.
- *
- * Enforced on every WRITE rather than once at the top of the router: reads stay
- * open so a downgraded owner can still see (and delete) what they configured,
- * which is exactly what the downgrade flow asks them to do.
- */
+// Plan's department allowance (0 = no transfer). Enforced on writes only, so a
+// downgraded owner can still see and delete what they configured.
 async function allowance(userId: string): Promise<number> {
   return (await getPlanFeatures(userId)).callTransferDepartments;
 }
@@ -81,9 +67,8 @@ router.put(
   "/departments",
   asyncHandler(async (req, res) => {
     const { departments } = departmentsReplaceSchema.parse(req.body);
-    // This path used to be capped only by the schema's global max(20), so it was
-    // the way around the per-request count check the POST does. It has to carry
-    // the same plan limit or "Save Changes" quietly grants unlimited departments.
+    // Must carry the same plan limit as POST — capped only by the schema's max(20),
+    // "Save Changes" quietly granted unlimited departments.
     const max = await assertTransferIncluded(req.user!.sub);
     if (departments.length > max) {
       throw new HttpError(400, `Your plan allows up to ${max} department${max === 1 ? "" : "s"}.`);

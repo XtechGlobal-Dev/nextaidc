@@ -2,18 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-/* The coupon PATCH handler is a long Express route wired to Stripe, so — same
- * approach as planActivation.test.ts — these pin the decisions that were wrong
- * rather than mocking the whole world. Each maps to a reported bug:
- *
- *  1. Editing a coupon's code silently did nothing: the zod schema accepted
- *     `code` and the redeemed-guard checked it, but the Prisma update never
- *     wrote it, so TEST50 → TEST10 saved "successfully" and changed nothing.
- *  2. Changing the percentage left the OLD Stripe coupon attached. Stripe
- *     coupons are immutable, so our DB said 20% while Stripe kept billing 10%.
- *  3. Renaming onto an existing code hit a raw unique-constraint error instead
- *     of the clean message `create` gives.
- */
+// Source-inspection tests for the coupon PATCH handler, pinning past bugs: code edits never saved,
+// percentage changes kept the old (immutable) Stripe coupon, renames onto a taken code threw raw.
 
 const src = readFileSync(resolve(import.meta.dirname, "admin.routes.ts"), "utf8");
 
@@ -82,11 +72,8 @@ describe("PATCH /api/admin/coupons/:id", () => {
     expect(patchCoupon).toMatch(/nextPercentOff == null && nextBonusMinutes == null/);
   });
 
-  /* Reported as "a coupon at its usage limit can't be edited". The limit turned
-   * out to be fine; the real fault was an EXPIRED coupon being uneditable —
-   * not renameable, not reactivatable, its limit not raisable — because the
-   * date guard treated "present in the payload" as "changed". The admin form
-   * submits every safe field on every save, including dates it never touched. */
+  // Bug: an expired coupon couldn't be edited at all, because the date guard treated "present in payload"
+  // as "changed" — and the admin form submits every field on every save.
   it("guards dates against the STORED value, not merely their presence", () => {
     // The bug was `data.expiresAt !== undefined && ...`.
     expect(patchCoupon).not.toMatch(/data\.expiresAt !== undefined &&\s*mergedExpiresAt/);

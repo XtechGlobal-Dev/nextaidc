@@ -14,12 +14,7 @@ import {
 } from "@/lib/api";
 import { formatDateDMY } from "@/lib/utils";
 
-/**
- * What is inside the brand: its customers, their subscriptions, its support
- * queue. Every table here is read from THIS brand's own database and nothing
- * else — opening a brand queries only that tenant. Read-only: the platform
- * looks, the brand's own admins act.
- */
+/** Inside the brand: customers, subscriptions, support queue — all read from this tenant's DB only. Read-only; the brand's admins act. */
 export function BrandInsideTab({ brand }: { brand: Brand }) {
   return (
     <>

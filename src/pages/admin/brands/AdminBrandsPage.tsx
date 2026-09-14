@@ -97,10 +97,7 @@ export default function AdminBrandsPage() {
     </div>
   );
 
-  /** Where the brand actually answers right now — which is its subdomain until a
-   *  vanity domain is verified, so a claimed-but-unpublished domain never reads
-   *  as the live address. The pending marker is what tells the operator someone
-   *  is still waiting on the client's DNS. */
+  // Live address: the subdomain until a vanity domain is verified, so an unpublished claim never reads as live.
   const renderAddress = (b: Brand) => (
     <span className="inline-flex items-center gap-1.5 text-muted-foreground">
       <Globe className="size-3.5 shrink-0" />

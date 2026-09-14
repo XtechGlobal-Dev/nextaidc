@@ -90,13 +90,7 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/**
- * A ringing bell on a nav entry that has unread support activity.
- *
- * Rendered nowhere when the count is zero, so nothing rings for no reason.
- * Expanded rows put it at the right edge; the collapsed rail perches it on the
- * icon's corner, where there is no room for a number.
- */
+/** Ringing bell for unread support activity. Nothing rendered at zero; the collapsed rail perches it on the icon corner. */
 function TicketBell({ count, collapsed }: { count: number; collapsed: boolean }) {
   if (count <= 0) return null;
   const label = `${count} unread support update${count === 1 ? "" : "s"}`;
@@ -121,10 +115,7 @@ interface NavItem {
   icon: LucideIcon;
   end?: boolean;
   tourKey?: string;
-  /** Show a Crown when the plan doesn't include this module. The item stays
-   *  visible on purpose — same call the plan cards make, where excluded
-   *  features are struck through rather than hidden, so people can still
-   *  discover what an upgrade buys. */
+  /** Crown when the plan lacks this module. Item stays visible on purpose so people can see what an upgrade buys. */
   premiumWhenLocked?: boolean;
   /** Temporarily hidden from the UI via CSS (kept routable). */
   hidden?: boolean;
@@ -132,13 +123,9 @@ interface NavItem {
   permission?: string;
   /** Only full ADMINs see this item (not STAFF). */
   adminOnly?: boolean;
-  /** Only the platform SUPER_ADMIN sees this item — the areas that hold the
-   *  platform's own API accounts and every tenant's setup. A brand ADMIN runs
-   *  their tenant but never sees these. */
+  /** SUPER_ADMIN only: platform API accounts and tenant setup. A brand ADMIN never sees these. */
   superAdminOnly?: boolean;
-  /** The brand module this item belongs to. A white-label brand that switched
-   *  the module off hides the item outright — unlike a plan lock, there is
-   *  nothing to upsell: the brand chose not to offer it at all. */
+  /** Brand module. Switched off = hidden outright; unlike a plan lock there's nothing to upsell. */
   module?: BrandModuleId;
 }
 
@@ -152,9 +139,7 @@ const NAV: NavItem[] = [
   { to: "/dashboard/transfer", label: "Call Transfer", icon: PhoneOutgoing, tourKey: "transfer", module: "transfer" },
   { to: "/dashboard/booking", label: "Booking", icon: CalendarCheck, tourKey: "booking", module: "booking" },
   { to: "/dashboard/sms-to-caller", label: "SMS to Caller", icon: MessageSquareText, tourKey: "smsToCaller", premiumWhenLocked: true, module: "smsToCaller" },
-  // Talking to the tier above. For a customer that's their brand's support
-  // team; for a brand admin — who reaches this same entry from the User
-  // Dashboard panel — it's the platform. One route, because it is one page.
+  // Support goes to the tier above (brand for a customer, platform for a brand admin). One route, one page.
   { to: "/dashboard/support", label: "Support", icon: LifeBuoy },
 ];
 
@@ -176,9 +161,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/dashboard/admin/subscriptions", label: "Subscriptions", icon: CreditCard, permission: "subscriptions" },
   { to: "/dashboard/admin/plans", label: "Plans", icon: Package, permission: "plans" },
   { to: "/dashboard/admin/coupons", label: "Coupons", icon: Ticket, permission: "coupons" },
-  // The handler's inbox. `tickets` is brand-scoped and `brand_tickets` is
-  // platform-only, so this ONE entry resolves to a brand admin's customer
-  // queue or the platform owner's brand queue and never to both.
+  // `tickets` is brand-scoped, `brand_tickets` platform-only, so exactly one of these two shows.
   { to: "/dashboard/admin/tickets", label: "Support Tickets", icon: MessagesSquare, permission: "tickets" },
   { to: "/dashboard/admin/tickets", label: "Brand Requests", icon: MessagesSquare, permission: "brand_tickets" },
   // A brand's own money: brand-scoped sections, so the super admin never sees
@@ -188,12 +171,8 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/dashboard/admin/voice-bank", label: "Voice Library", icon: Mic, permission: "voice_bank" },
   { to: "/dashboard/admin/phone-numbers", label: "Phone Numbers", icon: Phone, permission: "phone_numbers" },
   { to: "/dashboard/admin/resellers", label: "Resellers", icon: Handshake, permission: "resellers" },
-  // API Center — one entry. Its sections are tabs on the page itself, so
-  // repeating them here would be a second copy of the same navigation and make
-  // the admin list twice as long for no extra reach.
-  // API Center and Platform Settings hold the platform's provider credentials
-  // and spend — SUPER_ADMIN only, never a brand admin (the routes behind them
-  // enforce the same, see requireSuperAdmin).
+  // One API Center entry (its sections are tabs on the page). Holds provider credentials and spend,
+  // so SUPER_ADMIN only; the routes enforce the same via requireSuperAdmin.
   { to: "/dashboard/admin/api-center", label: "API Center", icon: Radar, superAdminOnly: true },
   // Reports, Webhook Logs, System Health and Settings are ADMIN-only areas —
   // not staff-assignable (removed from the role permission matrix).
@@ -212,21 +191,9 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/dashboard/admin/brands", label: "Brands", icon: Building2, superAdminOnly: true },
 ];
 
-/* ------------------------------------------------------------------ *
- *  User Dashboard panel — brand ADMIN only
- *
- *  An admin runs their tenant from the Admin nav but still holds a real
- *  customer workspace (Dashboard, Call Inbox, AI Brain, …). Stacking both
- *  lists doubles the sidebar, so for admins the customer modules fold into a
- *  single "User Dashboard" entry that opens this panel OVER the sidebar.
- *
- *  Always mounted and toggled with CSS transitions rather than mount/unmount,
- *  so the close slides out exactly as smoothly as the open slides in.
- *  `visibility` sits in the transition list: it flips to hidden only once the
- *  slide-out has finished, and back to visible the instant the slide-in
- *  starts. `inert` covers the in-between — nothing inside a closing panel can
- *  be clicked or tabbed into.
- * ------------------------------------------------------------------ */
+// Admin-only "User Dashboard" panel: folds the customer modules so the sidebar isn't doubled. Always mounted
+// and toggled with CSS so close slides as smoothly as open; `visibility` is in the transition list and `inert`
+// covers the in-between so nothing in a closing panel can be clicked or tabbed into.
 interface UserNavPanelProps {
   open: boolean;
   onClose: (opts?: { returnFocus?: boolean }) => void;
@@ -242,10 +209,8 @@ function UserNavPanel({ open, onClose, side, className, children }: UserNavPanel
 
   useEffect(() => {
     if (!open) return;
-    // Move focus in — a frame late, because on the very first tick of the
-    // open transition `visibility` is still hidden and a hidden element
-    // refuses focus. Two instances exist (desktop aside + mobile drawer);
-    // only the one on screen has a layout box, so only it takes focus.
+    // Focus a frame late: on the first tick `visibility` is still hidden and refuses focus. Of the two
+    // instances (desktop + mobile) only the one with a layout box takes it.
     let raf = requestAnimationFrame(() => {
       raf = requestAnimationFrame(() => {
         const btn = closeRef.current;
@@ -282,9 +247,7 @@ function UserNavPanel({ open, onClose, side, className, children }: UserNavPanel
       inert={!open}
       className={cn(
         "flex flex-col bg-warm shadow-[var(--shadow-panel)]",
-        // `translate`, not `transform`: Tailwind v4's translate-x utilities set
-        // the CSS `translate` property, so transitioning `transform` would
-        // fade the panel but snap the slide.
+        // Transition `translate`, not `transform`: Tailwind v4 translate-x sets the `translate` property, or the slide snaps.
         "transition-[translate,opacity,visibility] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
         open
           ? "visible translate-x-0 opacity-100"
@@ -331,9 +294,7 @@ export function Sidebar() {
   const isSuperAdmin = isSuperAdminRole(user?.role);
   const isStaff = user?.role === "STAFF";
   const isAdminOrStaff = isAdmin || isStaff;
-  // No customer workspace at all — STAFF (no profile) and the SUPER_ADMIN (runs
-  // the platform, isn't a business on it). Both get the admin nav and nothing
-  // else; see lib/roles.ts.
+  // STAFF and SUPER_ADMIN have no customer workspace: admin nav only (lib/roles.ts).
   const platformOnly = !hasCustomerWorkspace(user?.role);
   // Which optional modules this brand's door offers (null = the platform: all).
   const brandModules = useBrandingStore((s) => s.brand?.modules ?? null);
@@ -345,9 +306,7 @@ export function Sidebar() {
   // The admin's "User Dashboard" panel (see UserNavPanel). One piece of state
   // serves both the desktop aside and the mobile drawer — never both on screen.
   const [userPanelOpen, setUserPanelOpen] = useState(false);
-  // The button that opened it, so a keyboard / close-button dismiss can hand
-  // focus straight back. An outside click deliberately doesn't: focus belongs
-  // wherever the person just clicked.
+  // Opener, so keyboard/close-button dismiss returns focus. Outside clicks don't; focus belongs where they clicked.
   const userPanelTrigger = useRef<HTMLElement | null>(null);
   const openUserPanel = (e: MouseEvent<HTMLElement>) => {
     userPanelTrigger.current = e.currentTarget;
@@ -376,10 +335,7 @@ export function Sidebar() {
   // Read-only: whichever screen last fetched entitlements cached them. The badge
   // is decoration, so a stale read costs nothing — the page itself re-checks.
   const smsToCallerIncluded = cachedSmsToCallerEntitlement();
-  // Unread support activity, split by the entry it belongs to. Three counts
-  // rather than one because one account can hold two sides at once: a brand
-  // admin both answers their customers (`supportInbox`) and asks the platform
-  // (`requester`), and each deserves its own bell.
+  // Three unread counts, not one: a brand admin both answers customers (`supportInbox`) and asks the platform (`requester`).
   const notifications = useNotificationStore((s) => s.notifications);
   const ticketUnread = useMemo(() => unreadTicketCounts(notifications), [notifications]);
 
@@ -405,10 +361,7 @@ export function Sidebar() {
       collapsed && "justify-center px-0",
     );
 
-  // The customer modules (Dashboard, Call Inbox, AI Brain, CRM, …) belong to
-  // accounts that actually run a receptionist. STAFF have no profile and the
-  // SUPER_ADMIN has no business, so both get nothing here — just the Admin nav.
-  // ADMIN keeps these (minus Plans & Billing); USER sees all.
+  // Customer modules: none for STAFF/SUPER_ADMIN, all for USER, all minus Plans & Billing for ADMIN.
   const visibleUserItems = (isMobile: boolean) =>
     platformOnly
       ? []
@@ -445,10 +398,7 @@ export function Sidebar() {
       </NavLink>
     ));
 
-  // A brand ADMIN runs their tenant from the Admin nav but still holds a
-  // customer workspace. Rather than stack both lists, their customer modules
-  // fold into one "User Dashboard" entry that opens a panel over the sidebar.
-  // (The SUPER_ADMIN is an admin too, but has no workspace — nothing to fold.)
+  // ADMIN folds customer modules into the User Dashboard panel; SUPER_ADMIN has no workspace to fold.
   const userNavAsPanel = isAdmin && !platformOnly;
   // Light the entry up while on any of the pages it holds, so an admin can
   // still tell which side of the app they're on with the panel closed.
@@ -468,10 +418,7 @@ export function Sidebar() {
         <div className={cn("flex h-16 shrink-0 items-center px-4", isCollapsed ? "justify-center" : "justify-between")}>
           {!isCollapsed && (
             <NavLink
-              // Home is wherever this account actually starts. Pointing everyone
-              // at /dashboard would bounce a super admin straight back out
-              // through RequireCustomer — a visible flicker for a link that is
-              // supposed to be the safest thing on the page.
+              // Role-aware home; /dashboard would bounce a super admin through RequireCustomer with a visible flicker.
               to={homePath}
               end
               onClick={isMobile ? () => setMobileSidebarOpen(false) : undefined}
@@ -549,9 +496,7 @@ export function Sidebar() {
         {/* Scrollable region: nav + Call Assistant flow together (top-aligned, no floating gap) */}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
           <nav className="flex flex-col gap-1 px-3">
-            {/* Customer modules: inline for a USER, folded into one "User
-                Dashboard" entry for an ADMIN (the list itself lives in the
-                UserNavPanel rendered at the end of the sidebar). */}
+            {/* Customer modules: inline for USER, one "User Dashboard" button for ADMIN (list lives in UserNavPanel). */}
             {userNavAsPanel
               ? userItems.length > 0 && (
                   <button
@@ -564,9 +509,7 @@ export function Sidebar() {
                   >
                     <LayoutDashboard className="size-[18px] shrink-0" />
                     {isCollapsed ? (
-                      // Support is folded away behind this button, so its bell
-                      // rings here — a brand admin waiting on the platform must
-                      // not have to open the panel to find out.
+                      // Support is folded behind this button, so its bell rings here.
                       <TicketBell count={ticketUnread.requester} collapsed />
                     ) : (
                       <>
@@ -586,10 +529,7 @@ export function Sidebar() {
             const visibleAdminItems = ADMIN_NAV.filter((item) => {
               if (item.superAdminOnly && !isSuperAdmin) return false;
               if (item.adminOnly && !isAdmin) return false;
-              // Overview, Customers, Subscriptions and the Voice Library belong
-              // to a brand, not the platform — the super admin doesn't run a
-              // tenant's customer base. Keyed off the item's own permission
-              // section, so the nav and the API can't drift apart.
+              // Brand-scoped sections are refused to the super admin; keyed off the permission so nav and API can't drift.
               if (!canUseSection(user?.role, item.permission, user?.brandId)) return false;
               if (item.permission && !hasPermission(item.permission)) return false;
               return true;
@@ -616,10 +556,7 @@ export function Sidebar() {
                 >
                   <Icon className="size-[18px] shrink-0" />
                   {!isCollapsed && <span>{label}</span>}
-                  {/* Which inbox this row IS decides which count it rings for:
-                      `tickets` is a brand's customer queue, `brand_tickets` the
-                      platform's. Both live at the same path, so the permission
-                      is what tells them apart. */}
+                  {/* Same path for both inboxes, so the permission decides which count rings. */}
                   {permission === "tickets" && (
                     <TicketBell count={ticketUnread.supportInbox} collapsed={isCollapsed} />
                   )}
@@ -712,10 +649,7 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Call Assistant — sticky footer below the scrollable nav, so it stays
-            visible while the menu list scrolls. Hidden for anyone without a
-            customer workspace: it dials the account's own AI agent, and neither
-            STAFF nor the SUPER_ADMIN has one. */}
+        {/* Sticky footer so it stays visible while the nav scrolls. Hidden without a customer workspace (no agent to dial). */}
         {!platformOnly && (
           <div className="shrink-0 border-t border-border p-3">
             <Button
@@ -746,10 +680,7 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* Admin: the customer modules, in a panel over the sidebar. Desktop
-            pins it to the viewport at the sidebar's full width, so it also
-            works over the collapsed 72px rail (it simply overhangs the page
-            as a flyout); on mobile it fills the drawer. */}
+        {/* Desktop pins the panel to the viewport at full width so it works over the collapsed rail; mobile fills the drawer. */}
         {userNavAsPanel && userItems.length > 0 && (
           <UserNavPanel
             open={userPanelOpen}
@@ -768,12 +699,8 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Desktop sidebar. z-45: `sticky` makes the aside a stacking context,
-          so the User Dashboard panel inside can never out-rank the page
-          header (z-40) on its own — and over the collapsed rail the panel
-          overhangs the page, right where the header sits. Above the header,
-          below every dialog / sheet / palette (z-50+); the aside never
-          overlaps page content otherwise. */}
+      {/* z-45: sticky makes the aside a stacking context, so the panel inside can't out-rank the header (z-40)
+          on its own. Above the header, below dialogs/sheets (z-50+). */}
       <aside
         className={cn(
           "sticky top-0 z-45 hidden h-dvh shrink-0 flex-col overflow-hidden border-r border-border bg-warm transition-[width] duration-200 nav:flex",

@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Persisted prompt-summary cache. The summariser makes a slow OpenAI call; the
- *  DB cache lets an unchanged prompt skip it — even after a cold start (the main
- *  cause of the 15-20s test-call connect). These tests prove a DB hit skips the
- *  LLM entirely, and a miss computes then persists the result.
- * ------------------------------------------------------------------ */
+// Persisted prompt-summary cache: a DB hit must skip the slow OpenAI call even
+// after a cold start (the cause of the 15-20s test-call connect); a miss persists.
 
 const h = vi.hoisted(() => ({
   openaiConfigured: true,
@@ -18,11 +14,8 @@ vi.mock("./settings.js", () => ({
   integrationsStatus: () => ({ openai: h.openaiConfigured }),
   getEffective: (k: string) => (k === "openai.apiKey" ? "sk-test" : k === "openai.model" ? "gpt-5" : ""),
 }));
-// The double must mirror the module's real export surface: promptSummarizer also
-// imports `openAiTokenUnits` (it reports token usage to the API Center tracer).
-// These tests don't care what the call cost, so a zero is fine — but the export
-// has to exist, or accessing it throws and the summariser falls back to the
-// original prompt, which looks exactly like an LLM failure.
+// openAiTokenUnits must exist on the mock: a missing export throws and the
+// summariser falls back to the original prompt, which looks like an LLM failure.
 vi.mock("../lib/openai.js", () => ({
   buildChatBody: (b: unknown) => b,
   openAiTokenUnits: () => 0,

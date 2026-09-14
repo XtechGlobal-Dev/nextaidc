@@ -8,13 +8,8 @@ import {
 
 export type { SmsInfoValues } from "../lib/smsInfoItems.js";
 
-/* ------------------------------------------------------------------ *
- *  "Text Info to Callers" — resolve what an owner's AI may text a caller.
- *
- *  The rendered message bodies are resolved HERE, server-side, from the owner's
- *  own templates and profile. The assistant only ever names a topic, so a caller
- *  can't talk it into sending arbitrary text from the business's number.
- * ------------------------------------------------------------------ */
+// "Text Info to Callers": message bodies are rendered server-side from the owner's own
+// data. The assistant only names a topic, so a caller can't make it send arbitrary text.
 
 export interface SmsInfoEntry {
   item: SmsInfoItem;
@@ -47,11 +42,7 @@ const DISABLED: SmsInfoConfig = {
   values: EMPTY_VALUES,
 };
 
-/**
- * Load the owner's SMS-on-request catalogue with every message pre-rendered.
- * Best-effort — returns a disabled config on any miss or failure, so a tool call
- * mid-call degrades to "I'll read it out" instead of crashing.
- */
+/** Loads the owner's SMS-on-request catalogue, pre-rendered. Returns a disabled config on any failure so a mid-call tool call degrades instead of crashing. */
 export async function getSmsInfoConfig(userId: string | null | undefined): Promise<SmsInfoConfig> {
   if (!userId) return DISABLED;
   try {
@@ -103,9 +94,7 @@ export function findSmsInfoEntry(config: SmsInfoConfig, topic: string): SmsInfoE
   );
 }
 
-/** Resolve a list of requested topics to their entries — validated against the
- *  owner's catalogue, de-duplicated, in the order the caller asked. Unknown
- *  topics are simply dropped. */
+/** Maps requested topics to entries: validated, de-duplicated, caller's order; unknown topics dropped. */
 export function resolveSmsInfoTopics(config: SmsInfoConfig, topics: string[]): SmsInfoEntry[] {
   const out: SmsInfoEntry[] = [];
   const seen = new Set<string>();

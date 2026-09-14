@@ -10,23 +10,8 @@ import {
 } from "../src/lib/agentConfig.js";
 import { upsertAssistant } from "../src/services/vapi.js";
 
-/* ------------------------------------------------------------------ *
- *  One-off backfill: re-derive opening greetings that still carry a
- *  PREVIOUS business name.
- *
- *  The greeting is stored with the name baked in ("Thanks for calling
- *  Acme. How can I help you today?"), and renaming the business didn't
- *  update it — so those agents kept greeting callers with the old name
- *  on every live call. The code fix keeps them in sync from now on;
- *  this heals configs saved before it, recompiles their master prompt
- *  and pushes the corrected greeting to the live Vapi assistant.
- *
- *  Greetings the owner wrote themselves don't match the generated shape
- *  and are never touched.
- *
- *  Run with:  npm run backfill-greetings   (add --dry-run to preview,
- *  --skip-sync to write the DB without touching Vapi).
- * ------------------------------------------------------------------ */
+// One-off: re-derive auto-generated greetings still carrying a previous business name, recompile and
+// push to Vapi. Owner-written greetings are never touched. Flags: --dry-run, --skip-sync.
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const SKIP_SYNC = process.argv.includes("--skip-sync");

@@ -99,9 +99,7 @@ export default function Step3Number() {
   const [extra, setExtra] = useState<string[] | null>(null);
   const [extraSelected, setExtraSelected] = useState<string | null>(null);
   const [prefix, setPrefix] = useState<string>("");
-  // Twilio-style digit search. Kept separate from `prefix`: a typed pattern is the
-  // more specific request, so the server prefers it and we clear the prefix when a
-  // search runs (and vice versa) rather than letting two filters silently fight.
+  // Digit search, kept separate from `prefix` so the two filters don't silently fight.
   const [digits, setDigits] = useState("");
   const [match, setMatch] = useState<NumberMatch>("anywhere");
   // Anything narrowing the list right now — drives whether "Reset" is offered.
@@ -110,8 +108,7 @@ export default function Step3Number() {
   const [buying, setBuying] = useState(false);
   // Going live ends the trial and charges the saved card — confirm before doing it.
   const [confirmOpen, setConfirmOpen] = useState(false);
-  // The plan the trial user will be charged for (name + price), for the confirm
-  // dialog. Only fetched (and the dialog only shown) while they're still trialing.
+  // Plan name + price for the confirm dialog; only fetched while still trialing.
   const trial = useTrialStore((s) => s.trial);
   const onTrial = trial?.phase === "trial";
   const [sub, setSub] = useState<SubscriptionDetail | null>(null);
@@ -279,9 +276,7 @@ export default function Step3Number() {
   );
   const available = matching.filter((n) => !n.taken);
 
-  // Auto-select the first free number once the pool loads — but never while the
-  // user is looking at a brand-new number they picked, or it would silently
-  // re-arm the pool selection they just moved away from.
+  // Auto-select the first free number, but never while a brand-new pick is active or it re-arms the pool selection.
   useEffect(() => {
     if (available.length === 0 || extraSelected) return;
     const stillValid = selectedNumber && available.some((n) => n.number === selectedNumber);
@@ -290,9 +285,7 @@ export default function Step3Number() {
 
   const poolSelected = available.some((n) => n.number === selectedNumber);
 
-  /* The two lists are ONE choice, so picking in either clears the other —
-     otherwise both showed as selected and Save quietly claimed the pool number,
-     ignoring the brand-new one the user had chosen. */
+  // Both lists are one choice: picking in either clears the other, or Save quietly claimed the pool number.
   function pickPoolNumber(number: string) {
     setExtraSelected(null);
     selectNumber(number);
@@ -306,10 +299,7 @@ export default function Step3Number() {
   // Continue once EITHER list has a pick; nothing selected → the button stays off.
   const canContinue = poolSelected || !!extraSelected;
 
-  // The real work: claim a pool number (or buy a brand-new one), then advance.
-  // Assigning the number ends a trial user's trial and charges their saved card
-  // server-side — a failed charge comes back as an error here and the number
-  // isn't assigned, so the catch surfaces "update your card" and we stay put.
+  // Claim (or buy) then advance. Assigning ends the trial and charges server-side; a failed charge errors here and we stay put.
   async function proceed() {
     if (extraSelected) {
       await handleBuy();
@@ -329,10 +319,7 @@ export default function Step3Number() {
     }
   }
 
-  // Button entry point. Block without a pick (the disabled attribute is only
-  // visual — strippable in devtools; the server validates regardless). A trial
-  // user must confirm first, since going live ends the trial and charges now;
-  // everyone else proceeds straight away.
+  // Re-check the pick here (disabled is strippable in devtools). Trial users confirm first since going live charges now.
   function handleContinue() {
     if (saving || buying) return;
     if (!canContinue) {
@@ -453,9 +440,7 @@ export default function Step3Number() {
 
       {canBuyMore && (
         <div className="space-y-3">
-          {/* One panel for both filters. They act together, so presenting them as
-              two loose fields (with an orphaned reset link) read as unrelated
-              controls and left the reset wrapping onto its own line. */}
+          {/* One panel for both filters; as loose fields they read as unrelated and the reset link wrapped. */}
           <div className="rounded-xl border border-border bg-muted/40">
             <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2">
               <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -475,10 +460,7 @@ export default function Step3Number() {
             </div>
 
             <div className="space-y-2.5 p-3.5">
-              {/* Digits + where they sit, modelled on Twilio's own picker. The
-                  input and match selector share a row and flex to the modal's
-                  width; the button drops below on narrow screens rather than
-                  squeezing them. */}
+              {/* Digits + position, modelled on Twilio's picker; the button wraps below on narrow screens. */}
               <div className="flex flex-wrap items-center gap-2">
                 <Input
                   value={digits}
@@ -580,10 +562,7 @@ export default function Step3Number() {
                       : "No new numbers found — try a different country."}
                   </p>
                 ) : (
-                  /* Same row treatment as the pool list above — one visual
-                     language for what "selected" means, in either list. The
-                     purchase itself happens on Buy and continue, so there's no
-                     separate confirm button competing with it. */
+                  /* Same row treatment as the pool list; the purchase happens on Buy and continue, no separate confirm. */
                   extra.map((number) => {
                     const sel = extraSelected === number;
                     return (
@@ -655,9 +634,7 @@ export default function Step3Number() {
   );
 }
 
-/** Confirmation before a trial user goes live. Assigning a number ends their free
- *  trial and charges the saved card for the plan they picked at onboarding — this
- *  spells that out and takes an explicit action before the charge. */
+/** Confirm before a trial user goes live: assigning a number ends the trial and charges the saved card. */
 function GoLiveConfirm({
   open,
   onOpenChange,
@@ -672,14 +649,8 @@ function GoLiveConfirm({
   onConfirm: () => void;
 }) {
   const planName = sub?.planName?.trim() || "your plan";
-  // What the card is actually charged, not the plan's list price. Going live
-  // ends the trial and bills immediately, and Stripe applies the coupon attached
-  // to the subscription — so quoting the list price here told the customer a
-  // number that didn't match their invoice.
-  //
-  // Gated on cyclesLeft: a coupon whose cycles are spent has already been
-  // detached, and this charge is full price. Showing the discount then would be
-  // the same mistake in the other direction.
+  // Quote what the card is actually charged (Stripe applies the coupon), not list price, or it won't match
+  // the invoice. Gated on cyclesLeft: a spent coupon is already detached and this charge is full price.
   const listCents = sub?.priceCents ?? 0;
   const discount = sub?.discount && sub.discount.cyclesLeft > 0 ? sub.discount : null;
   const dueCents = listCents - couponDiscountCents(listCents, discount?.percentOff);
@@ -690,9 +661,7 @@ function GoLiveConfirm({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      {/* The QuickSetupModal sits at z-[1001]; lift this confirm above it (and its
-          z-[1100] dropdowns) or it opens hidden behind the modal — looking like the
-          button did nothing. */}
+      {/* QuickSetupModal is z-[1001] and its dropdowns z-[1100]; below that this opens hidden behind the modal. */}
       <DialogContent className="z-[1200]" overlayClassName="z-[1200]">
         <DialogHeader>
           <DialogTitle>Activate your plan and go live?</DialogTitle>

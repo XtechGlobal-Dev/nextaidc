@@ -1,22 +1,5 @@
-/**
- * Per-country "regional style" persona blocks. These make the live assistant
- * SOUND local to the caller's country — an Australian caller hears an assistant
- * that talks like an Aussie receptionist, an American caller hears an American
- * one, and so on. This builds familiarity and trust on the first call.
- *
- * Scope on purpose: these are the REGIONAL DELTA only — the country-specific
- * word choices and acknowledgements. The generic style (be brief, ask one
- * question at a time, never interrupt…) already lives in the master prompt's
- * `## CONVERSATION STYLE` block, so we don't repeat it here.
- *
- * NOTE: word choice is all a text prompt can control. The audible ACCENT comes
- * from the TTS voice, not the prompt — a US-voiced assistant saying "no worries"
- * still sounds American. Mapping country → voice is a separate, future concern.
- *
- * These are the built-in defaults for the English-speaking markets where local
- * phrasing actually differs. An admin can override or extend them per country
- * via the `prompt.countryStyles` platform setting (see services/settings.ts).
- */
+/** Per-country regional style — word choice only (the generic style lives in CONVERSATION STYLE, and
+ *  accent comes from the TTS voice, not the prompt). Admin-overridable via `prompt.countryStyles`. */
 export const BUILTIN_COUNTRY_STYLES: Record<string, string> = {
   AU: [
     "Sound like an experienced Australian receptionist.",

@@ -164,9 +164,7 @@ function statusBadge(status: string): { label: string; variant: "success" | "pri
 
 export default function AdminOverviewPage() {
   const [data, setData] = useState<AdminOverview | null>(null);
-  // Re-run on every live tick so the KPIs (calls, customers, leads) stay current
-  // without a manual reload. Data is only swapped on success, so the already-
-  // rendered cards never flash back to skeletons on a background refresh.
+  // Refetch on each live tick; data only swaps on success so cards never flash back to skeletons.
   const liveTick = useLiveTick();
 
   useEffect(() => {

@@ -9,24 +9,8 @@ import { deployTenantMigrations, latestTenantMigration } from "./tenantMigration
 import { rebuildDirectoryFromTenant } from "./customerDirectory.js";
 import { env } from "../env.js";
 
-/* ------------------------------------------------------------------ *
- *  A brand's own database: creating it, keeping it current, retiring it.
- *
- *  Every brand gets one at creation (services/brands.ts calls in here). Two
- *  providers, one code path:
- *
- *    neon         — its own Neon project in the chosen region. Production.
- *    local-schema — a schema on the platform's own database, when there is
- *                   no NEON_API_KEY. Development and tests, so the whole flow
- *                   runs on a laptop with nothing extra.
- *
- *  The order matters throughout: a brand only starts routing to its database
- *  once the schema is confirmed and its tenant_info row names the brand. Until
- *  then `status` is anything but `active`, the brand's door stays shut, and a
- *  run that dies halfway leaves a brand that says "failed — Retry", never one
- *  that half-works. Retrying resumes: an existing project or schema is reused,
- *  never duplicated.
- * ------------------------------------------------------------------ */
+// A brand's own DB: create, keep current, retire. neon in prod, local-schema without NEON_API_KEY.
+// Nothing routes until tenant_info names the brand — a half-finished run says "failed", and a retry resumes.
 
 export type TenantProvider = "neon" | "local-schema";
 
@@ -36,9 +20,7 @@ export const TENANT_RETIREMENT_DAYS = 30;
 /** Rows copied per batch. Transcripts make these rows large, so the batch is
  *  small — this is a background migration, not a race. */
 
-/** A short-lived client for DDL and checks, on the DIRECT (unpooled) endpoint —
- *  schema changes take session-level locks a transaction-mode pooler cannot
- *  hold. */
+// Short-lived client on the DIRECT endpoint — DDL takes session locks a pooler can't hold.
 async function withDirect<T>(directUrl: string, fn: (db: PrismaClient) => Promise<T>): Promise<T> {
   const db = new PrismaClient({ datasources: { db: { url: directUrl } } });
   try {
@@ -48,21 +30,7 @@ async function withDirect<T>(directUrl: string, fn: (db: PrismaClient) => Promis
   }
 }
 
-/**
- * A connection string for one Postgres schema on the same database.
- *
- * Two parameters, because Prisma treats them differently. `schema` is what the
- * generated client qualifies its own queries with, and where the CLI keeps that
- * tenant's `_prisma_migrations` — so tenants sharing a database still have
- * separate histories. `options` is handed to Postgres at connection start and
- * sets the search_path, which is what RAW SQL — the partition sweep, the
- * call-details helpers, the tenant_info claim — resolves unqualified names
- * against. Prisma does not set the search_path from `schema` alone; without
- * `options` every raw statement would quietly land in `public`.
- *
- * Percent-encoded by hand: URLSearchParams writes the space as "+", which libpq
- * does not read back as a space.
- */
+/** Connection string for one schema. Needs both `schema` (Prisma's queries + migration history) and `options` search_path (raw SQL) — without `options` raw statements land in `public`. Hand-encoded because URLSearchParams writes "+" for space, which libpq won't read. */
 export function withSchema(url: string, schema: string): string {
   const u = new URL(url);
   u.searchParams.delete("schema");
@@ -91,14 +59,7 @@ export interface ProvisionResult {
   schemaVersion: string;
 }
 
-/**
- * Give a brand its own database and bring it to the current schema.
- *
- * Idempotent: a brand whose database is already active is returned as-is, and
- * a brand with a half-finished row resumes with the project or schema it
- * already has. The failure this must never cause is two databases for one
- * brand.
- */
+/** Gives a brand its own DB at the current schema. Idempotent; a half-finished row resumes with what it has — never two databases for one brand. */
 export async function provisionBrandDatabase(opts: {
   brandId: string;
   region?: string;
@@ -142,9 +103,7 @@ export async function provisionBrandDatabase(opts: {
   } else if (provider === "neon") {
     region = opts.region || env.NEON_DEFAULT_REGION;
     if (!region) {
-      // A residency promise names a jurisdiction. Letting Neon pick would put
-      // the customer's data in whatever region is default — the one thing a
-      // dedicated database is for.
+      // Data residency is the point of a dedicated DB — never let Neon pick the region.
       throw new Error(
         "A region is required for a tenant database — set NEON_DEFAULT_REGION or choose one.",
       );
@@ -159,9 +118,8 @@ export async function provisionBrandDatabase(opts: {
     // the platform's own connection string may have changed since.
     schemaName = existing?.schemaName || localSchemaName(brand.slug);
     const base = localBaseUrls();
-    // The direct (unpooled) endpoint for BOTH — a pooler may drop the
-    // connection-start option that sets the search_path, and this is the
-    // development shape, where connection counts don't matter.
+    // Direct endpoint for BOTH — a pooler may drop the search_path option, and
+    // connection counts don't matter in the dev shape.
     url = withSchema(base.directUrl, schemaName);
     directUrl = url;
     // Created here rather than left to the migrate step, so the schema exists
@@ -202,9 +160,7 @@ export async function provisionBrandDatabase(opts: {
 
     await withDirect(directUrl, async (db) => {
       await claimTenant(db, brand);
-      // Provision this month and the buffer immediately, so the first call
-      // written after cutover lands in a real partition rather than the
-      // catch-all.
+      // Partitions now, so the first call after cutover lands in a real one, not the catch-all.
       await sweepCallPartitions(0, new Date(), db, "call_logs");
     });
 
@@ -214,14 +170,12 @@ export async function provisionBrandDatabase(opts: {
     });
 
     // --- 3. the brand's defaults ------------------------------------------
-    // Its support queues, and Main's directory of its people (empty for a
-    // brand-new brand; whole again for one being re-provisioned).
+    // Support queues, and Main's directory of its people.
     await seedSupportQueues(brand.id, directUrl);
     await rebuildDirectoryFromTenant(brand.id, directUrl);
 
     // --- 4. cut over -----------------------------------------------------
-    // Only now does anything route here. Everything above was preparation the
-    // running system never depended on.
+    // Only now does anything route here.
     await prisma.brandDatabase.update({
       where: { brandId: brand.id },
       data: { status: "active", migratedAt: new Date(), error: "" },
@@ -239,10 +193,7 @@ export async function provisionBrandDatabase(opts: {
   }
 }
 
-/**
- * Stamp the database with the brand it belongs to — or refuse, if it already
- * belongs to another. Re-running for the same brand is a no-op.
- */
+// Stamps tenant_info with the brand, or refuses if the DB already belongs to another.
 async function claimTenant(db: PrismaClient, brand: { id: string; slug: string }): Promise<void> {
   const rows = await db.$queryRawUnsafe<{ brandId: string }[]>(
     `SELECT "brandId" FROM "tenant_info" WHERE "id" = 'self'`,
@@ -261,13 +212,8 @@ async function claimTenant(db: PrismaClient, brand: { id: string; slug: string }
   );
 }
 
-/**
- * A brand's starter customer-support queues, in its own database (phase 4).
- * Only when it has none — a brand that deleted "Sales" must not find it back.
- * Through the direct URL because the database is not routable yet (or is
- * mid-migration); the ticket service is imported lazily to keep it out of this
- * module's import graph.
- */
+// Starter support queues, only when the brand has none (a deleted "Sales" must not come back).
+// Direct URL because the DB isn't routable yet; lazy import keeps tickets out of this graph.
 async function seedSupportQueues(brandId: string, directUrl: string): Promise<void> {
   const tenant = new TenantClient({ datasources: { db: { url: directUrl } } });
   try {
@@ -280,13 +226,7 @@ async function seedSupportQueues(brandId: string, directUrl: string): Promise<vo
 
 /* ------------------------- Keeping tenants current ------------------------ */
 
-/**
- * Bring one tenant's schema up to date. Used by `npm run tenant:migrate`.
- *
- * Routing stops while it runs (`migrating`) and resumes only on success; a
- * tenant left behind by a failed deploy keeps its door shut rather than run
- * new code against an old table. The error is recorded for the brand's page.
- */
+/** Migrates one tenant (`npm run tenant:migrate`). Routing stops while it runs and resumes only on success — a failed deploy keeps the door shut rather than run new code on an old table. */
 export async function migrateTenant(brandId: string): Promise<{ from: string; to: string }> {
   const row = await prisma.brandDatabase.findUnique({ where: { brandId } });
   if (!row) throw new Error(`Brand ${brandId} has no database.`);
@@ -297,9 +237,8 @@ export async function migrateTenant(brandId: string): Promise<{ from: string; to
   invalidateTenantRegistry();
   try {
     await deployTenantMigrations(decryptSecret(row.directUrlEncrypted));
-    // Month partitions for a call table the migration may just have created —
-    // the same step provisioning takes for a new brand, so the first call
-    // after the upgrade lands in a real partition rather than the catch-all.
+    // Same partition step as provisioning, so the first call after the upgrade
+    // lands in a real partition rather than the catch-all.
     const raw = new PrismaClient({
       datasources: { db: { url: decryptSecret(row.directUrlEncrypted) } },
     });
@@ -328,11 +267,7 @@ export async function migrateTenant(brandId: string): Promise<{ from: string; to
   }
 }
 
-/**
- * Stop routing to any active tenant whose schema is older than this build's,
- * and say so loudly. Run at boot: a deploy that shipped a tenant migration but
- * never ran `tenant:migrate` must not serve new code from an old table.
- */
+/** At boot: stops routing to tenants whose schema is behind this build, loudly — new code must not run against an old table. */
 export async function markStaleTenants(): Promise<string[]> {
   const latest = latestTenantMigration();
   const stale = await prisma.brandDatabase.findMany({
@@ -358,11 +293,7 @@ export async function markStaleTenants(): Promise<string[]> {
 
 /* ------------------------------ Retirement -------------------------------- */
 
-/**
- * Record a brand's database for removal 30 days from now. Called before the
- * brand row is deleted (which cascades its brand_databases row); until the
- * sweep runs, the database is untouched and the brand can be restored by hand.
- */
+/** Queues a brand's DB for removal in 30 days. Call before deleting the brand row (it cascades brand_databases); until then the DB is untouched and restorable. */
 export async function retireBrandDatabase(brandId: string): Promise<void> {
   const row = await prisma.brandDatabase.findUnique({
     where: { brandId },

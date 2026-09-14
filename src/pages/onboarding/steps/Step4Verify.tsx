@@ -67,10 +67,8 @@ export default function Step4Verify() {
       message={ONBOARDING_SPEECH.step4}
       aside={<AgentCallPreview scenario="email" />}
     >
-      {/* Kept as a <form> for a11y, but it never natively submits — the button
-          is type="button" and Enter is handled below — so GTM's form-submission
-          listener never fires `gtm.formSubmit`. Only our own `sign_up` event
-          goes out (from registerVerify). */}
+      {/* A <form> for a11y, but it never natively submits (type="button" + manual Enter) so GTM's
+          `gtm.formSubmit` never fires — only our `sign_up` event from registerVerify. */}
       <form
         noValidate
         onSubmit={(e) => e.preventDefault()}

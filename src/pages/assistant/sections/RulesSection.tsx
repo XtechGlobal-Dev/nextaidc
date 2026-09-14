@@ -74,10 +74,8 @@ export function RulesSection() {
 
   const set = (patch: Partial<typeof rules>) => update("rules", patch);
 
-  // GET /api/agent resolves the operating timezone from the business's phone
-  // number + address at signup and on read, and normalises legacy display
-  // labels ("Sydney (AEST/AEDT)"), so a stored zone is expected here. The
-  // browser fallback only covers an offline/mock config — not the real path.
+  // The API resolves + normalises the timezone (incl. legacy labels like "Sydney (AEST/AEDT)"),
+  // so a stored zone is expected; the browser fallback only covers an offline/mock config.
   const storedZone = useMemo(() => normalizeTimeZone(rules.timezone), [rules.timezone]);
   const effectiveZone = useMemo(
     () => storedZone || canonicalTimeZone(browserTimeZone()),

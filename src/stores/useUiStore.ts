@@ -8,9 +8,8 @@ interface UiState {
   assistantTesterOpen: boolean;
   themeMode: ThemeMode;
   mobileSidebarOpen: boolean;
-  /** Command palette (search). Lives here, not in AppHeader, because the
-   *  desktop header is hidden below the `nav` breakpoint — the mobile top bar
-   *  in AppLayout needs to open the same palette. */
+  /** Command palette. Lives here, not in AppHeader, because the mobile top bar in AppLayout
+   *  must open the same palette while the desktop header is hidden. */
   commandPaletteOpen: boolean;
   toggleSidebar: () => void;
   setAssistantTester: (open: boolean) => void;

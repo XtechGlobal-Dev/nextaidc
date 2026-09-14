@@ -1,20 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Global per-call duration ceiling.
- *
- *  A customer's own entitlement already caps how long a call may run (see
- *  remainingCallSeconds in trial.ts) — but that budget is per BILLING CYCLE, not
- *  per call, so one caller who stays on the line deliberately can drain a whole
- *  month of a customer's minutes in a single sitting. This adds a second,
- *  platform-wide ceiling that no single call may exceed, whatever the customer's
- *  plan says.
- *
- *  It is deliberately global and admin-owned: it is an abuse control, not a plan
- *  feature, so a customer can neither see nor raise it.
- *
- *  Enforcement is Vapi's, via the assistant's `maxDurationSeconds` — the same
- *  field the entitlement cap already uses. That means it holds for real inbound
- *  calls and browser test calls alike, and cannot be bypassed from the client.
- * ------------------------------------------------------------------------- */
+// Platform-wide per-call ceiling. The entitlement budget is per billing cycle, so one caller could
+// drain a month of minutes in a sitting. Admin-owned abuse control (customers can't see or raise it); enforced by Vapi's maxDurationSeconds so it can't be bypassed client-side.
 import { prisma } from "../prisma.js";
 
 const ENABLED_KEY = "call.maxDuration.enabled";
@@ -24,15 +9,11 @@ const SECONDS_KEY = "call.maxDuration.seconds";
  *  purpose of this module is that it is tunable without a deploy. */
 export const DEFAULT_MAX_CALL_SECONDS = 300;
 
-/** Below this the ceiling stops being an abuse control and starts cutting
- *  ordinary conversations; above it the call costs more than the abuse it
- *  prevents. Also keeps the value inside Vapi's own accepted range. */
+/** Bounds: below cuts ordinary conversations, above stops preventing abuse; also keeps inside Vapi's accepted range. */
 export const MIN_MAX_CALL_SECONDS = 60;
 export const MAX_MAX_CALL_SECONDS = 3600;
 
-/** How long before the ceiling the assistant is told to start closing, so the
- *  caller gets a sentence rather than a dead line. Must stay comfortably under
- *  MIN_MAX_CALL_SECONDS or a short ceiling would warn before the call began. */
+/** Lead time before the ceiling to start closing. Must stay well under MIN_MAX_CALL_SECONDS or a short ceiling warns before the call begins. */
 export const WRAP_UP_LEAD_SECONDS = 30;
 
 export interface CallDurationCap {
@@ -40,9 +21,7 @@ export interface CallDurationCap {
   seconds: number;
 }
 
-/** The configured ceiling. Absent rows → the default, switched OFF: turning this
- *  on is an explicit act, so deploying the feature never silently starts cutting
- *  live calls on existing accounts. */
+/** The configured ceiling. Absent rows = default, OFF — deploying the feature must never silently start cutting live calls. */
 export async function getCallDurationCapSetting(): Promise<CallDurationCap> {
   const rows = await prisma.platformSetting.findMany({
     where: { key: { in: [ENABLED_KEY, SECONDS_KEY] } },
@@ -71,13 +50,7 @@ export async function setCallDurationCapSetting(input: CallDurationCap): Promise
   return { enabled: input.enabled, seconds };
 }
 
-/** Apply the ceiling to a per-user entitlement cap.
- *
- *  `entitlementSeconds` is what the customer's plan allows (null = unlimited).
- *  The ceiling only ever LOWERS that: a customer with three minutes left still
- *  gets three minutes, not five. An unlimited plan becomes the ceiling, which is
- *  the point — an unlimited customer is exactly who a minute-burner would target
- *  if the ceiling let them through. */
+/** Applies the ceiling to an entitlement cap (null = unlimited). Only ever LOWERS it; an unlimited plan becomes the ceiling, since that's exactly who a minute-burner targets. */
 export function applyCallDurationCap(
   entitlementSeconds: number | null,
   cap: CallDurationCap,

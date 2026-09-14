@@ -1,21 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Permanent number removal.
- *
- *  When a customer discontinues and their warning window expires, the
- *  number goes back to Twilio for good — it does NOT land in a pool.
- *  This is the one path in the codebase that destroys an asset the
- *  platform pays for, so the order of operations and the failure
- *  behaviour both matter more than usual.
- * ------------------------------------------------------------------ */
+// Permanent number removal: back to Twilio for good, NOT into a pool. The one
+// path that destroys a paid-for asset, so ordering and failure behaviour matter.
 
 process.env.DATABASE_URL ||= "postgresql://user:pass@localhost:5432/test";
 process.env.JWT_SECRET ||= "test-secret-at-least-thirty-two-characters-long";
 
-/** Mocks are declared with the arguments they actually receive: a bare
- *  `vi.fn(async () => x)` types as zero-arity, so passing anything to it fails
- *  the typecheck even though the test runs fine. */
+// Mocks declare their args: a bare `vi.fn(async () => x)` is zero-arity and fails typecheck when called with anything.
 const h = vi.hoisted(() => ({
   findMany: vi.fn(),
   deleteNumber: vi.fn(async (_args: unknown) => ({})),
@@ -164,14 +155,8 @@ describe("releaseNumberPermanently", () => {
   });
 });
 
-/* ------------------------------------------------------------------ *
- *  Brand reclaim — "use it or lose it".
- *
- *  A number a brand unassigns is theirs to reuse, but not forever: if
- *  they don't, the platform takes it back into the shared pool. The
- *  sweep that does it runs hourly against live inventory, so the filter
- *  it applies is worth pinning down exactly.
- * ------------------------------------------------------------------ */
+// Brand reclaim ("use it or lose it"): an unassigned number returns to the shared
+// pool after a window. The sweep runs hourly on live inventory, so pin the filter exactly.
 
 const { sweepBrandReclaims, getReclaimDays } = await import("./phones.js");
 

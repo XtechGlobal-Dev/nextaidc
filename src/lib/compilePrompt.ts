@@ -2,12 +2,8 @@ import type { AgentConfig } from "@/types";
 import { getVoice } from "@/data/voices";
 import { normalizeTimeZone, timeZoneLabel } from "@/lib/timezone";
 
-/* ------------------------------------------------------------------ *
- *  compilePrompt — THE core function.
- *  Turns the structured AI Brain config into a clean, labelled LLM
- *  system prompt. The Advanced tab shows this as editable "PREVIEW"
- *  blocks with deep-links back to each section.
- * ------------------------------------------------------------------ */
+// Turns the structured AI Brain config into a labelled LLM system prompt; the Advanced tab shows the
+// blocks as an editable preview with deep links back to each section.
 
 /** Context from the owner's profile, injected into the prompt compiler. */
 export interface CompileContext {
@@ -38,24 +34,15 @@ export function autoGreeting(businessName?: string | null): string {
  *  "How can I help you today?" and legacy "How can I help you?" endings. */
 const AUTO_GREETING_RE = /^thanks for calling(?: .+?)?\. how can i help you(?: today)?\?$/i;
 
-/** Keep the greeting's business name in sync with the account's.
- *
- *  The greeting is stored with the business name baked in, so renaming the
- *  business used to leave the agent greeting callers with the OLD name. If the
- *  stored greeting is still one of ours (whatever name it carries), rebuild it
- *  from the current business name; a greeting the owner wrote is left alone.
- *  Mirrors resolveGreeting in server/src/lib/agentConfig.ts. */
+/** Rebuild an auto-generated greeting from the current business name (a rename used to leave the OLD name
+ *  baked in); an owner-written greeting is left alone. Mirrors server/src/lib/agentConfig.ts. */
 export function resolveGreeting(greeting: string | undefined | null, businessName?: string | null): string {
   const current = greeting?.trim();
   if (!current) return autoGreeting(businessName);
   return AUTO_GREETING_RE.test(current) ? autoGreeting(businessName) : current;
 }
 
-/** Did the OWNER write this greeting, rather than us generating it?
- *
- *  Same test `resolveGreeting` uses to decide whether a business rename may
- *  rewrite the greeting — exported so the editor can say which state it's in
- *  without a second copy of the pattern drifting out of step. */
+/** Did the owner write this greeting? Same test resolveGreeting uses, exported so the editor doesn't keep a drifting copy. */
 export function isCustomGreeting(greeting: string | undefined | null): boolean {
   const current = greeting?.trim();
   return !!current && !AUTO_GREETING_RE.test(current);
@@ -87,11 +74,8 @@ export function replaceBusinessName(text: string, from: string, to: string): str
   }
 }
 
-/** Carry a business rename through every field that baked the OLD name into
- *  free text — the onboarding-generated scenarios, FAQs and facts that name the
- *  business ("The caller is an existing customer of Acme"). Returns the original
- *  config when nothing matched, so callers can skip a needless update.
- *  Mirrors renameBusinessInConfig in server/src/lib/agentConfig.ts. */
+/** Carry a business rename through every free-text field that baked the old name in. Returns the same
+ *  config object when nothing matched so callers can skip the update. Mirrors server/src/lib/agentConfig.ts. */
 export function renameBusinessInConfig(
   config: AgentConfig,
   previousName: string | null | undefined,
@@ -287,10 +271,7 @@ export function compileBlocks(config: AgentConfig, ctx?: CompileContext): Compil
     });
   }
 
-  // Timezone — always in the prompt so the assistant knows the business's
-  // region and local time (Australian vs Indian vs American caller base).
-  // Emitted as a readable label plus the IANA zone: the label is what the model
-  // should reason in, the IANA zone removes any DST ambiguity.
+  // Timezone: readable label for the model to reason in, plus the IANA zone to remove DST ambiguity.
   const zone = normalizeTimeZone(rules.timezone);
   if (zone) {
     blocks.push({
@@ -312,15 +293,8 @@ export function compileBlocks(config: AgentConfig, ctx?: CompileContext): Compil
   return blocks;
 }
 
-/**
- * The admin-editable scaffold wrapped around every assistant's prompt.
- * {{assistantName}} → the assistant's name; {{businessName}} → the owner's
- * business name; {{sections}} → the per-customer blocks compiled from the
- * structured config. When the admin hasn't overridden it (or before the
- * override loads), this default is used.
- *
- * Keep this identical to the server default (server/src/lib/agentConfig.ts).
- */
+/** Default admin-editable scaffold ({{assistantName}}, {{businessName}}, {{sections}} placeholders).
+ *  Keep identical to the server default in server/src/lib/agentConfig.ts. */
 export const DEFAULT_PROMPT_TEMPLATE = [
   "# NAME: {{assistantName}}",
   "{{identity}}",
@@ -393,12 +367,8 @@ export const DEFAULT_PROMPT_TEMPLATE = [
   "## CLOSING\nOnce you have the useful details, close in ONE short line — don't linger and never read their details back. Confirm only what actually matters (like the time booked or what they need), and let them know the team will be in touch shortly. If it's outside business hours, say the team will get back to them during business hours. NEVER end the call yourself. A \"no\" to something you offered is NOT the end of the call — it only means they don't want that one thing. Reply \"No worries — anything else I can help you with?\" and keep going. Only ever sign off once the CALLER has clearly finished: \"bye\", \"that's all\", \"thanks, that's it\". Saying a sign-off ends the call instantly, so never say one while the caller may still have questions.\nWhen they do finish, sign off warmly once — like a human, thanking them for calling even if they decided not to book: \"No worries at all — thanks for calling, have a great day!\" Never sign off with a single word — that sounds like a machine hanging up on them. If the caller makes a small background sound after goodbye, don't restart the conversation — just end the call.",
 ].join("\n\n");
 
-/**
- * Render the final master prompt: fill the scaffold `template` (the admin
- * override, or DEFAULT_PROMPT_TEMPLATE when omitted) with the business name and
- * inject the compiled per-customer blocks at {{sections}}. Mirrors the server
- * compiler so the preview matches what actually syncs to the assistant.
- */
+/** Fill the scaffold (admin override or DEFAULT_PROMPT_TEMPLATE) with the compiled blocks. Mirrors the
+ *  server compiler so the preview matches what actually syncs to the assistant. */
 export function compileMasterPrompt(config: AgentConfig, template?: string, ctx?: CompileContext): string {
   const tpl = (template ?? "").trim() || DEFAULT_PROMPT_TEMPLATE;
   // Default assistant name when the owner hasn't set one (fills {{assistantName}}).
@@ -412,9 +382,7 @@ export function compileMasterPrompt(config: AgentConfig, template?: string, ctx?
   let out = tpl
     .replace(/\{\{\s*assistantName\s*\}\}/gi, () => name)
     .replace(/\{\{\s*businessName\s*\}\}/gi, () => biz);
-  // The identity block renders at {{identity}} (right under # NAME in the
-  // default template). A custom template without the marker keeps identity
-  // with the rest of the sections so it's never lost.
+  // Identity renders at {{identity}}; a custom template without the marker keeps it with the other sections.
   const hasIdentitySlot = /\{\{\s*identity\s*\}\}/i.test(out) && identityBlock;
   if (hasIdentitySlot) out = out.replace(/\{\{\s*identity\s*\}\}/gi, () => render(identityBlock));
   const sections = (hasIdentitySlot ? blocks.filter((b) => b !== identityBlock) : blocks)

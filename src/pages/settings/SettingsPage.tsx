@@ -41,14 +41,10 @@ import { phoneError } from "@/data/countries";
 import { SettingsRow } from "./SettingsRow";
 import { hasCustomerWorkspace, isAdminRole } from "@/lib/roles";
 
-/* ------------------------------------------------------------------ */
-/*  Support contact details (no backend field — maintained here).       */
-/* ------------------------------------------------------------------ */
+// Support contact details (no backend field — maintained here).
 
 
-/* ------------------------------------------------------------------ */
-/*  Premium feature list — fallback when plan features can't load.     */
-/* ------------------------------------------------------------------ */
+// Premium feature list — fallback when plan features can't load.
 
 const PREMIUM_FEATURES_FALLBACK = [
   "SMS follow-ups after every call",
@@ -65,19 +61,13 @@ export default function SettingsPage() {
   const isPremium = useProfileStore((s) => s.isPremium());
   const calls = useCallsStore((s) => s.calls);
   const isAdmin = useAuthStore((s) => isAdminRole(s.user?.role));
-  // No customer workspace (STAFF, SUPER_ADMIN) → no business profile, usage or
-  // plan to show. The page still exists for them: it's where they change their
-  // own password.
+  // No customer workspace (STAFF, SUPER_ADMIN) → no profile/usage/plan, but they still change their password here.
   const platformOnly = useAuthStore((s) => !hasCustomerWorkspace(s.user?.role));
-  // Full Name lives on the User record (not the Profile), so fall back to the
-  // signed-in account's name when the profile copy hasn't loaded yet — this is
-  // why the admin's name showed blank: it was only ever in the profile store.
+  // Full Name lives on the User, not the Profile — falling back here is what fixed the admin's blank name.
   const authFullName = useAuthStore((s) => s.user?.fullName ?? "");
 
-  // Profile is restored instantly from the persisted store for returning users
-  // (id present); an empty id means a fresh, not-yet-hydrated session.
-  // These accounts have no Profile row, so never block them on the skeleton —
-  // they land here (to change their password) and would otherwise hang forever.
+  // Empty id = not yet hydrated. Platform-only accounts have no Profile row, so never
+  // block them on the skeleton — it would hang forever.
   if (!platformOnly && !profile.id) {
     return <PageSkeleton variant="form" />;
   }
@@ -124,9 +114,7 @@ export default function SettingsPage() {
   );
 }
 
-/* ================================================================== */
-/*  1. Profile                                                         */
-/* ================================================================== */
+// 1. Profile
 
 function ProfileCard({
   className,
@@ -207,9 +195,7 @@ function ProfileCard({
   );
 }
 
-/* ================================================================== */
-/*  2. Change Password                                                 */
-/* ================================================================== */
+// 2. Change Password
 
 function PasswordCard({ className }: { className?: string }) {
   const [current, setCurrent] = useState("");
@@ -300,9 +286,7 @@ function PasswordCard({ className }: { className?: string }) {
   );
 }
 
-/* ================================================================== */
-/*  3. This Month's Usage                                              */
-/* ================================================================== */
+// 3. This Month's Usage
 
 function UsageCard({
   className,
@@ -384,9 +368,7 @@ function UsageCard({
   );
 }
 
-/* ================================================================== */
-/*  4. Subscription                                                    */
-/* ================================================================== */
+// 4. Subscription
 
 function SubscriptionCard({
   className,
@@ -569,9 +551,7 @@ function SubscriptionCard({
   );
 }
 
-/* ================================================================== */
-/*  6. Support Centre                                                  */
-/* ================================================================== */
+// 6. Support Centre
 
 function SupportCard({ className }: { className?: string }) {
   return (
@@ -599,9 +579,7 @@ function SupportCard({ className }: { className?: string }) {
   );
 }
 
-/* ================================================================== */
-/*  Shared small pieces                                                */
-/* ================================================================== */
+// Shared small pieces
 
 function Field({
   label,

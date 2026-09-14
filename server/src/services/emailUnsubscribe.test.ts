@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Unsubscribe feature — service-level coverage.
- *  The email import graph pulls in env (which normally validates real
- *  process.env and can process.exit), Prisma, settings and nodemailer.
- *  Stub them all so the graph never touches a real DB / SMTP server.
- * ------------------------------------------------------------------ */
+// Unsubscribe coverage. env (which can process.exit), Prisma, settings and
+// nodemailer are all stubbed so nothing touches a real DB or SMTP server.
 
 interface SentMail {
   html: string;

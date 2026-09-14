@@ -7,16 +7,8 @@ import { buildCombinedSmsBody } from "../lib/smsInfoItems.js";
 import { isTwilioConfigured, textCallerInfo } from "../services/sms.js";
 import { getPlanFeatures } from "../services/trial.js";
 
-/* ------------------------------------------------------------------ *
- *  "Text Info to Callers" dispatcher (PUBLIC — Vapi posts here mid-call, no
- *  auth). The owning business comes from `?uid=<userId>` stamped on the tool
- *  URL, exactly like the booking dispatcher.
- *
- *  The assistant only ever names a `topic`. The message body is resolved here
- *  from the owner's own template, so no amount of caller persuasion can make the
- *  agent text arbitrary content from the business's number. Every tool call
- *  answers with a short string that gets spoken back into the conversation.
- * ------------------------------------------------------------------ */
+// "Text Info to Callers" Vapi tool dispatcher. PUBLIC, no auth — owner comes from `?uid=` on the tool URL.
+// The assistant only names a topic; the body comes from the owner's template, so callers can't make us text arbitrary content.
 
 const router = express.Router();
 
@@ -38,9 +30,8 @@ interface CallState {
   expiresAt: number;
 }
 
-// In-memory, single-process — same trade-off as middleware/rateLimit.ts. Losing
-// this on restart is harmless: the worst case is a caller could be texted the
-// same detail twice across a process boundary mid-call.
+// In-memory, single-process (same trade-off as middleware/rateLimit.ts). Worst case on
+// restart: a caller gets the same detail texted twice mid-call.
 const callState = new Map<string, CallState>();
 const numberState = new Map<string, { count: number; resetAt: number }>();
 
@@ -71,15 +62,7 @@ function takeNumberQuota(phone: string, now: number): boolean {
   return true;
 }
 
-/**
- * Resolve the destination number to E.164.
- *
- * The caller's ANI is the trusted default — it's the number they're actually on.
- * A number the model transcribed from speech is only used when it parses to a
- * valid number, and it's parsed in the ANI's country so a locally-spoken number
- * ("oh four one two...") resolves correctly. Anything questionable falls back to
- * the ANI rather than texting a stranger.
- */
+/** Destination in E.164. A spoken number is only used if it parses validly (in the ANI's country); anything doubtful falls back to the ANI rather than texting a stranger. */
 export function resolveDestination(spoken: string, callerNumber: string): string {
   const ani = callerNumber.trim();
   const said = spoken.trim();
@@ -90,9 +73,7 @@ export function resolveDestination(spoken: string, callerNumber: string): string
   return ani;
 }
 
-/** The topics a sendInfoSms call is asking for. Accepts the `topics` array the
- *  tool advertises, and tolerates a lone `topic` string in case the model emits
- *  the singular form. De-duplicated, in ask order. */
+/** Topics a sendInfoSms call asks for. Accepts the `topics` array or a lone `topic` string (models emit both); de-duped, in ask order. */
 export function parseTopics(args: Record<string, unknown>): string[] {
   const raw = Array.isArray(args.topics) ? args.topics : [];
   // Only strings are valid topic keys — a number or object is malformed model
@@ -125,10 +106,8 @@ async function runSendInfoSms(
   callerNumber: string,
   args: Record<string, unknown>,
 ): Promise<string> {
-  // Plan gate, checked HERE and not only where the tool is attached. This
-  // endpoint is an unauthenticated Vapi webhook keyed on `uid`, so it is the
-  // last line before we actually spend money on an SMS: anyone who flipped the
-  // switch on past a disabled control (or posts here directly) still can't send.
+  // Plan gate here too, not just where the tool is attached: this is an unauthenticated
+  // webhook keyed on uid, so it's the last line before we spend money on an SMS.
   if (!(await getPlanFeatures(uid)).smsToCaller) {
     return "I can't text that through right now, but I'm happy to give you the details over the phone.";
   }
@@ -146,9 +125,7 @@ async function runSendInfoSms(
     return "I don't have that one to send, but I can tell you over the phone if you'd like.";
   }
 
-  // Consent is the whole point of the offer-then-send flow — if the assistant
-  // fired the tool without asking, don't send. Speaking this back nudges it to
-  // ask properly, and the caller only ever hears a natural-sounding question.
+  // No consent, no send. Speaking a question back nudges the assistant to ask properly.
   if (!toolArgBoolean(args.consentGiven)) {
     return `Before I send that — would you like me to text you ${spokenLabel(entries)}?`;
   }
@@ -157,9 +134,7 @@ async function runSendInfoSms(
   prune(now);
   const state = getCallState(callId || `anon:${callerNumber}`, now);
 
-  // Vapi retries tool calls, and callers repeat themselves — so only send the
-  // details we haven't already texted on this call. If they're all sent, say so
-  // rather than texting (and billing) the same thing twice.
+  // Vapi retries tool calls and callers repeat themselves — never text (and bill) the same detail twice on a call.
   const fresh = entries.filter((e) => !state.sent.has(e.item.key));
   if (!fresh.length) {
     return "That's already on its way to you — it should land in a moment.";

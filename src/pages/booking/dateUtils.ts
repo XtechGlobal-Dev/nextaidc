@@ -1,6 +1,5 @@
-/* Small timezone-aware date helpers for the Booking calendar. No date library on
- * the frontend, so we lean on Intl.DateTimeFormat with the owner's IANA timezone
- * for anything that must render in their local time. Grid math uses local Date. */
+// Timezone-aware date helpers for the Booking calendar. No date lib on the frontend, so
+// Intl.DateTimeFormat + the owner's IANA tz does local rendering; grid math uses local Date.
 
 /** "YYYY-MM-DD" from a Date's LOCAL calendar fields (for grid day keys). */
 export function ymd(d: Date): string {
@@ -99,11 +98,7 @@ export function zonedFull(iso: string, tz: string): string {
   }
 }
 
-/**
- * Convert an owner-entered wall-clock (date "YYYY-MM-DD" + time "HH:mm" meant in
- * `tz`) to a UTC ISO string the server can store. Uses one offset correction pass
- * — accurate except at the rare DST-gap boundary, which real slot times avoid.
- */
+/** Owner wall-clock ("YYYY-MM-DD" + "HH:mm" in `tz`) → UTC ISO. One offset pass — only off inside a DST gap, which real slots avoid. */
 export function zonedWallToUtcISO(dateStr: string, timeStr: string, tz: string): string {
   const naive = Date.parse(`${dateStr}T${timeStr}:00Z`);
   if (Number.isNaN(naive)) return new Date().toISOString();

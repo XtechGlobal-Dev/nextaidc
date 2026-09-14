@@ -1,18 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Brand host resolution + theme validation.
- *
- *  Host → brand runs on EVERY request and decides which tenant a
- *  visitor sees and which sender their mail goes out as, so the edges
- *  (apex domain, localhost, a suspended brand, an unknown label) are
- *  worth pinning down.
- * ------------------------------------------------------------------ */
+// Host -> brand runs on EVERY request and picks the tenant a visitor sees, so the edges
+// (apex, localhost, suspended brand, unknown label) are pinned here.
 
-// This file imports the REAL env.ts (unlike its sibling *.test.ts files, which
-// mock it), so the apex resolveBrandForHost checks host names against has to
-// be set explicitly rather than assumed — env.ts derives it from deployment
-// config instead of hardcoding a brand's own domain as the default.
+// This file imports the REAL env.ts (siblings mock it), so the apex must be set explicitly —
+// env.ts derives it from deployment config rather than defaulting to a brand's domain.
 process.env.PLATFORM_DOMAIN ||= "test-platform.example";
 
 const h = vi.hoisted(() => ({ findMany: vi.fn() }));
@@ -102,10 +94,8 @@ describe("resolveBrandForHost", () => {
   });
 
   it("resolves a brand subdomain on the dev loopback apex", async () => {
-    // Outside production `localhost` is an apex too, so a brand's own front
-    // door can be opened locally. Without it every request from
-    // acme.localhost fell through to the platform, and anyone signing up
-    // there was created as a PLATFORM customer instead of the brand's.
+    // Outside production `localhost` is an apex too. Without this, acme.localhost fell through
+    // to the platform and sign-ups there became PLATFORM customers instead of the brand's.
     h.findMany.mockResolvedValue([brand()]);
     await loadBrands();
     expect(resolveBrandForHost("acme.localhost")?.id).toBe("b_acme");

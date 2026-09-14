@@ -16,10 +16,8 @@ vi.hoisted(() => {
 
 import { useUiStore } from "./useUiStore";
 
-/* The command palette's open state moved into this store so the mobile top bar
- * can open the same dialog the (desktop-only) header opens. This store is
- * persisted, so the one thing worth pinning is that the dialog state is NOT —
- * otherwise a reload would restore a search dialog nobody opened. */
+// The store is persisted; the thing worth pinning is that the palette's open state is NOT —
+// otherwise a reload restores a search dialog nobody opened.
 
 describe("useUiStore — command palette", () => {
   beforeEach(() => {

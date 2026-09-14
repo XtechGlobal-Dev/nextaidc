@@ -3,10 +3,7 @@ import { cardWallActive } from "./cardWall";
 import type { AuthUser } from "@/lib/api";
 import type { Profile } from "@/types";
 
-/* The client half of the card wall. `subscriptionStatus: "none"` means two
- * different things depending on the account's own signup snapshot, and getting
- * the default wrong in either direction is severe: too strict locks out every
- * existing customer, too loose makes the wall decorative. */
+// Client half of the card wall. Too strict a default locks out every existing customer; too loose makes the wall decorative.
 
 const user = (profile: Partial<Profile> | null, role: AuthUser["role"] = "USER"): AuthUser =>
   ({
@@ -35,10 +32,8 @@ describe("cardWallActive", () => {
   });
 
   it("treats a profile cached before the columns shipped as grandfathered", () => {
-    // useAuthStore rehydrates from localStorage and marks the session authed
-    // BEFORE /me returns, so an old cached profile renders at least once. If
-    // undefined read as "wall them", every existing user would be bounced to
-    // /subscribe on their next page load.
+    // useAuthStore rehydrates from localStorage before /me returns, so an old cached profile
+    // renders at least once; undefined read as "wall them" would bounce every existing user.
     expect(cardWallActive(user({ subscriptionStatus: "none" }))).toBe(false);
   });
 
@@ -54,11 +49,8 @@ describe("cardWallActive", () => {
     ).toBe(false);
   });
 
-  // The bypass an adversarial review found: /subscribe opens a real Stripe trial
-  // subscription before any card exists, so Stripe reports "trialing" and the
-  // billing webhook mirrors it onto the profile. /billing/renew's failure path
-  // writes "past_due", and an abandoned trial is cancelled to "canceled". A
-  // status-keyed wall would drop for a user who never entered a card.
+  // /subscribe opens a Stripe trial before any card exists (webhook writes "trialing"), renew failures
+  // write "past_due", abandoned trials "canceled"; a status-keyed wall would drop for a card-less user.
   it.each(["trialing", "active", "past_due", "canceled"])(
     "keeps walling when the status is %s but no card was ever confirmed",
     (status) => {

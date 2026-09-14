@@ -1,17 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { rateLimit } from "./rateLimit.js";
 
-/* ------------------------------------------------------------------ *
- *  Fixed-window rate limiter.
- *
- *  Two things this guards, both reported as a DoS:
- *   1. Limiting is PER key (client IP). One IP hitting the cap must not affect
- *      another IP — the real-world break was every user collapsing onto the
- *      proxy's IP (fixed separately with `trust proxy`); here we prove the
- *      limiter itself is per-key so that fix is enough.
- *   2. The internal map is swept, so idle keys don't accumulate forever (the
- *      memory leak).
- * ------------------------------------------------------------------ */
+// Guards two reported DoS bugs: limiting is per IP (the proxy-IP collapse is fixed by `trust proxy`;
+// this proves the limiter itself is per-key), and idle keys are swept (the memory leak).
 
 /** Minimal Express req/res doubles. `res.status().json()` records the code. */
 function makeReqRes(ip: string) {

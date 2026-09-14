@@ -47,21 +47,10 @@ import { listTimeZones } from "@/lib/timezone";
 import { cn } from "@/lib/utils";
 import { BLANK_SETUP, setupPayload, type SetupDraft } from "./brandSetupDraft";
 
-/* ------------------------------------------------------------------ *
- *  Create one white-label brand.
- *
- *  A single scrolling form rather than a wizard: a brand with no
- *  address, no look and no admin isn't usable, so everything that makes
- *  it usable is asked for in one pass, with a live preview alongside so
- *  the operator can see the tenant they are about to hand over.
- *
- *  Editing lives in AdminBrandDetailPage — by then the pieces (domain,
- *  theme, plans, team) move independently and belong in tabs.
- * ------------------------------------------------------------------ */
+// Create one white-label brand in a single form (a brand without address, look and admin isn't usable).
+// Editing lives in AdminBrandDetailPage, where the pieces move independently.
 
-/** Turn what someone types into a legal subdomain label — the same rules the
- *  server applies, mirrored here so the field corrects itself as you type
- *  instead of failing on save. */
+// Same subdomain rules as the server, so the field self-corrects instead of failing on save.
 function slugify(raw: string): string {
   return raw
     .trim()
@@ -269,9 +258,7 @@ export default function AdminBrandCreatePage() {
   const domainInvalid =
     !!draft.customDomain && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(draft.customDomain);
 
-  // The subdomain is the brand's permanent address, so it is always required.
-  // A custom domain is an extra front door on top of it, and only has to be
-  // well-formed when one was typed at all.
+  // Subdomain is the permanent address and always required; a custom domain only needs to be well-formed if typed.
   const addressReady = !!draft.slug && slugState.available !== false && !domainInvalid;
 
   const canSave = draft.name.trim().length >= 2 && addressReady && adminReady;
@@ -284,9 +271,7 @@ export default function AdminBrandCreatePage() {
       const res = await api.super.brands.create({
         name: draft.name,
         slug: draft.slug,
-        // Optional, unlike the subdomain: the brand is reachable the moment it
-        // exists, and a vanity domain only becomes real once the client
-        // publishes DNS. Both are locked once set.
+        // Optional — only real once the client publishes DNS. Both addresses lock once set.
         customDomain: draft.customDomain || null,
         status: draft.live ? "active" : "suspended",
         tagline: draft.tagline,
@@ -1005,9 +990,7 @@ export default function AdminBrandCreatePage() {
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  Pieces
- * ------------------------------------------------------------------ */
+// Pieces
 
 /** Radix Select refuses an empty item value, so "use the platform's" needs a sentinel. */
 const NONE = "__none__";
@@ -1208,15 +1191,7 @@ const FONT_GROUP: Record<BrandFontOption["group"], { label: string; icon: typeof
   classic: { label: "Classic", icon: BookOpen },
 };
 
-/** A real slice of app chrome set in the chosen face and painted with the
- *  chosen colours — so the choice is judged on how it reads together, not on
- *  the name of a font or the hex of a swatch in isolation. Every colour here
- *  comes from the draft, never a fixed hue, so it repaints the instant either
- *  picker in Colors & Theme changes.
- *
- *  Bleeds to the section card's own edges (cancelling its padding) rather
- *  than sitting boxed in — the same full-bleed treatment the page's hero
- *  uses, so the specimen reads as a real screen, not a swatch in a frame. */
+// Live specimen of app chrome in the chosen font + colours. Every colour comes from the draft so it repaints on any picker change.
 function TypeSpecimen({
   font,
   primary,
@@ -1232,9 +1207,7 @@ function TypeSpecimen({
   return (
     <div>
       <Label className="text-sm font-medium">Preview</Label>
-      {/* Bleeds to the section card's left, right AND bottom edges — the
-          bottom corners are rounded to match the card's own radius so the
-          strip nests into it instead of leaving a dead gap below. */}
+      {/* Full-bleed to the card's edges; bottom radius matches the card so there's no dead gap. */}
       <div className="relative -mx-5 -mb-5 mt-1.5 overflow-hidden rounded-b-[var(--radius-card)] border-t border-border sm:-mx-6 sm:-mb-6">
         {/* Colour wash — the brand's own hues, not the app's. */}
         <div
@@ -1306,10 +1279,7 @@ function TypeSpecimen({
   );
 }
 
-/** The decorative right-hand composition in the specimen — a floating "Aa"
- *  card over a tilted glass panel, entirely in the brand's own primary/accent
- *  hues. Purely ornamental (hidden from AT) and dropped below `lg`, where
- *  there's no room for it beside the text. */
+// Decorative "Aa" composition in brand hues. Ornamental only (aria-hidden), dropped below `lg`.
 function SpecimenGlyphs({
   primary,
   accent,
@@ -1320,10 +1290,7 @@ function SpecimenGlyphs({
   font: BrandFontOption;
 }) {
   return (
-    // Inset from the strip's own top and bottom — not flush to `inset-0` —
-    // so the panel (and its shadow) sit clear of the strip's border instead
-    // of getting hard-clipped by the strip's overflow-hidden right at the
-    // edge, which read as a stray rectangle rather than a soft shape.
+    // Inset from top/bottom, not `inset-0` — the strip's overflow-hidden hard-clipped the panel shadow at the edge.
     <div
       aria-hidden
       className="pointer-events-none absolute inset-x-0 inset-y-8 hidden lg:block xl:inset-y-10"
@@ -1493,10 +1460,7 @@ function AssetTile({
           e.target.value = ""; // let the same file be re-picked after a removal
         }}
       />
-      {/* The whole card is the target. An overlay button rather than a wrapping
-          one, because the Remove control below has to stay its own button —
-          nesting them would be invalid, and the remove sits above this because
-          it comes later in the DOM and is positioned. */}
+      {/* Overlay button, not a wrapper — nesting the Remove button inside would be invalid HTML. */}
       <button
         type="button"
         onClick={() => input.current?.click()}

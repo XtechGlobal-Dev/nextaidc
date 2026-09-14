@@ -21,18 +21,8 @@ import {
 } from "@/components/admin/api-center/shared";
 import type { ApiKeyRow, ProviderRow } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  Providers — every integration, in one table.
- *
- *  This replaces four separate screens (Connections, Health, Quotas, API Keys).
- *  They were never four different sets of rows — only four different questions
- *  about the same providers — so they're now four column sets behind one
- *  switcher. Switching a view is instant and never refetches the snapshot.
- *
- *  Rows stay grouped by category, which is how someone thinks about an
- *  integration stack ("what's our voice layer doing?"), and attention-first
- *  within each group so a broken provider is never buried under healthy ones.
- * ------------------------------------------------------------------ */
+// Providers: one table, four column sets behind a switcher (no refetch). Grouped by category,
+// attention-first within each group so a broken provider is never buried.
 
 type View = "status" | "usage" | "quota" | "keys";
 
@@ -100,9 +90,7 @@ export default function ApiCenterProvidersPage() {
   if (!snapshot) return null;
 
   if (visibleProviders.length === 0) {
-    // A deployment with no credentials at all and no traffic yet has nothing
-    // "in use" — that's a setup state, not an empty filter result, and it needs
-    // a different sentence and a different button.
+    // No credentials and no traffic is a setup state, not an empty filter — different copy and button.
     const nothingInUse = !showingAll && available === snapshot.providers.length;
     return (
       <ApiCenterEmpty
@@ -130,12 +118,8 @@ export default function ApiCenterProvidersPage() {
 
   const keyByProvider = new Map((keys ?? []).map((k) => [k.provider, k]));
 
-  // Registry category order, not alphabetical — it puts the busiest, most
-  // critical groups (voice, AI) first.
-  //
-  // Counts are recomputed from the VISIBLE rows rather than taken from the
-  // server's category rollup, which covers every provider in the registry: with
-  // unused ones hidden, "2/4 connected" above two rows was simply wrong.
+  // Registry order (busiest groups first). Counts come from visible rows, not the server rollup —
+  // that covers hidden providers too and read "2/4 connected" above two rows.
   const groups = snapshot.categories
     .map((c) => {
       const rows = visibleProviders.filter((p) => p.category === c.category);
@@ -160,9 +144,7 @@ export default function ApiCenterProvidersPage() {
           <span className="text-xs text-muted-foreground tabular-nums">
             {visibleProviders.length} {visibleProviders.length === 1 ? "provider" : "providers"}
           </span>
-          {/* The registry knows about vendors this deployment doesn't touch.
-              They're hidden by default and reachable in one click, rather than
-              padding the table with permanently-grey rows. */}
+          {/* Unused registry vendors are hidden by default, one click away. */}
           {available > 0 && (
             <Button
               variant="ghost"
@@ -265,9 +247,7 @@ export default function ApiCenterProvidersPage() {
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  One row's cells for the active view.
- * ------------------------------------------------------------------ */
+// One row's cells for the active view.
 
 function ViewCells({
   view,

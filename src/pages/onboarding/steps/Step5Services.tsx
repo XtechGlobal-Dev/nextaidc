@@ -15,9 +15,7 @@ export default function Step5Services() {
   const back = useOnboardingStore((s) => s.back);
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
-  // "Services I found on your website" only fits when the analyser seeded some.
-  // Snapshot on mount so adding a service manually doesn't flip the message
-  // (and re-speak it) mid-step — e.g. on the "I don't have a website" path.
+  // Snapshot on mount so adding a service manually doesn't flip (and re-speak) the message mid-step.
   const [foundServices] = useState(services.length > 0);
   // Long catalogues are collapsed to the first chunk with a Show more/less toggle
   // so the list stays scannable (the analyser can return many genuine services).

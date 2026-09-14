@@ -20,11 +20,7 @@ import { listTimeZones } from "@/lib/timezone";
 import { formatMoney } from "@/lib/currency";
 import type { SetupDraft } from "./brandSetupDraft";
 
-/* ------------------------------------------------------------------ *
- *  How a brand's front door and product behave: who may sign up,
- *  which modules its customers get, which plans it sells, the trial
- *  its customers start on, and the voice their agents start with.
- * ------------------------------------------------------------------ */
+// Brand access + product: sign-up policy, modules, plans, trial and default voice.
 
 type Props = {
   value: SetupDraft;
@@ -35,12 +31,7 @@ type Props = {
  *  sentinel on the way in and out. */
 const NONE = "__none__";
 
-/**
- * Locale defaults and the sign-up policy. Lives in the identity card — shown
- * while creating too — because both are decided the day a brand is signed,
- * not discovered later: where its customers are, and whether it sells
- * self-serve at all.
- */
+/** Locale defaults + sign-up policy. In the identity card (shown at create too) since both are decided when the brand is signed. */
 export function BrandLocaleFields({ value, onChange }: Props) {
   return (
     <div className="space-y-4 border-t border-border pt-4">

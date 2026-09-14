@@ -28,24 +28,16 @@ export default function SubscribePage() {
   const loadMe = useAuthStore((s) => s.loadMe);
   const logout = useAuthStore((s) => s.logout);
   const suspended = useAuthStore((s) => s.user?.profile?.subscriptionStatus === "suspended");
-  // "Immediate" = the free trial is already used up, so subscribing charges the
-  // card TODAY and activates the plan right away (no second trial). Flips all the
-  // "free trial / $0 due today" copy on this page to a "charged now" narrative.
+  // "Immediate" = trial already spent, so the card is charged TODAY; flips the "$0 due today" copy to "charged now".
   const trial = useTrialStore((s) => s.trial);
   useEffect(() => {
     void useTrialStore.getState().hydrate();
   }, []);
-  // A card-required signup that hasn't entered a card is here because it MUST be,
-  // not because it chose to buy: this is the $0 authorisation that STARTS their
-  // free trial. Read from the profile on the auth store, never from useTrialStore
-  // — that store is persisted and hydrated asynchronously above, so `trial` is
-  // null on first render and would send the wrong flag on a fast submit.
+  // Card wall = the $0 authorisation that STARTS the trial. Read from the auth store, never useTrialStore —
+  // that one hydrates async, so `trial` is null on first render and a fast submit would send the wrong flag.
   const cardWall = useAuthStore((s) => cardWallActive(s.user));
   const immediate = Boolean(trial?.blocked) && !cardWall;
-  // Everyone else reaching this page deliberately chose a plan, so confirming a
-  // card is a purchase: charge and activate now rather than parking them on a
-  // trial. `immediate` is separate — it means the free trial is already spent,
-  // which changes the copy but no longer the outcome.
+  // Everyone not card-walled chose a plan deliberately, so confirming a card charges + activates now. `immediate` only changes copy.
   const activateNow = !cardWall;
 
   // The user lands here authenticated (post-signup) and is otherwise stuck on the
@@ -60,11 +52,8 @@ export default function SubscribePage() {
   const [trialInfo, setTrialInfo] = useState<{ days: number; minutes: number } | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
   const [autoRenew, setAutoRenew] = useState(true);
-  // The validated coupon, if any. PlanPicker owns the input and re-checks it
-  // whenever the plan changes, so by the time it reaches here it applies. Kept
-  // as the whole object, not just the code, because this page renders its own
-  // totals — the "Due today" rail and the card step — and every price on screen
-  // has to agree with the one in the picker.
+  // Validated coupon (PlanPicker re-checks on plan change). Whole object, not just the code — this page
+  // renders its own totals and every price on screen has to agree with the picker.
   const [coupon, setCoupon] = useState<AppliedCoupon | null>(null);
 
   const [step, setStep] = useState<"select" | "pay">("select");

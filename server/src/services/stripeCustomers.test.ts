@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  The Stripe customer index: how a payment finds its brand. Written
- *  when the customer is made, rebuilt from the profile that holds the
- *  id when it is missing, and honest when nobody holds it.
- * ------------------------------------------------------------------ */
+// The Stripe customer index: how a payment finds its brand. Rebuilt from the
+// profile when missing; never guesses when nobody holds the customer.
 
 const h = vi.hoisted(() => ({
   indexFindUnique: vi.fn(),

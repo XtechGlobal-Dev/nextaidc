@@ -1,22 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { speak, stopSpeaking } from "@/lib/speech";
 
-/**
- * Plays a short spoken preview of a voice via the server TTS proxy (`/api/tts`).
- * There's no per-voice sample CDN, so we synthesise a line on the fly with the
- * voice itself. One preview at a time: toggling another voice stops the previous.
- * Returns the id currently playing so the UI can swap play/pause.
- *
- * Language-specific voices (the curated Chinese/Punjabi ones, which carry an ISO
- * `language` code) are previewed with a line IN THAT LANGUAGE — a Mandarin voice
- * reading an English sentence is not a useful sample of what a caller will hear.
- */
+// Voice preview via the server TTS proxy (/api/tts) — no sample CDN, so we synthesise a line.
+// Voices with an ISO `language` get a line in that language; a Mandarin voice reading English is useless.
 const PREVIEW_LINE = "Hi, I'm your AI receptionist. How can I help you today?";
 
-/** Hindi and Punjabi verbs/pronouns agree with the speaker's gender (सकता/सकती,
- *  ਸਕਦਾ/ਸਕਦੀ), so those languages carry a line per gender — a male voice reading
- *  the feminine form sounds wrong to a native ear. Chinese has no grammatical
- *  gender, so one line serves all its voices. */
+// Hindi/Punjabi verbs agree with the speaker's gender (सकता/सकती), so those carry a line per
+// gender; Chinese has no grammatical gender, one line does.
 type GenderedLine = { male: string; female: string };
 
 const PREVIEW_LINES: Record<string, string | GenderedLine> = {
@@ -34,9 +24,8 @@ const PREVIEW_LINES: Record<string, string | GenderedLine> = {
   ne: "नमस्ते! म तपाईंको एआई रिसेप्शनिस्ट हुँ। म तपाईंलाई कसरी मद्दत गर्न सक्छु?",
 };
 
-/** The sample line for a voice — its own language when it has one, else English.
- *  A gendered language picks the form matching the voice; unknown gender falls
- *  back to the feminine form (most of our curated voices are female). */
+/** Sample line for a voice — its own language if it has one, else English. Unknown gender falls
+ *  back to the feminine form (most curated voices are female). */
 export function previewLineFor(
   language?: string,
   gender?: "male" | "female" | null,

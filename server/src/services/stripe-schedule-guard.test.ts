@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// A subscription attached to a Stripe subscription schedule (a pending downgrade)
-// rejects direct writes to its cancelation / billing-cycle fields:
-//   "The subscription is managed by the subscription schedule `sub_sched_…`, and
-//    updating any cancelation behavior directly is not allowed."
-// Both `setSubscriptionAutoRenew` and `renewSubscriptionNow` do exactly such a
-// write, so each must release the schedule FIRST. These tests pin that ordering
-// and the "leave it alone when there's no schedule" case.
+// Stripe rejects cancelation/billing-cycle writes on a subscription managed by a
+// schedule (pending downgrade), so both functions must release the schedule FIRST.
 
 const subscriptions = {
   retrieve: vi.fn(),
@@ -25,8 +20,7 @@ vi.mock("stripe", () => ({
   },
 }));
 vi.mock("../env.js", () => ({
-  // Brand hosts resolve against these; the real module exports them, so a
-  // mock that omits them fails to link for anything importing brandUrls.
+  // brandUrls imports these; a mock without them fails to link.
   platformDomain: "hello22.ai",
   platformDomains: ["hello22.ai"],
   allowUnverifiedBrandDomains: false,

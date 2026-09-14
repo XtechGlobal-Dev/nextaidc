@@ -78,19 +78,8 @@ import type {
   TicketPriority,
 } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  "My requests" — one page, both lanes.
- *
- *  Who you are decides who you are talking to, so this same screen is
- *  a customer's Support page (their brand's team answers) and a brand
- *  admin's Platform Support page (the platform answers). The API tells
- *  us which, and what to call it, on /lane — so the wording here can
- *  never drift from the wording in the emails and notifications the
- *  server writes for the same conversation.
- *
- *  Deep-linkable via ?ticket=<id> — that is what the bell and the
- *  "we replied" email point at. ?rate=1 opens the rating card.
- * ------------------------------------------------------------------ */
+// "My requests" — one page for both lanes (customer → brand team, brand admin → platform). /lane supplies the
+// lane + its wording so it can't drift from the server's emails. Deep links: ?ticket=<id>, ?rate=1.
 
 /** How many files the attachments card shows before "See all". */
 const ATTACHMENTS_PREVIEW = 2;
@@ -229,12 +218,7 @@ export default function SupportPage() {
     setSearchParams(id ? { ticket: id } : {}, { replace: true });
   }
 
-  /**
-   * Sending is optimistic: the bubble appears at once and the outbox carries it
-   * until the server confirms, so a slow connection shows a clock rather than an
-   * empty conversation. `ticketId` is captured per send — a reply must land on
-   * the thread it was written in, even if another has been opened since.
-   */
+  // Optimistic send. `ticketId` is captured per send so a reply lands on the thread it was written in, even if another opened since.
   const outbox = useOutbox({
     authorType: "requester",
     authorName: "You",
@@ -389,11 +373,7 @@ export default function SupportPage() {
     [tickets],
   );
 
-  /**
-   * What the conversation header shows. The list row already has the subject and
-   * badges, so they go up the instant a row is clicked and the fetch only fills
-   * in the messages underneath.
-   */
+  // Header falls back to the list row so subject + badges show instantly while the thread fetches.
   const headerTicket: Ticket | null =
     thread?.ticket ?? (selectedId ? (tickets.find((t) => t.id === selectedId) ?? null) : null);
 
@@ -403,9 +383,7 @@ export default function SupportPage() {
     [thread],
   );
 
-  /* This account raises no requests — say so plainly rather than showing a list
-   * that can never fill. Staff take it up with their own admin; the platform
-   * owner is the top of the ladder. */
+  // This account raises no requests (staff → their admin; platform owner is top of the ladder) — say so instead of an empty list.
   if (notForYou) {
     return (
       <div>
@@ -622,10 +600,7 @@ export default function SupportPage() {
                         </p>
                       </div>
                     </div>
-                    {/* That somebody has picked this up is worth saying; WHO is not
-                        ours to say. The server already masks the name to the lane's
-                        team label (serializeTicketForRequester), so this line is
-                        written to need no name at all. */}
+                    {/* Say it's picked up, never by WHOM — the server masks the assignee to the team label, so this line needs no name. */}
                     {thread.ticket.assignedTo && (
                       <p className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                         Someone from{" "}
@@ -1095,11 +1070,7 @@ export default function SupportPage() {
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  New request — subject / department / priority above, and the same
- *  composer as the thread below, so the first message is written (and
- *  its files attached) exactly the way every later one is.
- * ------------------------------------------------------------------ */
+// New request dialog — reuses the thread composer so the first message (and its files) works exactly like every later one.
 
 function NewRequestDialog({
   open,

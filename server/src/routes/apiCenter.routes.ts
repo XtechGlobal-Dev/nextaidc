@@ -1,17 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Admin → API Center.
- *
- *  Mounted at /api/admin/api-center. SUPER_ADMIN-only throughout (never
- *  requirePermission): this screen exposes vendor spend, key expiry and raw
- *  request logs for the platform's own API accounts. It sits with Platform
- *  Settings on the far side of the tenant boundary — not staff-assignable, and
- *  not reachable by a brand ADMIN either.
- *
- *  Shape of the API: one fat `GET /snapshot` powering the Overview, Connections,
- *  Health, Quotas, Costs and Latency screens, plus narrow endpoints for the
- *  screens that page or filter their own data (Logs, Errors, Alerts). See
- *  services/apiCenter.ts for why the snapshot is a single call.
- * ------------------------------------------------------------------ */
+// Admin → API Center (/api/admin/api-center). SUPER_ADMIN only, never requirePermission — it exposes the
+// platform's own vendor spend, key expiry and raw request logs. One fat GET /snapshot plus narrow paging endpoints.
 
 import express from "express";
 import { z } from "zod";
@@ -47,9 +35,7 @@ import { integrationsView } from "../services/settings.js";
 
 const router = express.Router();
 
-// Super-admin only. This screen exposes the platform's provider spend, key
-// expiry and raw request traces — the credentials side of every API account —
-// which a brand ADMIN must never see.
+// Super-admin only — provider spend and credential state, which a brand ADMIN must never see.
 router.use(requireAuth, requireSuperAdmin);
 
 /* ----------------------------- Snapshot ---------------------------- */
@@ -229,11 +215,7 @@ router.put(
 
 /* ------------------------------ API keys --------------------------- */
 
-/**
- * Credential status per provider. Values come from settings.ts already masked —
- * this endpoint never sees or returns a raw secret, only whether one is set,
- * its last four characters, and when it expires.
- */
+/** Credential status per provider. Already masked by settings.ts — never sees or returns a raw secret. */
 router.get(
   "/keys",
   asyncHandler(async (_req, res) => {

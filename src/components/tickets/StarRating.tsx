@@ -3,13 +3,7 @@ import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MAX_STARS } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Stars, in two moods: something you set, and something you read.
- *
- *  The interactive one is real buttons rather than a row of icons with
- *  a click handler — a rating has to be reachable by keyboard, and each
- *  star needs its own label ("3 stars") for anyone not looking at it.
- * ------------------------------------------------------------------ */
+// Star rating, settable or read-only. The interactive one is real buttons so it's keyboard-reachable and each star has its own label.
 
 const SIZE = {
   sm: "size-3.5",

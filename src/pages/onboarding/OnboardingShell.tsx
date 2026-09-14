@@ -60,9 +60,7 @@ export function OnboardingShell({
   // When the user has stepped back, offer a jump forward to the pending step.
   const canResume = step > 1 && step < furthestStep;
 
-  // Once the account is verified (OTP step done) the user has a live session, so
-  // give them a way to end it and leave onboarding — otherwise they're stuck in
-  // the flow with no exit. Only shown while authenticated (post-OTP steps).
+  // Post-OTP the user has a live session — give them a sign-out so they're not stuck in the flow with no exit.
   const navigate = useNavigate();
   const authed = useAuthStore((s) => s.status === "authed");
   const logout = useAuthStore((s) => s.logout);

@@ -4,11 +4,8 @@ import { prisma } from "./_brandDb.js";
 import { loadSettings, integrationsStatus } from "../src/services/settings.js";
 import { getCustomerCardFingerprint } from "../src/services/stripe.js";
 
-/* ------------------------------------------------------------------ *
- *  One-off backfill: store the Stripe card fingerprint for accounts
- *  created before card-dedup existed, so the same card can't open a
- *  second trial. Run with:  npm run backfill-cards
- * ------------------------------------------------------------------ */
+// One-off: store Stripe card fingerprints for pre-dedup accounts so one card can't open a second trial.
+// Run: npm run backfill-cards
 
 await loadSettings(); // hydrate Stripe key from DB/env so the client works
 

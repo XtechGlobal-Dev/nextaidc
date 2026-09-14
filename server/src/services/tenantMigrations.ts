@@ -5,17 +5,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-/* ------------------------------------------------------------------ *
- *  Applying the tenant schema (prisma/tenant) to one database.
- *
- *  The real `prisma migrate deploy`, not a hand-rolled runner: every tenant
- *  then carries its own `_prisma_migrations` history, checksums and
- *  failed-state handling, exactly like the control plane. The CLI is a
- *  runtime dependency for that reason.
- *
- *  A tenant's version is simply the name of the newest migration applied;
- *  `latestTenantMigration()` is what "current" means.
- * ------------------------------------------------------------------ */
+// Applies prisma/tenant to one tenant DB via the real `prisma migrate deploy` (so each
+// tenant keeps its own _prisma_migrations history) — that's why the CLI is a runtime dep.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -49,13 +40,7 @@ function prismaCliEntry(): string {
   }
 }
 
-/**
- * Bring one tenant database up to the newest migration.
- *
- * `directUrl` is the unpooled endpoint: migrations take a session-level
- * advisory lock a transaction-mode pooler cannot hold. Returns the CLI's output
- * for the provisioning log; throws with it when the deploy fails.
- */
+/** Migrates one tenant DB to the newest migration. `directUrl` must be unpooled — migrations take a session advisory lock a transaction-mode pooler can't hold. */
 export async function deployTenantMigrations(directUrl: string): Promise<string> {
   try {
     const { stdout, stderr } = await execFileAsync(

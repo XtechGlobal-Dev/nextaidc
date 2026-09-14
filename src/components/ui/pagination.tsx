@@ -33,15 +33,8 @@ export interface PaginationProps {
   className?: string;
 }
 
-/**
- * The app's one pagination control: jump to any page number, step with
- * Prev/Next, and choose how many records a page holds.
- *
- * Renders nothing when there is nothing to page through, so callers can drop it
- * straight under a table without guarding on the row count. Below `sm` the
- * numbered buttons collapse to a "Page x of y" readout — Prev/Next still work,
- * matching how the tables themselves fall back to cards on mobile.
- */
+/** The app's pagination control. Renders nothing with nothing to page, so callers needn't guard on row count;
+ *  below `sm` the number strip collapses to "Page x of y". */
 export function Pagination({
   page,
   pageSize,

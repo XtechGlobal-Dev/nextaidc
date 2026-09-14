@@ -13,10 +13,7 @@ import { AllVoicesResponseSchema, VoiceCatalogResponseSchema } from "hello22/sha
 
 const router = express.Router();
 
-/**
- * Both providers' full catalogs, for the admin Voice Bank + plan editor. The admin
- * curates these into categories; a plan then points at one category.
- */
+/** Both providers' full catalogs for the admin Voice Bank + plan editor. */
 router.get(
   "/all",
   requireAuth,
@@ -29,11 +26,8 @@ router.get(
   }),
 );
 
-/**
- * The voices this user may choose in the AI Brain. Driven by the Voice Bank category
- * on their plan — trialing or active (admins get every voice). `locked` = they can't
- * change voice yet (no plan / plan without a category) → they stay on the default.
- */
+// Voices this user may pick, from their plan's Voice Bank category (admins get all).
+// `locked` = no plan/category yet, so they stay on the default.
 router.get(
   "/",
   requireAuth,

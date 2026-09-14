@@ -16,12 +16,7 @@ import {
 } from "@/components/ui/select";
 import { api, ApiError, type AgentLlmOption } from "@/lib/api";
 
-/**
- * Admin editor for the platform-wide default LLM that powers every provisioned
- * voice assistant. When a new customer's agent is created (or an existing one is
- * synced), Vapi is told to use the provider + model chosen here — replacing the
- * built-in default. Owners never see this; it's a platform-level default.
- */
+/** Platform-wide default LLM for every provisioned assistant; applied to Vapi on create/sync. Owners never see it. */
 export function AgentModelSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

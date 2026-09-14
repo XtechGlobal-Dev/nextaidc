@@ -79,11 +79,7 @@ function toIso(day: string, endOfDay = false): string | null {
   return new Date(`${day}T${endOfDay ? "23:59:59" : "00:00:00"}`).toISOString();
 }
 
-/** A Date → the yyyy-mm-dd a date input wants, in LOCAL time.
- *
- *  Deliberately not `toISOString().slice(0, 10)`: that converts to UTC first, so
- *  a start date saved as local midnight comes back a day early for anyone east
- *  of UTC — which is most of this product's market. */
+// Date → yyyy-mm-dd in LOCAL time. Not toISOString(): that goes via UTC and lands a day early east of UTC.
 function localDay(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -128,9 +124,7 @@ function copyCode(code: string) {
   );
 }
 
-/** Micro-heading that groups the form into scannable sections. Each section
- *  carries one of the app's step accents (see --color-step-* in index.css) as a
- *  tinted icon chip — the same colour language as the AI Brain sections. */
+// Section heading tones — same --color-step-* accents as the AI Brain sections.
 const SECTION_TONES = {
   blue: "bg-step-1/12 text-step-1",
   violet: "bg-step-2/12 text-step-2",
@@ -195,11 +189,8 @@ export default function AdminCouponsPage() {
     }
   }
 
-  // Refresh when the tab regains focus. Redemptions happen in the CUSTOMER's
-  // session, so there's no client event here to push the counts — and watching a
-  // campaign means flipping between this tab and a checkout. Focus-only, not
-  // polled: unlike the customer Plans page (where a live call moves the usage
-  // meter every few seconds), these counts only change on a real charge.
+  // Refresh on window focus: redemptions happen in the customer's session so nothing pushes counts here.
+  // Focus-only, not polled — counts only move on a real charge.
   useEffect(() => {
     void load();
     const onFocus = () => void load();
@@ -234,22 +225,11 @@ export default function AdminCouponsPage() {
     setOpen(true);
   }
 
-  /** Terms are frozen once anyone has been shown them — a completed redemption,
-   *  or a checkout in progress. Changing them would rewrite a deal someone is
-   *  already on. Mirrors the in-use plan rule. Server-computed, so the form can
-   *  never offer a field the API will reject. */
+  // Terms freeze once anyone has seen them (redemption or in-flight checkout). Server-computed so the form never offers what the API rejects.
   const termsLocked = !!editing && editing.locked;
 
-  /** Floor for the "Redeemable from" picker.
-   *
-   *  Today in every case but one: a coupon that genuinely opened in the past must
-   *  keep its OWN start selectable, or `min` would mark the stored value invalid
-   *  and get in the way of editing the coupon's name, limits or Active state.
-   *
-   *  That single exception used to be handled by dropping the floor entirely while
-   *  editing, which also offered every other past date — and the save guard then
-   *  refused them. A control should not present a choice it will reject, so the
-   *  floor now moves only as far back as that coupon's own start. */
+  // Floor for "Redeemable from": today, except a coupon that already opened keeps its own start
+  // selectable — otherwise `min` marks the stored value invalid and blocks unrelated edits.
   const existingStart = toDay(editing?.startsAt ?? null);
   const minStartsAt = existingStart && existingStart < TODAY ? existingStart : TODAY;
 
@@ -264,9 +244,7 @@ export default function AdminCouponsPage() {
       toast.error("The percentage must be between 1 and 100.");
       return;
     }
-    // Both date guards fire only when the admin actually picked a NEW value —
-    // an existing coupon legitimately has dates in the past, and rejecting them
-    // would block editing its name, limits or Active state.
+    // Date guards only fire on a changed value — existing coupons legitimately have past dates.
     const startChanged = form.startsAt !== toDay(editing?.startsAt ?? null);
     if (form.startsAt && startChanged && form.startsAt < TODAY) {
       toast.error("The start date can't be in the past — leave it blank to start straight away.");
@@ -281,10 +259,7 @@ export default function AdminCouponsPage() {
       toast.error("The start date must be before the expiry date.");
       return;
     }
-    // An end date is required on every new coupon, and can't be cleared off one
-    // that has it — a code with no expiry stays claimable long after its campaign
-    // is over. Coupons created before this rule have no expiry and stay editable,
-    // so this only fires when the admin is creating or actively erasing a date.
+    // Expiry is required on new coupons and can't be cleared; pre-rule coupons without one stay editable.
     if (!form.expiresAt && (!editing || editing.expiresAt)) {
       toast.error("Pick a 'Redeemable until' date — every coupon needs an end date.");
       return;
@@ -383,12 +358,7 @@ export default function AdminCouponsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {coupons.map((c) => {
             const expired = !!c.expiresAt && new Date(c.expiresAt) <= new Date();
-            // ONE status, by precedence. Three stacked grey pills made a dead
-            // coupon look much like a live one; the question an admin is
-            // actually asking is "does this work right now, and if not why".
-            // Amber, not red, for all three: a campaign that ended or sold out
-            // did its job — none of these are failures, they just mean "not
-            // redeemable right now", and each is reversible by an admin.
+            // One status by precedence. Amber not red: none of these are failures, all reversible.
             const status = !c.active
               ? { label: "Inactive", variant: "warning" as const }
               : expired
@@ -408,9 +378,7 @@ export default function AdminCouponsPage() {
                   status ? "border-dashed border-border" : "border-primary/25",
                 )}
               >
-                {/* ---- Offer face — the tear line lives INSIDE this surface,
-                     so the perforation reads as punched through the ticket
-                     itself rather than a separate band below it. ---- */}
+                {/* Offer face — tear line lives inside it so it reads as punched through the ticket. */}
                 <div
                   className={cn(
                     "relative",
@@ -508,10 +476,7 @@ export default function AdminCouponsPage() {
                   </button>
                   </div>
 
-                  {/* Tear line at the EXACT junction of the ticket face and the
-                      stub: the dashes sit flush against the boundary, and the
-                      notch circles straddle it — top half punched out of the
-                      colour, bottom half melting into the card. */}
+                  {/* Tear line at the face/stub junction; notch circles straddle it. */}
                   <div
                     aria-hidden
                     className={cn(
@@ -650,9 +615,7 @@ export default function AdminCouponsPage() {
             </div>
           </DialogHeader>
 
-          {/* Live preview of the offer as it's typed — the same headline the
-              coupon card shows once saved, so the admin sees what they're
-              building instead of a wall of inputs. */}
+          {/* Live preview — same headline the saved card shows. */}
           {(form.percentOff.trim() !== "" || form.bonusMinutes.trim() !== "") && (
             <div className="rounded-xl border border-primary/20 bg-gradient-to-r from-primary-tint to-primary-tint-soft px-4 py-3">
               <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -785,10 +748,7 @@ export default function AdminCouponsPage() {
                   <Input
                     id="startsAt"
                     type="date"
-                    // A coupon can't have been redeemable before it existed, so a
-                    // past start is meaningless. The only past date the picker
-                    // offers is this coupon's own start, when it already opened —
-                    // see minStartsAt.
+                    // Only past date offered is this coupon's own start — see minStartsAt.
                     min={minStartsAt}
                     value={form.startsAt}
                     onChange={(e) => setForm({ ...form, startsAt: e.target.value })}
@@ -802,9 +762,7 @@ export default function AdminCouponsPage() {
                     id="expiresAt"
                     required
                     type="date"
-                    // Can't expire in the past, and can't land before it opens.
-                    // An already-expired coupon keeps its stored date until the
-                    // admin actually picks a new one.
+                    // Not in the past, not before it opens; an expired coupon keeps its stored date until changed.
                     min={form.startsAt && form.startsAt > TODAY ? form.startsAt : TODAY}
                     value={form.expiresAt}
                     onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}

@@ -19,11 +19,8 @@ type Updater<T> = (prev: T) => T;
 
 const SECTION_KEYS: AgentSectionKey[] = ["identity", "knowledge", "rules", "automations", "advanced"];
 
-/** The master prompt is recompiled from the other sections on every edit, so an
- *  auto-generated prompt differing from the snapshot is just an echo of a change
- *  already counted in its own section — drop it from the Advanced comparison.
- *  A manually edited prompt (masterPromptDirty) is a real Advanced change and
- *  stays in. */
+/** Drop the auto-compiled master prompt from the Advanced diff — it just echoes changes
+ *  already counted in their own section. A hand-edited one (masterPromptDirty) stays in. */
 function comparableSection(config: AgentConfig, key: AgentSectionKey) {
   const section = config[key];
   if (key !== "advanced") return section;
@@ -33,22 +30,16 @@ function comparableSection(config: AgentConfig, key: AgentSectionKey) {
   return rest;
 }
 
-/** Sections whose current draft differs from the last saved snapshot. Deriving
- *  dirtiness from a diff (instead of latching a flag on edit) means undoing a
- *  change by hand clears the unsaved-changes state again. */
+/** Sections that differ from the saved snapshot. A diff, not a latched flag, so undoing
+ *  an edit by hand clears the unsaved state again. */
 function diffSections(config: AgentConfig, savedConfig: AgentConfig): AgentSectionKey[] {
   return SECTION_KEYS.filter(
     (k) => JSON.stringify(comparableSection(config, k)) !== JSON.stringify(comparableSection(savedConfig, k)),
   );
 }
 
-/** Country / Region and Industry sit on the PROFILE, not the config — their only
- *  trace here is the recompiled master prompt, which the comparison above drops
- *  on purpose. So Identity is also dirty whenever they differ from the values in
- *  effect when the section was last clean. Captured on the first such edit (see
- *  noteContextChange), which makes this a comparison and not a latch: put the
- *  original industry back and the change disappears, exactly like editing a
- *  config field back by hand. */
+/** Country/Industry live on the profile, not the config, and the diff above drops their only
+ *  trace (the compiled prompt). So Identity is also dirty while they differ from this baseline. */
 export interface ProfileContext {
   country: string;
   industry: string;
@@ -87,9 +78,8 @@ interface AgentState {
   /** Snapshot of the last persisted config — the baseline we revert to when the
    *  user discards unsaved edits ("Don't save"). */
   savedConfig: AgentConfig;
-  /** The admin-editable prompt scaffold (from the server). Blank → the built-in
-   *  DEFAULT_PROMPT_TEMPLATE. Used to compile the master prompt so the preview
-   *  matches what the server syncs to the live assistant. */
+  /** Admin-editable prompt scaffold from the server (blank → DEFAULT_PROMPT_TEMPLATE), so the
+   *  preview compiles the same prompt the server pushes live. */
   promptTemplate: string;
   /** Whether the customer's prompt template snapshot matches the latest global template. */
   promptTemplateIsLatest: boolean;
@@ -107,9 +97,8 @@ interface AgentState {
   /** Country / Industry as they were when Identity was last clean, or null when
    *  they haven't been touched since. Cleared on save/revert/hydrate. */
   contextBaseline: ProfileContext | null;
-  /** Record the profile Country / Industry in effect BEFORE this edit, so the
-   *  unsaved-changes state can compare rather than latch — going back to the
-   *  original value clears it again. Only the first change captures a baseline. */
+  /** Record the profile Country/Industry from BEFORE an edit so dirtiness compares rather
+   *  than latches. Only the first change captures a baseline. */
   noteContextChange: (previous: ProfileContext) => void;
   /** Load config from the backend. */
   hydrate: () => Promise<void>;
@@ -120,9 +109,8 @@ interface AgentState {
   ) => void;
   /** Replace the whole config (e.g. import). */
   setConfig: (config: AgentConfig) => void;
-  /** Carry a business rename through the free text that named the old business
-   *  (onboarding-generated scenarios, FAQs, facts). `previousName` is the name
-   *  that text was written against. No-op when nothing mentions it. */
+  /** Carry a business rename through free text that named the old business (scenarios, FAQs,
+   *  facts). No-op when nothing mentions `previousName`. */
   propagateBusinessRename: (previousName: string) => void;
   /** Manually edit the master prompt (marks it dirty so it won't be overwritten). */
   setMasterPrompt: (text: string) => void;
@@ -260,9 +248,8 @@ export const useAgentStore = create<AgentState>()(
         return api.agent
           .save(config)
           .then((res) => {
-            // Adopt the server's canonical config — it may have normalised the
-            // voice id and re-matched a default assistant name (Jessica/Mark)
-            // to the newly picked voice's gender.
+            // Take the server's copy — it may normalise the voice id and re-match the
+            // default assistant name (Jessica/Mark) to the new voice's gender.
             const saved = res.agentConfig ?? config;
             set({ config: saved, savedConfig: saved, lastSyncedAt: res.lastSyncedAt, status: res.status, dirty: false, dirtySections: [], contextBaseline: null, syncFailed: !res.synced });
             // Saving can provision the agent + assign a receptionist number (esp. the
@@ -271,9 +258,8 @@ export const useAgentStore = create<AgentState>()(
             if (res.synced) {
               toast.success("Saved & deployed to your live agent");
             } else if (res.syncQueued) {
-              // Saved, the live push failed, and the server has queued a retry —
-              // so promise the catch-up instead of asking for a Save the user
-              // would have no way of knowing was still needed.
+              // Server queued a retry for the failed live push — promise the catch-up
+              // rather than asking for a Save the user can't know is still needed.
               toast.warning("Saved — your live agent will update shortly", {
                 description: res.syncError
                   ? `Couldn't reach the voice service (${res.syncError}). We'll keep retrying automatically.`
@@ -323,9 +309,8 @@ export const useAgentStore = create<AgentState>()(
     {
       name: "hello22_agent_config",
       version: 1,
-      // v0 → v1: owner call-summary channels became on-by-default. Flip them on
-      // once for existing users so their summaries start delivering to the account
-      // email / mobile (the user can still pause any channel afterwards).
+      // v0 → v1: owner call-summary channels became on-by-default; flip them on once
+      // for existing users (they can still pause any channel).
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Partial<AgentState>;
         if (version < 1) {
@@ -369,9 +354,8 @@ export const useAgentStore = create<AgentState>()(
           automations: fillAutomations(saved?.automations),
           advanced: { ...DEFAULT_AGENT_CONFIG.advanced, ...saved?.advanced },
         });
-        // Unsaved edits must NOT survive a browser refresh: reload the last-saved
-        // snapshot and drop any dirty draft + flags. (hydrate() then refreshes this
-        // from the backend once the user is authenticated.)
+        // Unsaved edits must NOT survive a refresh: restart from the saved snapshot,
+        // drop the dirty draft. hydrate() refreshes from the backend after auth.
         const savedConfig = fill(p.savedConfig);
         return {
           ...current,

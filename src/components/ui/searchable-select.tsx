@@ -7,14 +7,8 @@ import { cn } from "@/lib/utils";
  *  Only used to decide whether to drop down or flip up. */
 const PANEL_MAX_H = 300;
 
-/**
- * A searchable single-select dropdown over a flat list of string options — the
- * shared look/behaviour behind the Country and Industry pickers. Values are the
- * option strings themselves (what gets stored). Optional extras:
- *  - `clearLabel`: a top row that clears the selection (value → "") e.g. "Not set".
- *  - `renderFooter`: content under the list (e.g. an "add your own" action); it
- *     receives the current trimmed query and a `close()` that also resets search.
- */
+/** Searchable single-select over string options (values are the strings themselves). `clearLabel` adds a
+ *  clear row; `renderFooter` gets the trimmed query and a `close()` that also resets search. */
 export function SearchableSelect({
   value,
   onChange,
@@ -136,10 +130,8 @@ export function SearchableSelect({
         <ChevronDown className="size-4 shrink-0 opacity-60" />
       </button>
 
-      {/* Portalled to <body> on purpose. Every page card carries `animate-rise`,
-          whose persisted transform makes each card its own stacking context — an
-          absolutely-positioned panel (however high its z-index) would be trapped
-          inside its card and painted over by the next one. */}
+      {/* Portalled to <body>: page cards carry `animate-rise`, whose persisted transform makes each card a
+          stacking context, so an absolute panel would be painted over by the next card whatever its z-index. */}
       {open && pos && createPortal(
         <div
           ref={panelRef}

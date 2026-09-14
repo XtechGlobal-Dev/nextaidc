@@ -1,15 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Partition maintenance. Two things here can lose data if they are
- *  wrong, and both are tested directly:
- *
- *    - provisioning too few months ahead → live calls fall into the
- *      catch-all partition, which nothing ever drops;
- *    - dropping a partition that straddles the retention cutoff → calls
- *      the operator explicitly asked to keep are gone, instantly and
- *      unrecoverably, because DROP TABLE does not do half a month.
- * ------------------------------------------------------------------ */
+// Two data-loss risks pinned here: too few months provisioned ahead (calls land in the catch-all
+// nothing drops), and dropping a partition that straddles the retention cutoff (DROP TABLE can't do half a month).
 
 const h = vi.hoisted(() => ({
   queryRaw: vi.fn(),
@@ -30,10 +22,7 @@ vi.mock("../env.js", () => ({ env: { CALL_RETENTION_DAYS: 0 } }));
 
 const { sweepCallPartitions } = await import("./callPartitions.js");
 
-/**
- * The service issues several distinct tagged-template queries. They're told
- * apart by the SQL text so each test can answer them independently.
- */
+// Queries are told apart by SQL text so each test can answer them independently.
 function mockDb(opts: {
   partitioned?: boolean;
   existing?: string[];

@@ -1,24 +1,5 @@
-// Sync the admin "Default Agent Model" catalogue from Vapi.
-//
-// Vapi exposes NO public per-model cost/latency API. The numbers shown in Vapi's
-// dashboard model picker come from a cost estimator bundled in the dashboard's
-// own frontend. This script reproduces exactly what the dashboard shows by:
-//   1. pulling the provider + model list from Vapi's live OpenAPI schema
-//      (https://api.vapi.ai/api-json), then
-//   2. downloading the dashboard bundle, locating its cost-estimator chunk, and
-//      running Vapi's real estimator to get each model's cost/min + latency
-//      (the dropdown badge uses tokenLength 0 -> 500 tokens, matched here).
-// It then rewrites the AGENT_LLM_OPTIONS array in
-//   server/src/lib/agentConfig.ts
-// between its `= [` and `];` markers, leaving the rest of the file untouched.
-//
-// Run:  node scripts/syncVapiModels.mjs
-//
-// Filters (kept intentionally, mirror the hand-curated catalogue):
-//   - only providers with a fixed model enum (free-text providers like
-//     openrouter/together-ai/custom-llm are skipped — no safe dropdown),
-//   - OpenAI Azure region-pinned (":region") and realtime variants dropped,
-//   - Google realtime variants dropped.
+// Rewrites AGENT_LLM_OPTIONS in server/src/lib/agentConfig.ts from Vapi's OpenAPI schema plus the cost estimator
+// scraped from Vapi's dashboard bundle (no public cost API). Free-text and Azure/realtime variants skipped on purpose.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

@@ -1,20 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Vendor-reported status — the "is it them or is it us?" signal.
- *
- *  Our own telemetry (apiTrace.ts) says whether OUR calls are failing. It can't
- *  say whether the vendor is having a public incident, and the difference
- *  matters: a provider that is red on our side AND red on its own status page
- *  needs waiting out, while one that is red only on our side is our bug — a bad
- *  key, an expired token, a payload we changed.
- *
- *  Most modern API vendors publish a statuspage.io v2 summary. Those that don't
- *  (or whose endpoint moves) report `unknown`, never a fabricated "operational" —
- *  a green light nobody checked is worse than an honest blank.
- *
- *  Deliberately NOT routed through traceFetch: polling a status page is our own
- *  housekeeping, not traffic to the vendor's API, and counting it would inflate
- *  request counts and skew latency for every provider.
- * ------------------------------------------------------------------ */
+// Vendor status pages (statuspage.io v2) — "is it them or us?". No feed → `unknown`, never a
+// fabricated green. Not routed through traceFetch: polling would skew every provider's stats.
 
 import { PROVIDER_DEFS, type ProviderDef } from "./apiProviders.js";
 
@@ -120,9 +105,7 @@ async function poll(def: ProviderDef): Promise<ProviderStatus> {
     });
     if (!res.ok) return unknownStatus(def);
     const body = (await res.json()) as StatuspageSummary;
-    // Only statuspage.io's shape is understood. A vendor with a bespoke feed
-    // (Slack's, for one) parses to nothing and honestly reports "unknown"
-    // rather than being coerced into a green light.
+    // Only statuspage.io's shape is understood; a bespoke feed reports "unknown", not green.
     if (!body || typeof body !== "object" || !body.status) return unknownStatus(def);
     return parseSummary(def, body);
   } catch {
@@ -132,12 +115,7 @@ async function poll(def: ProviderDef): Promise<ProviderStatus> {
 
 /* ------------------------------- Public ---------------------------- */
 
-/**
- * One provider's vendor-reported status, from cache when fresh.
- *
- * Never throws and never blocks longer than {@link FETCH_TIMEOUT_MS}: a status
- * page having a bad day must not stop the API Center from rendering.
- */
+/** One provider's status, cached when fresh. Never throws or blocks past FETCH_TIMEOUT_MS. */
 export async function getProviderStatus(providerId: string): Promise<ProviderStatus> {
   const def = PROVIDER_DEFS.find((p) => p.id === providerId);
   if (!def) {
@@ -158,10 +136,8 @@ export async function getProviderStatus(providerId: string): Promise<ProviderSta
 
   const p = poll(def)
     .then((value) => {
-      // Only a real answer refreshes the cache clock. Caching a failed poll for
-      // the full TTL would hide a recovering status page for five minutes;
-      // caching it briefly still stops a hammering loop, because `inflight`
-      // collapses concurrent callers and the next attempt is one request.
+      // Only a real answer refreshes the clock; caching a failed poll for the
+      // full TTL would hide a recovering page. `inflight` already stops hammering.
       if (value.checkedAt) cache.set(providerId, { value, at: Date.now() });
       return value;
     })
@@ -171,10 +147,7 @@ export async function getProviderStatus(providerId: string): Promise<ProviderSta
   return p;
 }
 
-/**
- * Status for many providers at once, fetched concurrently. Used by the Health
- * screen and the fleet overview.
- */
+/** Status for many providers, fetched concurrently. */
 export async function getProviderStatuses(providerIds: string[]): Promise<Map<string, ProviderStatus>> {
   const unique = [...new Set(providerIds)];
   const results = await Promise.all(unique.map((id) => getProviderStatus(id)));

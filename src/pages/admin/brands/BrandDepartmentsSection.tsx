@@ -21,16 +21,8 @@ import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { AdminTicketDepartment, BrandTicketDepartmentInput } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  A brand's customer-support queues, from the platform's side.
- *
- *  Which queues a brand HAS is the platform's decision: every brand
- *  starts with General and Sales, and asks for more. The brand's admin
- *  decides who works each one — from their own inbox — and nothing
- *  else. So this is the whole of a department's definition (name,
- *  description, whether customers can pick it, order, on/off), and
- *  none of its staffing.
- * ------------------------------------------------------------------ */
+// A brand's support queues, platform side. Which queues exist is the platform's call; who works them is the
+// brand admin's (from their inbox) — so this edits the definition, never the staffing.
 
 interface Draft extends Required<BrandTicketDepartmentInput> {
   id: string | null;

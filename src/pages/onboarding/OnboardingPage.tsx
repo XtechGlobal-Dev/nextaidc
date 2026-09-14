@@ -32,17 +32,12 @@ export default function OnboardingPage() {
     for (const line of ALL_ONBOARDING_SPEECH) prefetchSpeech(line, voiceId);
   }, [voiceId]);
 
-  // A brand-new visitor with no captured website starts on the landing page. But
-  // an authenticated user resuming onboarding (their account already exists) must
-  // NOT be bounced — the client-side onboarding cache is cleared on sign-out, so
-  // bouncing them ping-ponged with RedirectIfAuthed into a blank/looping screen.
+  // No website → landing page, but never bounce an authed/resuming user: sign-out clears the onboarding
+  // cache, and bouncing them ping-ponged with RedirectIfAuthed into a blank loop.
   if (!url && !skippedWebsite && !authed && !accountCreated) return <Navigate to="/" replace />;
 
-  // /onboarding is mounted without RequireAuth, so a card-walled user can navigate
-  // back here and keep using the funnel instead of paying. Reuse the single
-  // redirect decider rather than re-implementing the rule: it returns "/onboarding"
-  // while the guided funnel is genuinely still in progress, and "/subscribe" once
-  // it isn't. Anyone not walled is unaffected.
+  // /onboarding has no RequireAuth, so a card-walled user could come back here to dodge paying.
+  // Reuse the single redirect decider rather than re-implementing the rule.
   if (user && onboardingRedirectPath(user) === "/subscribe") {
     return <Navigate to="/subscribe" replace />;
   }

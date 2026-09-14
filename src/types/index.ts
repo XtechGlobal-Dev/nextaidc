@@ -38,14 +38,11 @@ export interface Profile {
   // Billing / subscription (present in dynamic mode).
   subscriptionStatus?: string; // none | trialing | active | past_due | canceled | suspended
   subscriptionPlanId?: string | null;
-  /** Whether a card was required when THIS account signed up (frozen at signup —
-   *  the admin toggle is never re-read).
-   *  ABSENT on a profile cached before this shipped, so read sites must test
-   *  `=== true` — undefined has to mean grandfathered, never "wall them". */
+  /** Frozen at signup — the admin toggle is never re-read. Absent on profiles cached before this
+   *  shipped, so read sites must test `=== true`: undefined means grandfathered, never "wall them". */
   cardRequiredAtSignup?: boolean;
-  /** When the first card was confirmed (ISO); null/absent = never. Paired with
-   *  the flag above by `cardWallActive` — see src/lib/cardWall.ts for why the
-   *  subscription status can't be used for this. */
+  /** First card confirmed (ISO); null/absent = never. Paired with the flag above by `cardWallActive` —
+   *  src/lib/cardWall.ts explains why subscription status can't be used instead. */
   cardConfirmedAt?: string | null;
   trialEndsAt?: string | null;
   /** Set (ISO) when an admin has locked the account; null/absent otherwise. */
@@ -147,9 +144,7 @@ export interface WebhookDelivery {
   createdAt: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Human Call Transfer                                                 */
-/* ------------------------------------------------------------------ */
+// Human Call Transfer
 
 export interface HumanTransferSettings {
   id: string;

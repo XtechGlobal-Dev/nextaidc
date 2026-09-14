@@ -4,13 +4,8 @@ import { resolve } from "node:path";
 import { lockMasterPrompt } from "./agent.routes.js";
 import type { AgentConfig } from "../lib/agentConfig.js";
 
-/*
- * The master prompt is the product, so a customer may read it but never rewrite
- * it. A read-only textarea does not enforce that — the config round-trips to the
- * browser and back on a plain PUT, so devtools, the console, or curl would all
- * have saved a hand-written prompt. These pin the server-side rule, which is the
- * only version of it that holds.
- */
+// Customers may read the master prompt but never rewrite it. The read-only textarea
+// doesn't enforce that (config round-trips on a plain PUT), so the server rule is pinned here.
 
 const advanced = (over: Partial<AgentConfig["advanced"]> = {}) =>
   ({ masterPrompt: "", masterPromptDirty: false, ...over }) as AgentConfig["advanced"];
@@ -75,9 +70,8 @@ describe("lockMasterPrompt", () => {
   });
 
   it("lets an admin through while impersonating, where the role reads USER", () => {
-    // The impersonation token carries the CUSTOMER's role, so the role check
-    // alone would lock support out of the account they were sent to fix. `imp`
-    // is minted only by the ADMIN-only impersonate route.
+    // Impersonation tokens carry the customer's role; `imp` is only minted by the
+    // admin-only impersonate route, so it's safe to trust.
     const config = incoming();
 
     lockMasterPrompt(config, storedAs("the real prompt"), { role: "USER", imp: true });
@@ -86,15 +80,11 @@ describe("lockMasterPrompt", () => {
   });
 });
 
-/* Both client-writable config routes must call it — leaving either open just
- * moves the bypass one endpoint along. Source-pinned, in the style of
- * couponUpdate.test.ts, because these are long Express handlers wired to Vapi
- * and Stripe. */
+// Both client-writable config routes must call it, or the bypass just moves one
+// endpoint over. Source-pinned since the handlers are wired to Vapi and Stripe.
 const src = readFileSync(resolve(import.meta.dirname, "agent.routes.ts"), "utf8");
 
-/** One handler's body. Selected by VERB as well as path — `router.get("/")` and
- *  `router.put("/")` both exist here, and matching on the path alone silently
- *  returned the read route. */
+// One handler's body, selected by verb AND path — path alone silently matched the GET.
 const routeBody = (verb: string, path: string) => {
   const chunk = src
     .split(new RegExp(`router\\.${verb}\\(`))
@@ -117,12 +107,8 @@ describe("agent config write paths", () => {
   });
 
   it("locks before the business rename, so a rename still reaches a frozen prompt", () => {
-    // renameBusinessInConfig only rewrites a DIRTY prompt. Restoring the stored
-    // value after it ran would undo the rename and leave the agent greeting
-    // callers with the old business name.
-    // Matched on the CALL sites, not the bare identifiers — both names also
-    // appear in the comments explaining this ordering, which would make the
-    // comparison pass or fail on prose rather than on code.
+    // renameBusinessInConfig only rewrites a dirty prompt; restoring after it would
+    // undo the rename. Matched on call sites, since both names also appear in comments.
     const put = routeBody("put", "/");
     expect(put.indexOf("lockMasterPrompt(config,")).toBeLessThan(
       put.indexOf("= renameBusinessInConfig("),

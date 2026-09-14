@@ -1,22 +1,7 @@
 import { parsePhoneNumberFromString } from "libphonenumber-js/max";
 
-/* ------------------------------------------------------------------ *
- *  Call-forwarding instructions engine.
- *
- *  The owner keeps their existing published number and forwards its
- *  calls to the AI number at their carrier. The actual forwarding is a
- *  carrier-side action on the OWNER's phone (we can't program another
- *  carrier), so this module just generates the correct dial codes:
- *
- *   - mode "all"      → unconditional forwarding (every call → AI)
- *   - mode "overflow" → conditional forwarding (busy / no-answer /
- *                       unreachable → AI; the owner still answers first)
- *
- *  Codes are carrier/country specific. AU mobiles + most GSM networks
- *  use the standard MMI codes (*21*, *61*, *67*, *62*); US carriers use
- *  the CLASS star codes (*72, *90, *92). The destination is the AI
- *  number, formatted per the code family.
- * ------------------------------------------------------------------ */
+// Call-forwarding dial codes. Forwarding is a carrier-side action on the OWNER's phone, so we
+// only generate codes: GSM MMI (*21*/*61*/*67*/*62*) for AU + most of the world, US CLASS (*72/*90/*92).
 
 export type ForwardingMode = "all" | "overflow";
 export type ForwardingCountry = "au" | "us" | "generic";
@@ -103,12 +88,8 @@ export function findCarrier(country: ForwardingCountry, carrierId: string): Forw
   return def.carriers.find((c) => c.id === carrierId) ?? def.carriers[0];
 }
 
-/**
- * Format the AI (destination) number for a code family.
- *  - GSM codes take the full international number (+countrycode…).
- *  - US CLASS codes are dialed domestically, so a US destination becomes
- *    1 + national number; a non-US destination stays international.
- */
+/** Destination for a code family: GSM takes full international; US CLASS is dialed domestically,
+ *  so a US number becomes 1 + national and a non-US one stays international. */
 export function formatDestination(aiNumber: string, family: "gsm" | "us"): string {
   const parsed = parsePhoneNumberFromString(aiNumber.trim());
   if (parsed) {
@@ -124,20 +105,8 @@ export function formatDestination(aiNumber: string, family: "gsm" | "us"): strin
   return raw.startsWith("+") ? `+${digits}` : `+${digits}`;
 }
 
-/**
- * The destination as it should actually be KEYED INTO a forwarding code.
- *
- * A forwarding code is dialled on the user's own phone, on their own network, so
- * the destination is a domestic call: carriers want the national form (AU
- * `0468159801`, not `+61468159801`). It also has to be — a landline keypad has
- * no `+` key at all, which made the international form impossible to enter.
- *
- * Only safe when the AI number is in the SAME country the user is dialling from;
- * a cross-border destination has no national form there, so it stays E.164 and
- * the UI warns that it needs an international dial-out prefix.
- *
- * `iso` is the country the user picked ("Where's your phone?"), lowercase.
- */
+/** Destination as KEYED INTO a code: national form (AU `0468…`, not `+61…`) — carriers want it and a
+ *  landline keypad has no `+`. Only when the AI number is in `iso`; cross-border stays E.164 and the UI warns. */
 export function dialDestination(aiNumber: string, iso: string | undefined | null): string {
   const parsed = parsePhoneNumberFromString(aiNumber.trim());
   if (parsed?.country && iso && parsed.country.toLowerCase() === iso.toLowerCase()) {
@@ -155,9 +124,8 @@ export function isForeignDestination(aiNumber: string, iso: string | undefined |
   return parsed.country.toLowerCase() !== iso.toLowerCase();
 }
 
-/** International dial-out (IDD) prefixes — what you key INSTEAD of "+" when the
- *  destination is in another country. Most of the world uses 00; the exceptions
- *  here are the countries we offer numbers in. */
+/** IDD prefixes keyed INSTEAD of "+" for a cross-border destination. Most of the world is 00;
+ *  the exceptions listed are the countries we sell numbers in. */
 const IDD_PREFIXES: Record<string, string> = {
   au: "0011",
   us: "011",
@@ -171,10 +139,7 @@ export function internationalPrefix(iso: string | undefined | null): string {
   return (iso && IDD_PREFIXES[iso.toLowerCase()]) || "00";
 }
 
-/**
- * Build the dial codes + steps for a given AI number, country/carrier and mode.
- * Pure and deterministic — the single source of truth for every forwarding UI.
- */
+/** Dial codes + steps for an AI number, carrier and mode. Pure — the single source for every forwarding UI. */
 export function buildForwarding(
   aiNumber: string,
   country: ForwardingCountry,
@@ -251,21 +216,11 @@ export function buildForwarding(
   };
 }
 
-/* ------------------------------------------------------------------ *
- *  Full forwarding-code reference tables.
- *
- *  The step-by-step guide above walks a user through ONE scenario at a
- *  time. This is the complete carrier-style lookup — every diversion
- *  type (all calls / no answer / unreachable / busy) with its activate,
- *  deactivate and check codes — shown in an accordion so a user can find
- *  the exact code for their situation instead of guessing from a single
- *  misleading line. Mirrors the tables carriers publish (see the doc
- *  links below).
- * ------------------------------------------------------------------ */
+// Full carrier-style reference tables (every diversion type with activate/deactivate/check),
+// for the accordion — the guide above only covers one scenario at a time.
 
-/** One diversion type and its dial codes. The "turn on" code is split AROUND the
- *  number the user substitutes (prefix + <AI number> + suffix) so the UI can show
- *  clearly which part is the fixed code and which part is their number. */
+/** One diversion type. The "turn on" code is split AROUND the number (prefix + <AI number> + suffix)
+ *  so the UI can show which part is theirs. */
 export interface GsmCodeRow {
   /** Short scenario name, e.g. "No answer". */
   scenario: string;
@@ -285,13 +240,8 @@ export function codeTableHasCheck(family: "gsm" | "us"): boolean {
   return family === "gsm";
 }
 
-/**
- * The forwarding-code table for a code family. GSM uses the universal MMI codes
- * (**21*<number>#, matching Telstra/Vodafone's own tables); US uses the CLASS
- * star codes (no unreachable case, no check code). The "turn on" code is returned
- * split around the number so the UI can highlight where the AI number goes — pass
- * the row + a formatted number to activateCode() to get the full dialable string.
- */
+/** Code table for a family. GSM = universal MMI (matches Telstra/Vodafone's tables); US = CLASS codes
+ *  (no unreachable, no check). Pass a row + number to activateCode() for the dialable string. */
 export function buildGsmCodeTable(family: "gsm" | "us", carrierId?: string): GsmCodeRow[] {
   if (family === "us") {
     return [
@@ -300,11 +250,8 @@ export function buildGsmCodeTable(family: "gsm" | "us", carrierId?: string): Gsm
       { scenario: "Busy", when: "You're already on a call", activate: { prefix: "*90", suffix: "" }, deactivate: "*91", check: "" },
     ];
   }
-  // GSM MMI — `**<code>*<number>#` register+activate, `##<code>#` erase,
-  // `*#<code>#` interrogate. `##002#` clears every diversion at once.
-  // Telstra documents the voice basic-service class `*11` on the activate
-  // sequence (`**<code>*<number>*11#`) — so match their official form exactly for
-  // Telstra; every other GSM carrier uses the plain `#`.
+  // GSM MMI: `**<code>*<number>#` activate, `##<code>#` erase, `*#<code>#` check, `##002#` clears all.
+  // Telstra documents the voice class `*11` on activate (`…*11#`) — match their form exactly; others use plain `#`.
   const activateSuffix = carrierId === "telstra" ? "*11#" : "#";
   const gsm = (code: string): Omit<GsmCodeRow, "scenario" | "when"> => ({
     activate: { prefix: `**${code}*`, suffix: activateSuffix },
@@ -333,12 +280,8 @@ export interface CarrierDocLink {
   url: string;
 }
 
-/**
- * Official carrier call-forwarding guides, by country ISO (lowercase). Shown so a
- * user whose exact codes differ (or who prefers an in-app toggle) can follow their
- * own carrier's instructions. Curated + editable — verified links, newest checked
- * July 2026. Falls back to nothing (a generic note is shown instead).
- */
+/** Official carrier forwarding guides by lowercase ISO, for users whose codes differ. Curated —
+ *  links last verified July 2026. No entry → the UI shows a generic note. */
 export const CARRIER_DOC_LINKS: Record<string, CarrierDocLink[]> = {
   au: [
     { label: "Telstra", url: "https://www.telstra.com.au/small-business/online-support/mobiles-devices/forward-calls-on-mobile" },

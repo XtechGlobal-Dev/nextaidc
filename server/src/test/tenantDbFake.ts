@@ -1,19 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  A stand-in for services/tenantDb.js in unit tests.
- *
- *  Since phase 6 a customer's profile, agent record, calls and coupons
- *  are read from the brand's own database. Tests that fake `prisma`
- *  model by model keep working by letting the brand's database BE that
- *  same fake: every router in here resolves to one object that answers
- *  from `extras` first (models the test names explicitly) and from the
- *  mocked control-plane client otherwise.
- *
- *  Use inside a vi.mock factory:
- *
- *    vi.mock("../services/tenantDb.js", async () =>
- *      (await import("../test/tenantDbFake.js")).tenantDbFake({ callLog: { ... } }),
- *    );
- * ------------------------------------------------------------------ */
+// Stand-in for services/tenantDb.js in unit tests: the brand DB IS the mocked `prisma`, with `extras` answering
+// first. Use inside a vi.mock factory: `vi.mock("../services/tenantDb.js", async () => (await import(...)).tenantDbFake({...}))`.
 
 export async function tenantDbFake(
   extras: Record<string, unknown> = {},

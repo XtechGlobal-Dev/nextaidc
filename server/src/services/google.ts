@@ -4,22 +4,8 @@ import { encryptSecret, decryptSecret } from "../lib/crypto.js";
 import { traceFetch } from "./apiTrace.js";
 import { canonicalApiBaseUrl, env } from "../env.js";
 
-/**
- * The OAuth redirect URI, resolved consistently for BOTH the auth URL and the
- * token exchange (Google requires they match exactly).
- *
- * Deliberately ONE value for every tenant, never the brand's own domain. Google
- * only accepts a redirect_uri that was registered on the OAuth client ahead of
- * time, so a per-brand callback would mean a Google Cloud project per brand —
- * and a console visit every time a brand is created, which is the opposite of
- * what white-labelling is for. Instead every tenant's consent comes back here
- * and the callback bounces the browser to the brand it came from, using the
- * origin carried in the signed `state` (see routes/google.routes.ts).
- *
- * Admin Settings wins so the URI can be corrected without a redeploy; the env
- * default backstops a blank field, which Google rejects outright with
- * "Missing required parameter".
- */
+// One redirect URI for every tenant, never the brand's domain — Google only accepts
+// pre-registered URIs. The callback bounces to the origin carried in the signed `state`.
 function redirectUri(): string {
   const configured = getEffective("google.redirectUri").trim();
   if (configured) return configured;
@@ -27,18 +13,13 @@ function redirectUri(): string {
   return `${canonicalApiBaseUrl}/api/google/callback`;
 }
 
-/** The single callback URI to register in the Google Cloud console — surfaced in
- *  admin so the operator never has to reconstruct it by hand. */
+/** The callback URI to register in the Google Cloud console, surfaced in admin. */
 export function googleCallbackUri(): string {
   return redirectUri();
 }
 
-/* ------------------------------------------------------------------ *
- *  Google Calendar OAuth — plain-fetch token exchange + storage.
- *  Tokens live (encrypted) in PlatformSetting under "google.tokens.<userId>"
- *  so no schema migration is needed. Client credentials come from
- *  settings.ts (DB override → env fallback).
- * ------------------------------------------------------------------ */
+// Google Calendar OAuth. Tokens live encrypted in PlatformSetting under
+// "google.tokens.<userId>" — no schema migration needed.
 
 export interface GoogleTokens {
   accessToken: string;
@@ -154,10 +135,7 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
   }
 }
 
-/** Authenticated Google API fetch for a user, with transparent access-token
- *  refresh: on a 401 it refreshes once (using the stored refresh token), persists
- *  the new token, and retries. Returns null when the user isn't configured /
- *  connected. Callers inspect `res.ok` themselves. Never throws on refresh. */
+// Authenticated fetch; refreshes once on 401 and retries. Null when not connected.
 async function googleFetch(
   userId: string,
   path: string,
@@ -194,19 +172,7 @@ export interface BusyInterval {
   end: string;
 }
 
-/**
- * Return the busy intervals on the booking calendar(s) over a window, so the
- * availability engine can subtract already-occupied time from the owner's open
- * slots. Implemented with events.list (NOT the freeBusy endpoint): the freeBusy
- * API requires the broad `calendar`/`calendar.readonly` scope, but our OAuth only
- * requests `calendar.events` — which grants events.list and returns a 403 on
- * freeBusy. events.list works with the scope we already have (no re-consent).
- *
- * Counts only TIMED, non-cancelled, non-"free" (opaque) events as busy; all-day
- * (date-only) events are ignored so a single all-day entry can't wipe out every
- * slot. Best-effort — returns [] on any error so availability degrades to "show
- * the owner's open hours" rather than crashing the booking tool.
- */
+/** Busy intervals over a window. Uses events.list, not freeBusy — freeBusy needs the broad calendar scope we don't request (403). All-day events are ignored so one can't wipe every slot; returns [] on error. */
 export async function getFreeBusy(
   userId: string,
   timeMinISO: string,
@@ -260,8 +226,7 @@ export async function getFreeBusy(
   }
 }
 
-/** Delete a calendar event (used when the AI/owner cancels a booking). Emails
- *  attendees the cancellation (sendUpdates=all). Best-effort — never throws. */
+/** Deletes an event and emails attendees (sendUpdates=all). Never throws. */
 export async function deleteCalendarEvent(
   userId: string,
   eventId: string,
@@ -288,8 +253,7 @@ export async function deleteCalendarEvent(
   }
 }
 
-/** Move an existing event to a new start/end (used when the AI/owner reschedules).
- *  Emails attendees the update (sendUpdates=all). Best-effort — never throws. */
+/** Moves an event to a new start/end and emails attendees. Never throws. */
 export async function patchCalendarEventTime(
   userId: string,
   eventId: string,
@@ -330,11 +294,9 @@ export interface CalendarEvent {
   endISO: string;
   /** Calendar to write to; defaults to the user's primary calendar. */
   calendarId?: string;
-  /** IANA timezone (e.g. "Australia/Sydney") stamped on start/end. Optional —
-   *  when omitted Google uses the offset carried in the ISO datetimes. */
+  /** IANA timezone; when omitted Google uses the offset in the ISO datetimes. */
   timeZone?: string;
-  /** Caller's email. When set, they're added as an attendee and Google emails
-   *  them a native calendar invite (sendUpdates=all). */
+  /** Caller's email; when set they get a native Google invite. */
   attendeeEmail?: string;
 }
 
@@ -380,9 +342,7 @@ function parseGoogleError(status: number, detail: string): string {
   return snippet ? `Google API ${status}: ${snippet}` : `Google API error ${status}`;
 }
 
-/** Create a calendar event on the user's calendar, optionally inviting the caller.
- *  Graceful no-op when unconfigured/disconnected. On failure, `error` carries a
- *  short human reason (surfaced by the Test button + logs). */
+/** Creates an event, optionally inviting the caller. No-op when unconfigured; `error` is a short human reason. */
 export async function createCalendarEvent(
   userId: string,
   evt: CalendarEvent,
@@ -420,10 +380,8 @@ export async function createCalendarEvent(
       };
     }
 
-    // Resilience: many Google Workspace accounts block inviting EXTERNAL attendees
-    // (returns 403 forbiddenForNonOrganizer / a policy error). Don't lose the whole
-    // booking over the invite — retry once without the attendee so the event still
-    // lands on the owner's calendar (they just don't get the auto-invite email).
+    // Many Workspace accounts block external attendees (403). Retry without the
+    // invite so the booking still lands on the owner's calendar.
     if (!res.ok && evt.attendeeEmail?.trim()) {
       const detail = await res.text().catch(() => "");
       console.warn(

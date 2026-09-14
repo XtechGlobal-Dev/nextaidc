@@ -7,12 +7,8 @@ import {
 } from "@aws-sdk/client-s3";
 import { env } from "../env.js";
 
-/* ------------------------------------------------------------------ *
- *  S3 object storage — used for admin-uploaded branding assets (logos
- *  + favicon). Credentials are env-only (server/.env, AWS_* vars) — not
- *  configurable from the admin UI. The client is rebuilt whenever the
- *  config changes.
- * ------------------------------------------------------------------ */
+// S3 storage for branding assets and JSON blobs. Credentials are env-only (AWS_*),
+// deliberately not editable from the admin UI.
 
 export interface S3Config {
   bucket: string;
@@ -117,15 +113,8 @@ export async function deleteObject(key: string): Promise<void> {
   }
 }
 
-/* ------------------------------------------------------------------ *
- *  JSON blobs — cold storage for archived call transcripts. See
- *  services/callArchive.ts.
- *
- *  Kept apart from `uploadObject` because these use a CALLER-CHOSEN, stable
- *  key (one per call) instead of a random UUID: the archiver has to be able to
- *  re-derive a call's key, and a re-run must overwrite rather than litter the
- *  bucket with orphans nothing points at.
- * ------------------------------------------------------------------ */
+// JSON blobs (archived transcripts) use a caller-chosen stable key, not a UUID, so
+// the archiver can re-derive it and a re-run overwrites instead of leaving orphans.
 
 /** Write `value` as JSON at an exact key. Overwrites whatever was there. */
 export async function putJsonObject(key: string, value: unknown): Promise<void> {
@@ -143,14 +132,7 @@ export async function putJsonObject(key: string, value: unknown): Promise<void> 
   );
 }
 
-/**
- * Read a JSON object back by key.
- *
- * Returns null when the key is missing, storage is unconfigured, or the body
- * won't parse. A call whose blob has gone astray then renders with an empty
- * transcript instead of 500-ing the owner's inbox — the row itself still holds
- * every field the page actually needs (caller, duration, outcome, summary).
- */
+/** Reads a JSON object by key. Null on missing/unconfigured/unparseable so a lost transcript blob renders empty instead of 500-ing the inbox. */
 export async function getJsonObject<T = unknown>(key: string): Promise<T | null> {
   if (!key || !isStorageConfigured()) return null;
   const c = s3Config();

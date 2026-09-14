@@ -2,13 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  API contract pilot: this route's responses go through sendValidated()
- *  against the shared @shared/contracts/industries schemas, so a passing
- *  assertion here also confirms the live response matches the contract
- *  the frontend's src/lib/api.ts types against (sendValidated throws
- *  outside production on any mismatch).
- * ------------------------------------------------------------------ */
+// Responses go through sendValidated() (throws outside prod on mismatch), so a pass
+// here also proves the live response matches the shared contract the frontend types against.
 
 const h = vi.hoisted(() => ({
   getPublicIndustries: vi.fn(),

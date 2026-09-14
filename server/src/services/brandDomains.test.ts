@@ -1,15 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Brand } from "@prisma/client";
 
-/* ------------------------------------------------------------------ *
- *  Brand vanity domains — the records handed to the client, the check
- *  that promotes a claim to "verified", and the sweep that runs it.
- *
- *  The split this pins down: the routing record points the brand's
- *  domain at the FRONTEND edge, and at nothing else. No record here ever
- *  sends API traffic anywhere — the API stays on the platform's host for
- *  every brand.
- * ------------------------------------------------------------------ */
+// Brand vanity domains: the records, the verify check, and the sweep. Pins that the routing
+// record points at the FRONTEND edge only — the API stays on the platform's host for every brand.
 
 const h = vi.hoisted(() => ({
   findMany: vi.fn(),

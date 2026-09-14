@@ -8,12 +8,7 @@ import { Input } from "@/components/ui/input";
 import { ApiError, type ApplyPriceResult, type BrandPricing, type BrandPricingRow } from "@/lib/api";
 import { formatMoney } from "@/lib/currency";
 
-/* ------------------------------------------------------------------ *
- *  A brand's price list: the platform's base price per plan, the brand's
- *  own addon on top, and what its customers therefore pay. Shared by the
- *  platform owner's view of a brand and the brand admin's own page — the
- *  only difference is who may type in the addon column.
- * ------------------------------------------------------------------ */
+// Brand price list (base + addon = customer price). Shared by the platform view and the brand admin page; only who can edit the addon differs.
 
 export function BrandPricingSection({
   pricing,
@@ -205,9 +200,7 @@ function PricingRow({
         )}
         {overCap && <div className="mt-1 text-[11px] text-danger">Over the cap</div>}
         {onApply && current.subscribers > 0 && (
-          // Existing subscribers stay on the Price they signed up with until the
-          // platform owner moves them — no proration, the new amount bills from
-          // their next cycle.
+          // Existing subscribers keep their Price until moved — no proration, new amount from next cycle.
           <Button
             size="sm"
             variant="outline"

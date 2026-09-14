@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// chargeTrialAndActivateNow runs when a trial user goes live by claiming a number:
-// it must charge the saved card and activate the plan, and — critically — a failed
-// charge must NOT destroy the trial (the account stays trialing so they can retry
-// after fixing their card, instead of being stranded).
+// Go-live charge: a failed charge must NOT destroy the trial — the account stays
+// trialing so the user can retry after fixing their card.
 
 vi.mock("../prisma.js", () => ({
   prisma: { profile: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() } },

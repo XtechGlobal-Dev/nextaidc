@@ -1,16 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  A queued downgrade must not quietly cancel a customer's coupon.
- *
- *  scheduleDowngrade writes the schedule's phases explicitly, and Stripe treats
- *  a phase's `discounts` as "if not specified, inherit from the subscription's
- *  CUSTOMER". Our coupons live on the subscription, not the customer — so
- *  phases written without `discounts` strip the discount the moment the
- *  schedule takes over. Nothing errors; the customer just starts paying full
- *  price with cycles still owed, which is the sort of bug you find in a refund
- *  request months later.
- * ------------------------------------------------------------------------- */
+// A queued downgrade must not silently drop the coupon: an unspecified phase `discounts`
+// inherits from the CUSTOMER, and ours sit on the subscription — stripped with no error.
 
 const subscriptions = { retrieve: vi.fn(), update: vi.fn() };
 const subscriptionSchedules = { create: vi.fn(), update: vi.fn(), release: vi.fn() };
@@ -22,8 +13,7 @@ vi.mock("stripe", () => ({
   },
 }));
 vi.mock("../env.js", () => ({
-  // Brand hosts resolve against these; the real module exports them, so a
-  // mock that omits them fails to link for anything importing brandUrls.
+  // brandUrls imports these; a mock without them fails to link.
   platformDomain: "hello22.ai",
   platformDomains: ["hello22.ai"],
   allowUnverifiedBrandDomains: false,

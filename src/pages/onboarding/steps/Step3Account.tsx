@@ -106,10 +106,8 @@ export default function Step3Account() {
       message={ONBOARDING_SPEECH.step3}
       aside={<AgentCallPreview scenario="sms" />}
     >
-      {/* Kept as a <form> for autofill / password-manager support, but it never
-          natively submits — the button is type="button" and Enter is handled
-          below — so GTM's form-submission listener never fires `gtm.formSubmit`.
-          Only our own `sign_up` event goes out (on OTP verify). */}
+      {/* A <form> for autofill/password managers, but it never natively submits (type="button" + manual Enter)
+          so GTM's `gtm.formSubmit` never fires — only our `sign_up` event on OTP verify. */}
       <form
         noValidate
         onSubmit={(e) => e.preventDefault()}

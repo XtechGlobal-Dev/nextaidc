@@ -20,11 +20,8 @@ import { audit } from "./audit.js";
 import type { AgentConfig } from "../lib/agentConfig.js";
 import { brandDisplayName } from "../lib/brandUrls.js";
 
-/* ------------------------------------------------------------------ *
- *  Admin phone-number management. The PhoneNumber table is the source
- *  of truth for the panel; `Profile.receptionistNumber` is kept in sync
- *  on (re)assignment so the customer dashboard + provisioning still work.
- * ------------------------------------------------------------------ */
+// Admin phone-number management. PhoneNumber is the source of truth;
+// Profile.receptionistNumber is kept in sync on (re)assignment.
 
 const DEFAULT_MONTHLY_CENTS = 5000;
 
@@ -37,42 +34,10 @@ function agentLabel(config: AgentConfig | null | undefined): string {
   return config?.identity?.assistantName?.trim() || "Receptionist";
 }
 
-/* ------------------------------------------------------------------ *
- *  Release lifecycle
- *
- *  A number leaves a customer in one of two ways, and they are NOT the
- *  same thing:
- *
- *  1. Deliberately — an admin moves it to the pool, or a customer's setup
- *     swaps their agent onto a different number. Either way the number was
- *     given up on purpose, so it goes back to THAT brand's own pool, ready
- *     for the brand's next customer — allocation enforces that boundary, so a
- *     number in Acme's pool can only be handed to an Acme customer.
- *
- *     It is not the brand's forever, though: `releasedAt` starts a reclaim
- *     clock, and a number the brand hasn't reused within the window moves to
- *     the shared platform pool. Use it or lose it — otherwise a brand could
- *     park inventory the platform pays for and nobody uses.
- *
- *     There is no customer-facing "release my number" — a customer only ever
- *     gives one up by taking another. If that ever ships, it belongs on this
- *     path: call releasedToBrandPool() and it lands in the right pool.
- *
- *  2. Incidentally — a trial lapses, an account is deleted. Nobody chose
- *     to give the number up, and holding that inventory for a month would
- *     starve signup, so it goes straight back to the shared pool.
- *
- *  Both paths null `userId`, which is exactly why `brandId` is stored on
- *  the row: after a release there is otherwise nothing left to say whose
- *  customer had it.
- * ------------------------------------------------------------------ */
+// Two release paths: deliberate (admin/customer swap) → the brand's own pool with a reclaim
+// clock; incidental (trial lapse, deletion) → shared pool. Both null userId, hence brandId on the row.
 
-/** Back to the shared platform pool, immediately and unowned.
- *
- *  Exported because the invariant it encodes — AVAILABLE implies no brand and
- *  no hold — has to hold for every release path in the codebase, including the
- *  ones in provisioning. A row left AVAILABLE with a stale brandId would show
- *  up in that tenant's pool while being handed to anyone's next customer. */
+/** Shared pool, unowned, no hold. Exported so every release path keeps the invariant: AVAILABLE with a stale brandId would leak into that tenant's pool. */
 export const TO_SHARED_POOL = {
   userId: null,
   assistantId: null,
@@ -82,16 +47,8 @@ export const TO_SHARED_POOL = {
   releasedAt: null,
 } as const;
 
-/**
- * A deliberate release: the number goes back to its own brand's pool, free to
- * hand to another of that brand's customers straight away.
- *
- * The brand keeps it because the brand paid for it. It stays AVAILABLE rather
- * than sitting in a cooldown — allocation is what enforces the boundary now
- * (`availableForBrand`), so a number in Acme's pool can only ever go to an Acme
- * customer. With no brand (a platform-direct customer) it returns to the shared
- * pool, which is the same thing one level up.
- */
+// Deliberate release: back to the brand's pool, AVAILABLE right away — allocation
+// (availableForBrand) enforces the boundary, not a cooldown. No brand → shared pool.
 function releasedToBrandPool(brandId: string | null | undefined) {
   if (!brandId) return { ...TO_SHARED_POOL };
   return {
@@ -123,9 +80,7 @@ export interface PoolNumberDto {
   brandId: string | null;
   /** That tenant's display name, for the admin table. Null when shared. */
   brandName: string | null;
-  /** When an unassigned brand number moves to the shared platform pool, or null
-   *  when nothing is counting down (in service, or already shared). The brand
-   *  needs to see this: otherwise a number they were saving simply disappears. */
+  /** When an unassigned brand number moves to the shared pool; null when nothing is counting down. */
   reclaimAt: string | null;
 }
 export interface UserNumberDto extends PoolNumberDto {
@@ -155,23 +110,7 @@ export interface ImportableDto {
   monthlyPriceCents: number;
 }
 
-/**
- * Split every tracked number this viewer may see into System Pool vs User
- * Numbers, carving out the current SMS sender (it lives only in its own card).
- *
- * `viewerBrandId` is the acting admin's tenant — null for the SUPER_ADMIN and
- * any platform-level admin, exactly like `tenantScope()` elsewhere. It decides
- * what comes back:
- *
- *   platform (null)  every number the platform owns: its own free inventory,
- *                    everything the Twilio sync imported, and each brand's
- *                    numbers too (tagged with the owning brand). The platform
- *                    is billed for all of it, so none of it may silently vanish
- *                    from its inventory.
- *   a brand          ONLY that brand's own numbers — the ones its customers are
- *                    using (Used) and the ones its admin has unassigned. Not the
- *                    shared platform pool, and never another brand's.
- */
+/** Pool vs user numbers for a viewer. Platform (null) sees everything it's billed for, brand-tagged; a brand sees ONLY its own numbers — never the shared pool or another brand's. */
 export async function getOverview(viewerBrandId: string | null = null): Promise<OverviewDto> {
   const sender = normalize(getEffective("twilio.fromNumber")) || null;
   const reclaimDays = await getReclaimDays();
@@ -244,18 +183,7 @@ export async function getOverview(viewerBrandId: string | null = null): Promise<
   };
 }
 
-/**
- * The pool a customer of `brandId` may actually be given a number from.
- *
- * A brand's own pool first, the shared platform pool second. This is the rule
- * that lets a released number stay in its brand's pool while being immediately
- * usable: without it, "AVAILABLE with a brandId" would be handed to whoever
- * signed up next, and Acme would pay for a number Northwind is using.
- *
- * Order matters — a brand should spend the inventory it is already paying for
- * before drawing on the shared pool. Callers pass this to `findFirst` with
- * `orderBy` and take the first row.
- */
+/** Where clause for numbers a brand's customer may take: own pool or shared. Without it "AVAILABLE with a brandId" would go to anyone, and Acme would pay for Northwind's number. */
 export function availableForBrand(brandId: string | null | undefined) {
   return {
     userId: null,
@@ -283,17 +211,13 @@ export async function nextAvailableForBrand(brandId: string | null | undefined) 
   });
 }
 
-/** Which tenant a number belongs to, for callers that must check reach before
- *  acting on it. Null = the shared platform pool (or no such number — either
- *  way a brand admin is allowed to attempt it, and reassign decides the rest). */
+/** Tenant owning a number, for reach checks. Null = shared pool or no such number; reassign decides the rest. */
 export async function numberBrandId(id: string): Promise<string | null> {
   const row = await prisma.phoneNumber.findUnique({ where: { id }, select: { brandId: true } });
   return row?.brandId ?? null;
 }
 
-/** Every agent a number can be assigned to (one per customer conversion),
- *  scoped to the viewer's tenant — a brand admin assigns numbers to their own
- *  customers and nobody else's. Null viewer = platform-level, sees all. */
+/** Assignable agents, scoped to the viewer's tenant so a brand admin only sees their own customers. Null viewer = all. */
 export async function listAgents(viewerBrandId: string | null = null): Promise<AgentDto[]> {
   const tenants = viewerBrandId ? [{ brandId: viewerBrandId, db: await tenantFor(viewerBrandId) }] : await allTenants();
   const out: AgentDto[] = [];
@@ -325,9 +249,7 @@ export async function twilioAvailable(): Promise<ImportableDto[]> {
   ]);
   const have = new Set(rows.map((r) => normalize(r.number)));
   const importable = owned.filter((o) => !have.has(normalize(o.number)));
-  // Show the REAL Twilio monthly rate for each number (cached per country), so the
-  // admin sees what they're actually paying — not a flat placeholder. Falls back to
-  // the default only when live pricing can't be fetched.
+  // Real Twilio rate per number (cached per country); default only if pricing fails.
   return Promise.all(
     importable.map(async (o) => ({
       sid: o.sid,
@@ -359,9 +281,7 @@ export async function twilioSearch(opts: {
           limit: 10,
         })
       ).map((f) => f.number);
-  // No SID until purchased — the number itself keys the buy. Show the real Twilio
-  // rate for each (cached per country), falling back to the default when pricing
-  // can't be fetched.
+  // No SID until purchased — the number itself keys the buy.
   return Promise.all(
     numbers.map(async (n) => ({
       sid: n,
@@ -397,9 +317,7 @@ export async function addSystem(opts: {
     twilioSid = match?.sid ?? null;
     smsCapable = match?.smsCapable ?? null;
   }
-  // Resolve capability from the SID when the lookup above didn't already answer
-  // it. Best-effort by design — a failed check stores null, and the admin's
-  // Re-sync fills it in later.
+  // Best-effort: a failed check stores null and Re-sync fills it in later.
   if (smsCapable === null && twilioSid) smsCapable = await fetchSmsCapability(twilioSid);
 
   // Use the real Twilio monthly rate for this number's country, falling back to
@@ -434,14 +352,7 @@ export async function addSystem(opts: {
   };
 }
 
-/** Move a number to the system pool (conversionId null) or assign it to an
- *  agent — rewiring Vapi routing and keeping the owner's profile in sync.
- *
- *  Moving to the pool is the DELIBERATE release: the number is parked in its
- *  owner's brand pool for the hold window rather than going straight back to
- *  the shared pool. A number already held is refused outright — the whole point
- *  of the window is that nobody, including the brand holding it, can hand it
- *  out again until the window lapses. */
+/** Releases a number (target null) or assigns it to an agent, rewiring Vapi and syncing the profile. Release here is the DELIBERATE path: brand pool with the reclaim clock running. */
 export async function reassign(
   id: string,
   /** The agent to route to, in the brand whose database holds it; null = release. */
@@ -560,28 +471,20 @@ export async function sendTestSms(to: string): Promise<{ from: string; to: strin
   return { from: getEffective("twilio.fromNumber"), to: clean };
 }
 
-/** Clear the SMS sender. Writes an empty override (not a delete) so it also
- *  masks any `TWILIO_FROM_NUMBER` coming from .env / the Twilio connection —
- *  the number fully disappears from the card AND Settings until reassigned. */
+/** Clears the SMS sender with an empty override (not a delete) so it also masks TWILIO_FROM_NUMBER from .env. */
 export async function unassignSmsSender(): Promise<void> {
   await setSettingValue("twilio.fromNumber", "");
 }
 
 /** Drop pool rows whose Twilio number the account no longer owns. */
-/**
- * Reflect a self-serve number claim (from the customer setup wizard) in the
- * admin pool: release any other number the user held, then flip/create this
- * number's row to ASSIGNED under the user + their assistant. Best-effort caller.
- */
+/** Reflects a self-serve claim in the pool: release the user's other numbers, then mark this one ASSIGNED. */
 export async function markNumberAssignedToUser(opts: {
   userId: string;
   number: string;
   assistantId: string | null;
 }): Promise<void> {
   const brandId = await brandIdForOwner(opts.userId);
-  // One number per agent — free any other number this user currently holds.
-  // The customer swapping their own number is a deliberate give-up, so the old
-  // one goes back to their brand's pool with the reclaim clock running.
+  // One number per agent. A self-swap is a deliberate give-up → brand pool, clock running.
   await prisma.phoneNumber.updateMany({
     where: { userId: opts.userId, number: { not: opts.number } },
     data: releasedToBrandPool(brandId),
@@ -604,13 +507,7 @@ export async function markNumberAssignedToUser(opts: {
     .catch(() => undefined);
 }
 
-/**
- * Release the number a user currently holds back to the system pool — without
- * touching their Vapi assistant (so a later re-subscribe reuses it). Used when a
- * post-trial grace period lapses. Mirrors the number side of
- * `deprovisionAgentForUser` but keeps the assistant. Returns the freed number
- * (for the notification), or null if the user held none. Best-effort on Vapi.
- */
+/** Releases a user's number to the shared pool, keeping their Vapi assistant so a re-subscribe reuses it. Returns the freed number or null. */
 export async function releaseUserNumberToPool(userId: string): Promise<string | null> {
   const rows = await prisma.phoneNumber.findMany({ where: { userId }, select: { number: true } });
   for (const r of rows) {
@@ -626,23 +523,7 @@ export async function releaseUserNumberToPool(userId: string): Promise<string | 
   return rows[0]?.number ?? null;
 }
 
-/**
- * Give a discontinued customer's number back to Twilio, for good.
- *
- * This is the end of the line, not a pool release: the customer stopped paying,
- * their warning window (Admin -> Plans -> grace period, 7 days by default) ran
- * out, and the platform should stop being billed for a number nobody is using.
- * So the number is released at the carrier and the row is deleted — it does not
- * land in the brand's pool, or the shared one, because we no longer own it.
- *
- * Irreversible: once Twilio has it back, anyone may buy it. That is the point,
- * and it is why only the grace-lapse sweep calls this.
- *
- * Order matters. Vapi first (so no assistant is left pointing at a number we are
- * about to lose), then Twilio, then the row. If Twilio fails we keep the row:
- * a number we still own and still pay for must stay visible in the pool rather
- * than vanish from the books.
- */
+/** Hands a discontinued customer's number back to Twilio for good — row deleted, not pooled, since we no longer own it. Irreversible; only the grace-lapse sweep calls this. Vapi first, then Twilio, then the row; if Twilio fails the row stays so a number we still pay for stays on the books. */
 export async function releaseNumberPermanently(userId: string): Promise<string | null> {
   const rows = await prisma.phoneNumber.findMany({
     where: { userId },
@@ -786,9 +667,7 @@ export interface ResyncResult {
   assignmentsSynced: number;
 }
 
-/** Reconcile the pool against the connected Twilio account. With creds removed
- *  it purges all Twilio rows (account switch); otherwise it repairs SIDs, maps
- *  existing assignments, and reports inventory. Throws if creds are rejected. */
+/** Reconciles the pool against Twilio. No creds = account switch, so all Twilio rows are purged; otherwise repairs SIDs and assignments. Throws if creds are rejected. */
 export async function resyncTwilio(): Promise<ResyncResult> {
   if (!isTwilioConfigured()) {
     const purged = await prisma.phoneNumber.deleteMany({ where: { provider: "twilio" } });
@@ -804,11 +683,8 @@ export async function resyncTwilio(): Promise<ResyncResult> {
     const r = byNum.get(normalize(o.number));
     if (r) {
       inPool++;
-      // Reconcile both the Twilio SID and the real monthly price (backfills the
-      // old flat $50 placeholder with the actual per-country Twilio rate).
-      // SMS capability rides along here too — this is what backfills every row
-      // that predates the column, so caller-facing texts can start using the
-      // business's own number instead of the shared platform sender.
+      // Backfills SID, the real per-country price (over the old flat $50), and
+      // smsCapable for rows that predate the column.
       const data: { twilioSid?: string; monthlyPriceCents?: number; smsCapable?: boolean } = {};
       if (!r.twilioSid) data.twilioSid = o.sid;
       if (r.smsCapable !== o.smsCapable) data.smsCapable = o.smsCapable;
@@ -818,9 +694,7 @@ export async function resyncTwilio(): Promise<ResyncResult> {
     }
   }
   const assignmentsSynced = await backfillAssignments();
-  // Re-sync is the admin's "reconcile everything" action — give any cross-org
-  // blocked numbers a fresh chance (e.g. after pointing at the right Vapi org).
-  // If still locked, the next claim attempt simply re-blocks them.
+  // Give cross-org blocked numbers a fresh chance; a still-locked one re-blocks on the next claim.
   await clearBlockedNumbers().catch(() => {});
   return {
     configured: true,
@@ -832,11 +706,8 @@ export async function resyncTwilio(): Promise<ResyncResult> {
   };
 }
 
-/* ------------------------------------------------------------------ *
- *  Auto-replenish — keep at least `target` AVAILABLE numbers in the
- *  pool. Imports already-owned Twilio numbers first (free); only buys
- *  new ones when auto-purchase is enabled. Persisted as platform settings.
- * ------------------------------------------------------------------ */
+// Auto-replenish: keep `target` AVAILABLE numbers. Import owned Twilio numbers
+// first (free); buy only when auto-purchase is on.
 
 const POOL_TARGET_KEY = "phones.poolTarget";
 const AUTO_PURCHASE_KEY = "phones.autoPurchase";
@@ -852,15 +723,8 @@ const DEFAULT_PURCHASE_COUNTRY = "US";
 const DEFAULT_ALLOWED_COUNTRIES = ["US", "AU"];
 const digitsOf = (s: string | null | undefined): string => (s ?? "").replace(/\D/g, "");
 
-/* ------------------------------------------------------------------ *
- *  Brand reclaim — "use it or lose it".
- *
- *  A number a brand unassigns stays in that brand's pool, usable by them
- *  straight away. If they do not reuse it within this window it moves to
- *  the shared platform pool, where every brand's customers can draw on
- *  it. Without this a brand could sit on inventory the platform is being
- *  billed for while nobody answers calls on it.
- * ------------------------------------------------------------------ */
+// Brand reclaim ("use it or lose it"): an unassigned brand number not reused within
+// the window moves to the shared pool, so brands can't park inventory the platform pays for.
 
 const RECLAIM_DAYS_KEY = "phones.brandReclaimDays";
 const DEFAULT_RECLAIM_DAYS = 7;
@@ -871,29 +735,15 @@ const MAX_RECLAIM_DAYS = 365;
 /** How long a brand keeps an unassigned number before the platform reclaims it. */
 export async function getReclaimDays(): Promise<number> {
   const row = await prisma.platformSetting.findUnique({ where: { key: RECLAIM_DAYS_KEY } });
-  // A blank value is "unset", not zero. Number("") is 0, which is a LEGITIMATE
-  // setting here ("reclaim on the next sweep") — so without this check, someone
-  // clearing the field in a DB tool would quietly strip every brand's unassigned
-  // numbers within the hour. Only parse a value that actually has digits in it.
+  // Blank is "unset", not zero: Number("") is 0, and 0 is a legitimate value, so a
+  // cleared field would otherwise strip every brand's unassigned numbers within the hour.
   const raw = (row?.value ?? "").trim();
   if (!raw) return DEFAULT_RECLAIM_DAYS;
   const n = Number(raw);
   return Number.isInteger(n) && n >= 0 && n <= MAX_RECLAIM_DAYS ? n : DEFAULT_RECLAIM_DAYS;
 }
 
-/**
- * Move every brand-pooled number past its reclaim window into the shared
- * platform pool. Run hourly by the scheduler; safe to call ad hoc.
- *
- * Re-reads the window each pass rather than baking an expiry date into the row,
- * so shortening it releases the backlog on the next tick instead of stranding it
- * under the old rule.
- *
- * Only ever touches UNASSIGNED numbers (`userId: null`): a number the brand put
- * back into service has its clock cleared, and this clause is the second line of
- * defence if that ever failed — reclaiming a number mid-call would be the worst
- * bug in this file.
- */
+/** Hourly: brand numbers past the reclaim window go to the shared pool. Re-reads the window each pass so shortening it releases the backlog. `userId: null` is the safety clause — never reclaim a number mid-call. */
 export async function sweepBrandReclaims(): Promise<number> {
   const days = await getReclaimDays();
   const cutoff = new Date(Date.now() - days * 86_400_000);
@@ -963,13 +813,7 @@ export async function getAllowedPrefixes(): Promise<Record<string, string[]>> {
   return parseAllowedPrefixes(row?.value);
 }
 
-/**
- * Numbers that live in the shared Twilio account but are locked to a DIFFERENT
- * Vapi organisation (e.g. a teammate imported them on their own local Vapi key),
- * so importing them into *this* project 409s with "already in use by another org".
- * We remember them (digit-only) so they stop being offered as claimable and don't
- * keep throwing the same error. Stored as a JSON array in platform_settings.
- */
+/** Numbers locked to a DIFFERENT Vapi org (import 409s "already in use by another org"), remembered digit-only so they stop being offered. */
 export async function getBlockedNumberDigits(): Promise<Set<string>> {
   const row = await prisma.platformSetting.findUnique({ where: { key: BLOCKED_NUMBERS_KEY } });
   if (!row?.value) return new Set();
@@ -1108,9 +952,7 @@ let replenishing = false;
 const availableCount = () =>
   prisma.phoneNumber.count({ where: { userId: null, poolStatus: "AVAILABLE", status: "active" } });
 
-/** Top the pool back up to `target` AVAILABLE numbers: import owned Twilio
- *  numbers first, then buy the rest only if auto-purchase is enabled. Best-effort
- *  and idempotent — safe to call after every assignment and on a timer. */
+/** Tops the pool up to `target`: import owned numbers first, buy only if auto-purchase is on. Idempotent. */
 export async function replenishPool(): Promise<ReplenishResult> {
   const cfg = await getReplenishConfig();
   if (!isTwilioConfigured()) {

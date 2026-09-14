@@ -10,9 +10,8 @@ import {
 } from "./callDurationCap.js";
 import { scheduleWrapUp, cancelWrapUp, pendingWrapUpCount } from "./callWrapUp.js";
 
-/* The ceiling is an abuse control layered on top of each customer's own minute
- * budget. Getting the direction wrong would either stop capping abusers or start
- * cutting paying customers early, and neither shows up until a live call. */
+// Abuse control on top of each customer's minute budget. Wrong direction either stops capping
+// abusers or cuts paying customers early — neither shows up until a live call.
 
 describe("applyCallDurationCap", () => {
   const on = { enabled: true, seconds: 300 };
@@ -45,9 +44,8 @@ describe("applyCallDurationCap", () => {
   });
 
   it("is reversible — switching the ceiling off returns an unlimited plan to uncapped", () => {
-    // The value that comes back must be null, not the old ceiling: the sync layer
-    // keys off null to write Vapi's maximum back and release the assistant. If
-    // this returned a number, turning the feature off would be a one-way door.
+    // Must be null, not the old ceiling: the sync layer keys off null to release the assistant,
+    // so a number here would make turning the feature off a one-way door.
     const wasCapped = applyCallDurationCap(null, on);
     expect(wasCapped).toBe(300);
     expect(applyCallDurationCap(null, off)).toBeNull();

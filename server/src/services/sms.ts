@@ -9,9 +9,8 @@ import { traceCall } from "./apiTrace.js";
 import { currentBrandId } from "../lib/brandContext.js";
 import { brandIdForUser } from "./brands.js";
 
-/* One client per distinct Twilio account — a white-label brand may bring its
- * own, and a single cached client would send that brand's texts (and bill them)
- * through the platform's account. */
+// One client per Twilio account — a single cached client would send (and bill) a
+// white-label brand's texts through the platform's account.
 const clients = new Map<string, Twilio>();
 
 function sms(brandId?: string | null): Twilio {
@@ -60,22 +59,9 @@ export async function sendSms(
   );
 }
 
-/**
- * Which number a caller-facing text should come FROM.
- *
- * Prefer the business's own AI number so the text arrives from the number the
- * caller just dialled — far better trust and reply handling than a stranger's.
- * Falls back to the global platform sender whenever we can't confirm the number
- * can send SMS (`smsCapable` null/false), which is the common case: geographic
- * numbers outside NANP are typically voice-only, and US local senders need A2P
- * 10DLC registration before carriers will deliver.
- *
- * Best-effort — any failure resolves to the platform sender.
- */
+/** Sender for a caller-facing text: the business's own AI number when it's confirmed smsCapable (most aren't — non-NANP geo numbers are voice-only, US local needs 10DLC), else the platform/brand sender. */
 export async function resolveSmsSender(userId: string | null | undefined): Promise<string> {
-  // The platform sender falls back to the OWNER's brand sender when they belong
-  // to a white-label tenant, so a text that can't come from the business's own
-  // number still arrives from their brand rather than from the platform.
+  // Fallback is the OWNER's brand sender, so a white-label customer's text never comes from the platform.
   if (!userId) return getEffective("twilio.fromNumber", currentBrandId());
   try {
     const [own, brandId] = await Promise.all([
@@ -91,15 +77,7 @@ export async function resolveSmsSender(userId: string | null | undefined): Promi
   }
 }
 
-/**
- * Text a caller one piece of business information they asked for during a call.
- *
- * `body` is already rendered from the OWNER's template (never model output) and
- * clamped to a single segment — we re-clamp here anyway, because this is the
- * last point before Twilio and a multi-part send costs real money per extra
- * segment. Best-effort: returns false rather than throwing, so a failed text
- * downgrades to the AI reading the detail out instead of breaking the call.
- */
+/** Texts a caller one business detail. `body` is owner-template output, never model output; re-clamped to one segment here because extra segments cost money. Returns false instead of throwing. */
 export async function textCallerInfo(
   to: string,
   body: string,
@@ -130,9 +108,7 @@ export function buildBookingConfirmationSms(
   return `Your ${subject} is confirmed for ${whenLabel}. ${team} be in touch shortly to look after you. Thank you for choosing us!`;
 }
 
-/** Text a booking confirmation to the caller after the AI books directly.
- *  `whenLabel` is the human date/time in the owner's timezone; `reason` is what
- *  they booked (haircut, room, …) and `businessName` personalises it. Best-effort. */
+/** Texts a booking confirmation. `whenLabel` is already in the owner's timezone. Best-effort. */
 export async function textBookingConfirmation(
   to: string,
   whenLabel: string,
@@ -164,9 +140,7 @@ export interface CallSummaryOpts {
 
 const SMS_LIMIT = 160;
 
-/** Trim `text` to at most `max` chars on a whole-word boundary, dropping any
- *  dangling punctuation so it reads as a complete phrase (no "..." / cut-off
- *  word). Returns "" when `max` is too small to hold even one word. */
+// Whole-word clip with dangling punctuation dropped; "" when not even one word fits.
 function clipToWord(text: string, max: number): string {
   const t = text.replace(/\s+/g, " ").trim();
   if (max <= 0) return "";
@@ -176,18 +150,7 @@ function clipToWord(text: string, max: number): string {
   return (lastSpace > 0 ? clipped.slice(0, lastSpace) : clipped).replace(/[\s,.;:]+$/, "");
 }
 
-/**
- * Build the post-call summary SMS, capped at 160 characters. Structured so it
- * stays meaningful within one segment:
- *
- *     Caller: <name> (<number>)
- *     Purpose: <few words>
- *     More info: <public link>
- *
- * The "More info" link is reserved first and never truncated; the caller name is
- * capped; the purpose fills whatever budget remains, trimmed to a whole word.
- * Lines with no content (no link, no purpose) are omitted entirely.
- */
+/** Post-call summary SMS in one 160-char segment: Caller / Purpose / More info. The link is reserved first and never truncated; purpose takes what's left. */
 export function buildCallSummarySms(opts: CallSummaryOpts): string {
   const url = opts.conversationUrl?.trim();
   const linkLine = url ? `More info: ${url}` : "";
@@ -218,10 +181,7 @@ export async function callSummarySms(opts: CallSummaryOpts & { to: string }): Pr
   await sendSms(opts.to, buildCallSummarySms(opts));
 }
 
-/** Turn a thrown Twilio error into a short, admin-actionable sentence. Twilio's
- *  REST errors carry a numeric `code` + human `message` (e.g. 21408 = region not
- *  enabled, 21606 = From not SMS-capable); we surface those instead of a vague
- *  "check the configuration" so the admin knows exactly what to fix. */
+/** Turns a Twilio error into an admin-actionable sentence, keyed off Twilio's numeric `code`. */
 export function describeSmsError(err: unknown): string {
   const e = err as { code?: number; status?: number; message?: string } | null;
   const code = e?.code;
@@ -285,9 +245,7 @@ function isoFromE164(number: string): string {
   return "US";
 }
 
-/** Real Twilio monthly price (in cents) for a number, using its country's local
- *  rate. Returns null if Twilio isn't configured or pricing can't be fetched, so
- *  callers can fall back to their own default. */
+/** Twilio monthly price in cents for a number; null when unavailable so callers can use their own default. */
 export async function monthlyPriceCentsFor(number: string): Promise<number | null> {
   try {
     const { prices } = await getNumberPricing(isoFromE164(number));
@@ -299,18 +257,7 @@ export async function monthlyPriceCentsFor(number: string): Promise<number | nul
   }
 }
 
-/** True when Twilio credentials are configured AND the Account SID is well-formed
- *  (must start with "AC"). An invalid SID is treated as not-configured so callers
- *  degrade gracefully instead of hitting the Twilio SDK's raw constructor error. */
-/**
- * Is Twilio usable? With no argument this asks about the PLATFORM's account,
- * which is what almost every caller means: the phone-number pool is shared
- * infrastructure the platform buys and assigns from, and the helpers that reach
- * it (searchAvailableNumbers, purchaseNumber, …) all use the platform client.
- *
- * Pass a brand id where the question is "can we text THIS tenant's customers?" —
- * a brand with its own Twilio account can send even when the platform has none.
- */
+/** Is Twilio usable? No arg = the platform account (the shared number pool). Pass a brand id to ask "can we text THIS tenant's customers" — a brand's own account counts even if the platform has none. A malformed SID counts as unconfigured so we never hit the SDK's raw constructor error. */
 export function isTwilioConfigured(brandId?: string | null): boolean {
   return (
     integrationConfiguredFor("twilio", brandId) &&
@@ -324,9 +271,7 @@ export async function listTwilioNumbers(): Promise<string[]> {
   return numbers.map((n) => n.phoneNumber);
 }
 
-/** Owned Twilio numbers with their SID (needed to tie pool rows to Twilio) and
- *  whether each can send SMS — the flag resolveSmsSender gates caller-facing
- *  texts on. */
+/** Owned numbers with SID and smsCapable — the flag resolveSmsSender gates on. */
 export async function listTwilioNumbersDetailed(): Promise<
   { number: string; sid: string; smsCapable: boolean }[]
 > {
@@ -349,10 +294,7 @@ export async function fetchSmsCapability(sid: string): Promise<boolean | null> {
   }
 }
 
-/** Search Twilio's inventory for purchasable numbers in a country / area code.
- *  `type` picks the Twilio inventory: "local" (geographic, e.g. +61 2/3/7/8) or
- *  "mobile" (e.g. +61 4). Not every country has a mobile pool — the caller should
- *  tolerate an empty/erroring result for unsupported types. */
+/** Searches Twilio inventory. `type` picks local vs mobile; not every country has a mobile pool, so callers tolerate an empty/erroring result. */
 export async function searchAvailableNumbers(opts: {
   country?: string;
   areaCode?: string;
@@ -373,9 +315,8 @@ export async function searchAvailableNumbers(opts: {
   }));
 }
 
-// Countries whose numbers are searched by national dialing prefix (e.g. AU "03"),
-// with the national prefix that denotes mobile. NANP countries (US/CA) aren't here
-// — they search by area code instead.
+// Countries searched by national prefix (AU "03") plus their mobile prefix. NANP
+// countries search by area code instead, so they're not here.
 const PREFIX_DIAL_CODES: Record<string, string> = { AU: "61", NZ: "64", GB: "44" };
 const MOBILE_PREFIX: Record<string, string> = { AU: "04", NZ: "02", GB: "07" };
 
@@ -393,10 +334,7 @@ function prefixToSearch(
   return { type: national === MOBILE_PREFIX[country] ? "mobile" : "local", e164: `+${dial}${area}` };
 }
 
-/** Up to `limit` (max 20) purchasable numbers matching a dialing prefix. For prefix
- *  countries (AU/NZ/GB) the prefix is the national area/mobile prefix; NANP countries
- *  (US/CA) treat it as a Twilio area code. Biases the Twilio search with `contains`,
- *  then filters by the exact E.164 prefix so results always match the chosen prefix. */
+/** Up to `limit` (max 20) numbers for a prefix. Twilio's `contains` is only a hint, so results are re-filtered on the exact E.164 prefix. */
 export async function searchNumbersByPrefix(
   country: string,
   prefix: string,
@@ -433,19 +371,7 @@ export async function searchNumbersByPrefix(
 /** Where the typed digits must sit in the number, mirroring Twilio's "Match to". */
 export type NumberMatch = "start" | "anywhere" | "end";
 
-/**
- * Search purchasable numbers by the digits a user typed, anchored like Twilio's
- * "Match to" control.
- *
- * Twilio's own `contains` is a loose pattern match, so anchoring is done here
- * rather than trusting it — the same approach `searchNumbersByPrefix` already
- * takes. "start" is checked against the NATIONAL number (via libphonenumber) so
- * the country dial code never counts as part of the match: an Australian
- * searching "8" means +61 **8**… , not the 6 in +6**1**.
- *
- * Both inventories are searched. Restricting to one would silently hide half the
- * catalogue — an AU search for "4" would return nothing at all from `local`.
- */
+/** Digit search anchored like Twilio's "Match to". Anchoring is done here (Twilio's `contains` is loose), "start" is checked on the NATIONAL number so the dial code never matches, and both inventories are searched or AU mobiles would vanish. */
 export async function searchNumbersByPattern(
   country: string,
   digits: string,
@@ -463,9 +389,7 @@ export async function searchNumbersByPattern(
   if (!want) return [];
   const cap = Math.min(Math.max(limit, 1), 20);
 
-  // With a prefix chosen we know which Twilio inventory can possibly match, so
-  // only that one is queried. Without one, BOTH are — restricting to `local`
-  // would silently return nothing for an AU mobile search.
+  // A prefix pins the inventory; without one query BOTH, or AU mobile searches return nothing.
   const hint = opts.prefix ? prefixToSearch(c, opts.prefix) : null;
   const inventories: ("local" | "mobile")[] = hint ? [hint.type] : ["local", "mobile"];
   const found = await Promise.all(
@@ -486,9 +410,7 @@ export async function searchNumbersByPattern(
       return national.startsWith(want);
     });
 
-  // Both filters apply together: the digits say which numbers, the prefix says
-  // which series. Twilio's `contains` is only a hint, so the series is enforced
-  // here on the exact E.164 prefix.
+  // Series enforced here on the exact E.164 prefix — Twilio's `contains` is only a hint.
   if (hint) matched = matched.filter((n) => n.startsWith(hint.e164));
 
   // Honour the admin's allowed series, exactly as the prefix + default searches do,
@@ -502,10 +424,7 @@ export async function searchNumbersByPattern(
   return [...new Set(allowed)].slice(0, cap);
 }
 
-/** Default purchasable-number list for a country, respecting the admin's allowed
- *  prefixes. With an explicit allow-list it only returns matching numbers (e.g. no
- *  mobile if "04" isn't allowed); without one it returns a 3-local + 3-mobile mix
- *  topped up to `min`. */
+/** Default number list for a country. With an allow-list only matching series show; without one, a 3 local + 3 mobile mix topped up to `min`. */
 export async function searchDefaultNumbers(
   country: string,
   allowedPrefixes: string[] | undefined,
@@ -564,11 +483,7 @@ export async function searchDefaultNumbers(
   return out;
 }
 
-/** Buy a number from Twilio. Returns the new IncomingPhoneNumber SID.
- *  Regulated countries (e.g. Australia) need an Address (+ usually a Bundle) on the
- *  buy call — these are env-only (never in the admin UI). Only attached for the
- *  countries that require them so US/other buys aren't rejected for carrying an
- *  AU bundle. AU mobile numbers may need a different bundle than local ones. */
+/** Buys a number; returns its SID. AU needs an Address + Bundle (env-only), attached only for +61 so other countries' buys aren't rejected; AU mobile may need its own bundle. */
 export async function purchaseNumber(number: string): Promise<string> {
   const opts: { phoneNumber: string; addressSid?: string; bundleSid?: string } = {
     phoneNumber: number,
@@ -589,19 +504,7 @@ export async function setVoiceWebhook(sid: string, voiceUrl: string): Promise<vo
   await sms().incomingPhoneNumbers(sid).update({ voiceUrl });
 }
 
-/**
- * Give a number back to Twilio for good.
- *
- * This is NOT the pool "release" — it hands the number back to the carrier,
- * stops the monthly charge, and is irreversible: the number returns to Twilio's
- * inventory and anyone may buy it next. Only the permanent-removal path should
- * call it (a customer who discontinued and whose warning period has expired).
- *
- * Resolves the SID from the number when we don't have one stored, because a row
- * imported before we tracked SIDs would otherwise be un-releasable and keep
- * billing forever. Returns false when the number simply isn't in the account any
- * more — already gone is the outcome we wanted, not an error.
- */
+/** Hands a number back to Twilio for good — NOT the pool release; irreversible, only for the permanent-removal path. Resolves the SID by number for rows imported before we tracked SIDs. False when already gone. */
 export async function releaseTwilioNumber(opts: {
   sid?: string | null;
   number?: string | null;

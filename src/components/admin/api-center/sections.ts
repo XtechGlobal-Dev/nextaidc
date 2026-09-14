@@ -1,22 +1,8 @@
 import { Activity, DollarSign, LayoutGrid, Plug, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-/* ------------------------------------------------------------------ *
- *  The API Center's sections, declared once.
- *
- *  Five, not twelve. The earlier split gave every metric its own tab, which
- *  meant an operator had to know which of twelve screens held the number they
- *  wanted before they could look at it. Related concerns now share a page with a
- *  small view-switcher, so the navigation answers "what kind of question am I
- *  asking?" rather than "which metric is this?".
- *
- *  Nothing was dropped — health, quotas, keys, usage, latency, errors and logs
- *  all still exist, one level down instead of one tab across. Per-provider depth
- *  lives in the drawer, which is where detail belongs.
- *
- *  Both the sidebar group and the in-page rail render from this list, so they
- *  can never disagree about what exists or what order it's in.
- * ------------------------------------------------------------------ */
+// API Center sections, declared once so the sidebar group and in-page rail can't disagree.
+// Five pages with view-switchers rather than one tab per metric.
 
 export interface ApiCenterSection {
   /** Path segment under /dashboard/admin/api-center. "" is the index route. */

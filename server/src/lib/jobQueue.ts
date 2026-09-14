@@ -1,17 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  A thin wrapper around pg-boss, our scheduled-job queue.
- *
- *  Backed by the existing main Postgres database (its own "pgboss" schema,
- *  additive — no Prisma migration involved) rather than Redis/BullMQ: the
- *  codebase has zero Redis footprint today, and this workload (a dozen
- *  recurring jobs, none faster than once a minute) doesn't need Redis-grade
- *  throughput.
- *
- *  Unlike scheduler.ts's setInterval jobs, a job registered here runs on
- *  exactly one instance per firing even when multiple server processes are
- *  running — pg-boss claims each job via `SELECT ... FOR UPDATE SKIP LOCKED`,
- *  so only one instance's poll ever wins a given scheduled tick.
- * ------------------------------------------------------------------ */
+// pg-boss wrapper (own "pgboss" schema in the main DB, no Redis). Unlike scheduler.ts's setInterval jobs,
+// a job here fires on exactly one instance — pg-boss claims via SKIP LOCKED.
 import PgBoss from "pg-boss";
 import { env } from "../env.js";
 
@@ -37,16 +25,8 @@ export function getBoss(): Promise<PgBoss> {
   return starting;
 }
 
-/**
- * Registers a recurring job on a cron schedule: creates its queue if missing,
- * wires `handler` as the worker, then schedules it (UTC). One call replaces a
- * scheduler.ts setTimeout+setInterval pair for a job migrated onto the queue.
- *
- * `singletonKey` refuses an overlapping run (the previous firing still in
- * flight when the next tick arrives) — use it for jobs where a double-run
- * would be unsafe rather than merely redundant (e.g. one that purchases
- * inventory or deletes external resources).
- */
+/** Register a cron job (UTC). `singletonKey` refuses an overlapping run — use it where a double-run
+ *  is unsafe (purchases, external deletes), not merely redundant. */
 export async function scheduleRecurring(
   name: string,
   cron: string,

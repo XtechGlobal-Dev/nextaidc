@@ -8,12 +8,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   delete: "Delete",
 };
 
-/**
- * A field (table column) that can be individually gated inside a section.
- * Allow-list semantics: a role sees a column only when it holds the matching
- * `${section}.field.${key}` permission. The section's identity column (e.g. the
- * customer name) is always shown and is NOT listed here.
- */
+/** A gatable table column (allow-list: shown only with `${section}.field.${key}`). The identity column is never listed. */
 export interface FieldDef {
   key: string;
   label: string;
@@ -45,21 +40,15 @@ export const SECTIONS: SectionDef[] = [
     ],
   },
   {
-    // A brand's customer support queue (ticket lane `support`). Unlike every
-    // other section, holding these keys is only half the check: WHICH tickets a
-    // staff member sees is decided by the departments granted to their role
-    // (StaffRole.ticketDepartments) or to them personally. "edit" covers
-    // replying and changing status / priority / assignee / department; "delete"
-    // additionally covers moderating — removing someone else's message.
+    // Brand support queue. Keys are only half the check — WHICH tickets staff see comes from their
+    // department grants. "delete" also covers moderating someone else's message.
     key: "tickets",
     label: "Support Tickets",
     capabilities: ["view", "create", "edit", "delete"],
   },
   {
-    // The platform's own inbox: the requests brand admins raise (lane `brand`).
-    // Listed so the label exists in one place, but PLATFORM_ONLY_SECTIONS puts
-    // it out of reach of everyone but the super admin — including STAFF, for
-    // whom ticking the box would authorize nothing.
+    // Platform inbox for brand admins' requests. Listed for the label; access is gated by
+    // PLATFORM_TEAM_SECTIONS, not by this row alone.
     key: "brand_tickets",
     label: "Brand Requests",
     capabilities: ["view", "create", "edit", "delete"],
@@ -71,94 +60,34 @@ export const SECTIONS: SectionDef[] = [
   { key: "emails", label: "System Emails", capabilities: ["view", "edit"] },
   { key: "pricing", label: "Pricing", capabilities: ["view", "edit"] },
   { key: "wallet", label: "Wallet", capabilities: ["view"] },
-  // The Audit Log used to sit here. It is now platform-only (see
-  // PLATFORM_ONLY_SECTIONS below), so it is no longer grantable — a ticked box
-  // that authorizes nothing is worse than no box at all.
-  //
-  // Resellers is absent too, but for the opposite reason: it is open to every
-  // ADMIN (a brand runs its own reseller programme) yet is deliberately NOT
-  // staff-assignable, so there is no box to tick. Adding a SectionDef for it
-  // here is all that would be needed to put it back in the staff matrix.
-  //
-  // Staff, Roles, Reports, Webhook Logs and System Health are ADMIN-only areas and
-  // are intentionally NOT staff-assignable — they're excluded from the role
-  // permission matrix. Every one of their pages/routes is gated by `requireAdmin`
-  // (never `requirePermission`), so a STAFF member could never use them even if
-  // the key were granted — a role that only ticked "Staff" would leave the member
-  // with zero usable access ("no access yet"). Their pages remain accessible to
-  // full ADMINs (who bypass permission checks).
-  //
-  // Platform Settings, the API Center and Brands go one step further: they hold
-  // the platform's own integration credentials and every tenant's setup, so they
-  // are gated by `requireSuperAdmin` — out of reach of a brand ADMIN as well as
-  // of STAFF.
+  // Not listed on purpose: audit (platform-only), resellers (every ADMIN, never staff), and the
+  // requireAdmin/requireSuperAdmin areas — a grantable box that authorizes nothing is worse than none.
 ];
 
-/**
- * Sections that belong to a BRAND, not to the platform.
- *
- * These four are the day-to-day running of a tenant's own customer base — its
- * signup metrics, its customers, their subscriptions and the voices they may
- * pick from. They are the brand admin's job, and in a white-label setup one
- * brand's customer list is that brand's business, not something the platform
- * owner browses.
- *
- * So the SUPER_ADMIN is refused them (see requirePermission). Everyone else is
- * unaffected: an ADMIN still runs their tenant, and STAFF are still gated by
- * their role's grants exactly as before.
- */
+/** A tenant's own customer base — the SUPER_ADMIN is refused these (one brand's customers are not
+ *  the platform owner's to browse). Everyone else is gated as before. */
 export const BRAND_SCOPED_SECTIONS = new Set([
   "overview",
   "customers",
   "subscriptions",
   "voice_bank",
-  // A tenant's customers talking to that tenant's own team. Its support inbox
-  // is its customer list in conversation form, so the same rule applies: the
-  // platform owner is refused it. Their own inbox is `brand_tickets` below.
+  // The support inbox is the customer list in conversation form; the platform's own is `brand_tickets`.
   "tickets",
-  // A brand's own charge on top of the platform's plans, and the wallet its
-  // share lands in. The platform owner manages these FROM the brand's page.
+  // Brand markup and its wallet — the platform owner manages these from the brand's page.
   "pricing",
   "wallet",
 ]);
 
-/**
- * Sections that belong to the PLATFORM, not to any one brand.
- *
- * The audit trail is the platform owner's: an audit log that a tenant's own
- * admin can read is a weak audit log. Only the SUPER_ADMIN gets it — which is
- * also why it is absent from the staff matrix above.
- *
- * The reseller/affiliate programme used to sit here too. It no longer does: a
- * brand recruits and pays its own resellers, so every ADMIN gets the section,
- * narrowed to their own tenant by `tenantScope` on the /resellers and
- * /commissions routes. A brand admin therefore never sees — or can edit, delete
- * or mark paid — another brand's resellers or commissions.
- *
- * The mirror image of BRAND_SCOPED_SECTIONS: that set is refused TO the super
- * admin, this one is refused to everyone else.
- */
+/** Refused to everyone but the SUPER_ADMIN — an audit log a tenant admin can read is a weak audit log.
+ *  Resellers moved out: each brand runs its own programme, tenant-scoped on the routes. */
 export const PLATFORM_ONLY_SECTIONS = new Set(["audit"]);
 
-/**
- * Sections worked by the platform's own TEAM: the super admin, and the support
- * staff they employ — accounts with no brand. The requests brand admins raise
- * with the platform are between that brand and the platform; a rival tenant's
- * admin, or a staff member of ANY tenant, has no business in that queue. So a
- * brand's admin is refused these outright, and a staff member is admitted only
- * with no brand and the key (see requirePermission).
- */
+/** Worked by the platform's own team (no brand). Brand admins are refused outright; staff need no
+ *  brand plus the key — a rival tenant must never see another brand's requests. */
 export const PLATFORM_TEAM_SECTIONS = new Set(["brand_tickets"]);
 
-/**
- * Drop the keys an account cannot hold given whose team it is on.
- *
- * A brand's staff work the brand's customer queue (`tickets.*`) and never the
- * platform's inbox; the platform's own staff work the platform's inbox
- * (`brand_tickets.*`) and never a customer queue. Applied on every auth read
- * and at every write, so a role holding both sides' keys can't smuggle one
- * side's to the other.
- */
+/** Drop the other side's ticket keys (brand staff: no `brand_tickets.*`; platform staff: no `tickets.*`).
+ *  Applied on every auth read and write so a role holding both can't smuggle one across. */
 export function scopePermissionsToTenant(
   permissions: string[],
   brandId: string | null | undefined,
@@ -187,12 +116,7 @@ export const ALL_PERMISSION_KEYS: string[] = [
 
 const ASSIGNABLE_KEY_SET = new Set(ALL_PERMISSION_KEYS);
 
-/**
- * Drop any permission keys that are no longer assignable — e.g. keys for a
- * section that was removed from the matrix. Applied on every auth read so a
- * removed section can't keep authorizing a role/user whose stored `permissions`
- * still contain its (now-orphaned) keys.
- */
+/** Drop keys that are no longer assignable, so a removed section can't keep authorizing via stored orphans. */
 export function sanitizePermissions(permissions: string[] | null | undefined): string[] {
   return (permissions ?? []).filter((p) => ASSIGNABLE_KEY_SET.has(p));
 }

@@ -2,9 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { SubscriptionPlan } from "@/lib/api";
 import { planSlug, planCardId, planAnalyticsParams, type PlanIdentity } from "./planSlug";
 
-/* Plan slugs are the identity a GA4 report groups by, so the two things that
- * matter here are: a readable slug for every plan an admin can create, and
- * never two plans collapsing into one bucket. */
+// Plan slugs are what GA4 groups by: readable for every plan, and never two plans in one bucket.
 
 const plan = (over: Partial<PlanIdentity> = {}): PlanIdentity =>
   ({

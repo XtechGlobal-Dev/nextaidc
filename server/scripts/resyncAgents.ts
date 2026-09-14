@@ -3,12 +3,8 @@ import { loadSettings } from "../src/services/settings.js";
 import { upsertAssistant } from "../src/services/vapi.js";
 import type { AgentConfig } from "../src/lib/agentConfig.js";
 
-/* ------------------------------------------------------------------ *
- *  One-shot repair: push every agent's SAVED config to its live Vapi
- *  assistant — exactly what pressing "Save Changes" in the AI Brain
- *  does, for all agents at once. Use after a sync failure left live
- *  assistants running a stale prompt.
- * ------------------------------------------------------------------ */
+// Push every agent's saved config to its live Vapi assistant (a bulk "Save Changes"). Use after a sync
+// failure left stale prompts live.
 
 // A brand's workspace lives in the brand's database (phase 6): BRAND=<slug> picks it.
 import { prisma } from "./_brandDb.js";
@@ -19,10 +15,7 @@ async function main() {
     where: { vapiAssistantId: { not: null } },
     select: {
       id: true,
-      // Required: without it upsertAssistant resolves no owner, and the transfer
-      // plan, booking tools and info-SMS tools all come back empty — the payload
-      // always sends `tools`, so a push without an owner STRIPS them from the
-      // live assistant instead of leaving them alone.
+      // Required: without an owner the payload sends empty `tools` and STRIPS transfer/booking/SMS from the live assistant.
       userId: true,
       vapiAssistantId: true,
       agentConfig: true,

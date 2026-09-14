@@ -1,14 +1,10 @@
-/** Languages a multilingual-plan customer may enable for their assistant, beyond
- *  the English base. Bounded by what the call pipeline actually supports (see the
- *  server list in server/src/lib/agentConfig.ts, SUPPORTED_AGENT_LANGUAGES — the
- *  server sanitizes saves against its copy). Keep the two lists identical. */
+/** Extra languages a multilingual-plan customer can enable. Must match SUPPORTED_AGENT_LANGUAGES
+ *  in server/src/lib/agentConfig.ts — the server sanitizes saves against its copy. */
 export const AGENT_LANGUAGES = [
   "Hindi",
-  // Punjabi hidden for now — not offering it as a switch-to language yet.
-  // Uncomment (here + SUPPORTED_AGENT_LANGUAGES on the server) to bring it back.
+  // Punjabi hidden for now — re-enable here + SUPPORTED_AGENT_LANGUAGES on the server together.
   // "Punjabi",
-  // "Chinese" alone is ambiguous to the LLM (Mandarin vs Cantonese) — name the
-  // dialect our Chinese voices actually speak so it can't answer in the other one.
+  // Plain "Chinese" is ambiguous to the LLM (Mandarin vs Cantonese) — name the dialect our voices speak.
   "Chinese (Mandarin)",
   "Nepali",
   "Spanish",
@@ -23,9 +19,8 @@ export const AGENT_LANGUAGES = [
 
 export type AgentLanguage = (typeof AGENT_LANGUAGES)[number];
 
-/** Languages Deepgram nova-3's `language: "multi"` can transcribe alongside English.
- *  Mirrors the server (lib/agentConfig.ts) — matched to Deepgram's published set,
- *  NOT to our language catalogue. */
+/** What Deepgram nova-3 `language: "multi"` can transcribe — Deepgram's published set, NOT our
+ *  catalogue. Mirrors server/src/lib/agentConfig.ts. */
 const DEEPGRAM_MULTI_LANGUAGES: readonly string[] = [
   "Hindi",
   "Spanish",
@@ -47,9 +42,8 @@ export type TranscriberConfig =
   | { provider: "deepgram"; model: "nova-3"; language: "en" | "multi" }
   | { provider: "google"; model: string; language: "Multilingual" };
 
-/** Transcriber for this agent's languages — Deepgram where it has coverage, Google's
- *  multilingual model for Punjabi/Mandarin. Mirrors the server so a web test call
- *  transcribes exactly like a real inbound one. */
+/** Transcriber for the agent's languages — Deepgram where covered, else Google multilingual.
+ *  Mirrors the server so a web test call transcribes like a real inbound one. */
 export function transcriberFor(languages: readonly string[]): TranscriberConfig {
   if (!languages.length) return { provider: "deepgram", model: "nova-3", language: "en" };
   const deepgramCovers = languages.every((l) => DEEPGRAM_MULTI_LANGUAGES.includes(l));
@@ -59,10 +53,8 @@ export function transcriberFor(languages: readonly string[]): TranscriberConfig 
   return { provider: "google", model: GOOGLE_TRANSCRIBER_MODEL, language: "Multilingual" };
 }
 
-/** Languages only offered on an ElevenLabs voice. Deepgram's Aura-2 voices are
- *  English-only and the rest of the Deepgram pipeline has no coverage for these
- *  two, so offering them alongside a Deepgram voice would promise something the
- *  agent can't deliver. Mirrored server-side (lib/agentConfig.ts). */
+/** ElevenLabs-only languages — Deepgram's Aura-2 voices are English-only, so offering these with a
+ *  Deepgram voice would promise what the agent can't deliver. Mirrors server/src/lib/agentConfig.ts. */
 export const ELEVENLABS_ONLY_LANGUAGES: readonly string[] = [
   "Punjabi",
   "Chinese (Mandarin)",

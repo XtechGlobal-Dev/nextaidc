@@ -6,13 +6,7 @@ import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { formatBytes } from "@/lib/ticketFiles";
 import type { TicketAttachment } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Full-screen viewer for the images in a conversation.
- *
- *  Opening a screenshot in a new browser tab loses the thread you were
- *  reading; this keeps you in it, and lets ← / → walk every image in
- *  the conversation without going back to hunt for the next one.
- * ------------------------------------------------------------------ */
+// Full-screen image viewer for a thread; keeps you in the conversation and lets ← / → walk every image.
 
 export interface ImageLightboxProps {
   /** Every image in the thread, in conversation order. */

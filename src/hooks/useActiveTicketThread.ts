@@ -1,18 +1,8 @@
 import { useEffect } from "react";
 import { useNotificationStore } from "@/stores/useNotificationStore";
 
-/**
- * Tell the notification store which ticket conversation is open on screen.
- *
- * While it is open and the tab is visible, anything new about that ticket is
- * treated as seen — marked read rather than raised as a toast, since the reply
- * is already showing in the thread. Switching to another ticket, another page,
- * or a hidden tab lifts that, so notifications resume.
- *
- * Pass the id from the page's `?ticket=` param (null when no thread is open).
- * Works on every ticket surface, both lanes and both sides: the store only ever
- * matches on the ticket id in a notification's link.
- */
+/** Tell the notification store which ticket thread is on screen (id from `?ticket=`, null if none).
+ *  While open and visible, news about it is marked read instead of toasted. */
 export function useActiveTicketThread(ticketId: string | null | undefined) {
   useEffect(() => {
     const id = ticketId || null;

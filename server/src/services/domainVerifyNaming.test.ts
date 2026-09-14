@@ -1,14 +1,8 @@
-/* ------------------------------------------------------------------ *
- *  The DNS records a brand's CLIENT publishes carry a name, and that
- *  name is read by someone who has never heard of this platform. It has
- *  to be THIS deployment's name, so it derives from PLATFORM_DOMAIN and
- *  moves with it — there is no second setting to remember and nothing
- *  hardcoded to leak the domain this codebase started life on.
- * ------------------------------------------------------------------ */
+// The verify record a client publishes must carry THIS deployment's name, derived
+// from PLATFORM_DOMAIN — nothing hardcoded that could leak the original domain.
 
-// env.ts validates at import and exits the process if these are missing, so
-// they go in before anything in the graph is imported (the module is pulled in
-// with a dynamic import below, after this runs).
+// env.ts validates at import and exits if these are missing, so set them before
+// the dynamic import below.
 process.env.DATABASE_URL ||= "postgresql://user:pass@localhost:5432/test";
 process.env.JWT_SECRET ||= "test-secret-at-least-thirty-two-characters-long";
 process.env.PLATFORM_DOMAIN = "peelcases.com";
@@ -40,12 +34,8 @@ describe("ownership record naming", () => {
 
 describe("PLATFORM_DOMAIN left unset", () => {
   it("falls back to the literal 'localhost', never a guess at a real domain", async () => {
-    // Deriving this from APP_URL's hostname was tried and reverted: APP_URL is
-    // typically a subdomain of the real apex ("agent.example.com"), and there
-    // is no reliable way to strip back to the registrable domain without a
-    // public-suffix list. A wrong apex here is a tenant-routing bug, not a
-    // cosmetic one, so an unset PLATFORM_DOMAIN gets an obviously-fake apex
-    // instead — easy to spot locally, and never someone else's brand name.
+    // Deriving from APP_URL was tried and reverted: no reliable way to get the
+    // registrable apex without a public-suffix list, and a wrong apex breaks tenant routing.
     vi.resetModules();
     delete process.env.PLATFORM_DOMAIN;
     process.env.APP_URL = "https://agent.a-totally-different-client.com";

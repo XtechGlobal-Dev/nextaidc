@@ -36,9 +36,7 @@ export function OnboardingTour() {
   // The tour walks through customer features (and its steps target customer nav).
   // Admins/resellers aren't onboarded this way, so don't auto-start it for them.
   const isCustomer = useAuthStore((s) => s.user?.role === "USER");
-  // Server-side "quick setup seen" flag + whether the profile has loaded. We must
-  // wait for the profile before deciding, or the tour can fire during the load gap
-  // (before Quick Setup auto-opens) and the two end up on screen together.
+  // Wait for the profile before deciding, or the tour fires in the load gap and overlaps Quick Setup.
   const quickSetupSeen = useProfileStore((s) => Boolean(s.profile.quickSetupSeenAt));
   const profileLoaded = useProfileStore((s) => Boolean(s.profile.id));
   const quickSetupResolved = quickSetupSeen || quickSetupCompleted || quickSetupDismissed;
@@ -139,9 +137,7 @@ export function OnboardingTour() {
       {/* Click-catcher — clicking the dimmed area ends the tour. */}
       <div className="fixed inset-0 z-[997]" onClick={endTour} />
 
-      {/* Spotlight: a cutout + ring around the current step's target so the user
-          clearly sees which module it points to. The huge box-shadow dims the
-          rest of the screen, leaving the target lit. */}
+      {/* Spotlight ring; the huge box-shadow dims everything but the target. */}
       {targetRect && (
         <div
           className="pointer-events-none fixed z-[998] rounded-xl ring-2 ring-primary ring-offset-2 ring-offset-transparent transition-all duration-300"

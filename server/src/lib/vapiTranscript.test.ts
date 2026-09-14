@@ -1,10 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { turnsFromVapiMessages } from "./vapiTranscript.js";
 
-/* ------------------------------------------------------------------ *
- *  Phone-call transcripts must carry per-turn timing, built from Vapi's
- *  structured artifact.messages (which the plain-string transcript lacks).
- * ------------------------------------------------------------------ */
+// Per-turn timing comes from Vapi's structured artifact.messages; the plain-string transcript has none.
 
 describe("turnsFromVapiMessages", () => {
   it("maps bot→agent / user→caller and uses secondsFromStart as `at`", () => {

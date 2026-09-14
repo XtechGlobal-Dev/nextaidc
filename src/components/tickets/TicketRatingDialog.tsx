@@ -13,16 +13,7 @@ import { StarRating } from "@/components/tickets/StarRating";
 import { cn } from "@/lib/utils";
 import { MAX_STARS, POOR_RATING_MAX, type Ticket } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  "How did we do?" — the rating card, as a dialog.
- *
- *  Deliberately NOT part of the conversation. A rating prompt wedged
- *  between the last reply and the composer is in the way of the one
- *  thing that pane is for; here it is one small star in the header that
- *  opens this when tapped — and the "resolved" notification links
- *  straight to it, which is the moment someone actually knows how it
- *  went.
- * ------------------------------------------------------------------ */
+// Rating dialog, deliberately outside the conversation pane; opened from a header star or the "resolved" notification.
 
 /** What each score is called, so the number isn't the only feedback. */
 const STAR_LABEL: Record<number, string> = {
@@ -144,13 +135,7 @@ export function TicketRatingDialog({
   );
 }
 
-/**
- * The one icon that stands in for the whole thing in a thread header.
- *
- * Shows the score once given, and a plain outline star while it is still being
- * asked for — a pulsing dot marks the unanswered case so it reads as an invite
- * rather than decoration.
- */
+/** Header star: shows the score once given; a pulsing dot marks the unanswered case so it reads as an invite. */
 export function TicketRatingButton({
   ticket,
   onClick,

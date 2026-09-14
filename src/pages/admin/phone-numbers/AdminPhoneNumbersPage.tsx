@@ -116,32 +116,15 @@ export default function AdminPhoneNumbersPage() {
   // Live Twilio pricing per country (lowercase iso → pricing), loaded lazily.
   const [pricing, setPricing] = useState<Record<string, NumberPricing>>({});
 
-  // Capability gates — must mirror the server's `requirePermission("phone_numbers", …)`
-  // on each route. ADMIN passes all; STAFF only where the role grants it. Denied
-  // buttons are omitted from the DOM and the handlers no-op defensively.
-  //   create → Add System Number, Restock now
-  //   edit   → Reassign, SMS assign/unassign/test, Save settings, Clear Sync, Re-sync
-  //   delete → Cleanup Orphaned
+  // Capability gates mirroring the server's requirePermission("phone_numbers", …) per route.
+  // Denied buttons are omitted from the DOM and handlers no-op.
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreate = hasPermission("phone_numbers.create");
   const canEdit = hasPermission("phone_numbers.edit");
   const canDelete = hasPermission("phone_numbers.delete");
 
-  /* Platform-owner gate, layered ON TOP of the capability grants above.
-   *
-   * The Twilio maintenance actions, the shared SMS sender and the auto-stock
-   * pool rules are ONE setting for the whole platform, not per-tenant, so they
-   * belong to the platform owner alone — a brand admin running their own tenant
-   * has no business re-syncing the platform's Twilio credentials, buying into
-   * the shared pool or repointing the SMS sender every tenant's summaries go
-   * out from. STAFF aren't SUPER_ADMIN either, so they lose these too.
-   *
-   * What everyone else keeps: the Numbers tab (with Reassign, if their role
-   * grants edit), the Customer Number Countries card, and a plain Refresh in
-   * place of the maintenance buttons.
-   *
-   * Each platform action still needs BOTH the role and the capability, so this
-   * only ever narrows what a permission grant allows. */
+  // Super admin gate on top of the capability grants: Twilio maintenance, the shared SMS sender and the
+  // auto-stock pool are platform-wide, so brand admins and STAFF never get them. Role AND capability both required.
   const isSuperAdmin = useAuthStore((s) => isSuperAdminRole(s.user?.role));
   const canCleanup = isSuperAdmin && canDelete;
   const canSyncTwilio = isSuperAdmin && canEdit;
@@ -188,17 +171,8 @@ export default function AdminPhoneNumbersPage() {
       .catch(() => {});
   }, []);
 
-  /* Are these cards holding an unsaved change?
-   *
-   * `replenish` is the config as the SERVER has it — the baseline the drafts are
-   * measured against — and it is null until the first load, which is what keeps
-   * both buttons off while the inputs still show their initial values. Each Save
-   * watches only its OWN card's fields, so the countries list can't light up the
-   * pool button or the other way round.
-   *
-   * (Both write the whole config through `saveReplenish`, so whichever one is
-   * pressed also commits the other card's edits — that is existing behaviour and
-   * loses nothing, since the response resets both baselines.) */
+  // Per-card dirty flags against the server config (`replenish`, null until loaded so Saves stay off).
+  // Both Saves write the whole config via saveReplenish, so either commits the other card's edits too.
   const poolDirty =
     replenish != null &&
     (targetDraft !== String(replenish.target) ||
@@ -277,9 +251,7 @@ export default function AdminPhoneNumbersPage() {
     }
   }
 
-  /* Manual re-pull of the pool + assignments. Available to anyone who can open
-   * the page: the live tick already refreshes silently, this is the on-demand
-   * version and it is the only header action a non-super-admin sees. */
+  // On-demand refresh — the only header action a non-super-admin sees.
   async function refresh() {
     setBusy("refresh");
     try {
@@ -422,9 +394,7 @@ export default function AdminPhoneNumbersPage() {
       setUserPurchase(cfg.userPurchase);
       setAllowedCountries(cfg.allowedCountries ?? []);
       setAllowedPrefixes(cfg.allowedPrefixes ?? {});
-      // Holds are dated from the CURRENT setting, not from the one in force when
-      // each number was released, so a changed window re-dates every countdown
-      // already on screen — reload rather than leave stale ones showing.
+      // Holds are dated from the current setting, so a changed window re-dates every countdown — reload.
       void load(true);
       toast.success("Auto-stock settings saved");
     } catch (e) {
@@ -456,9 +426,7 @@ export default function AdminPhoneNumbersPage() {
     }
   }
 
-  /* A held number has no action: the whole point of the window is that nobody
-   * A released number is assignable straight away — it stays in its brand's
-   * pool rather than sitting out a cooldown. */
+  // A released number is assignable straight away — it stays in its brand's pool, no cooldown.
   const renderReassign = (n: PhonePoolNumber | PhoneUserNumber) => {
     return canEdit ? (
       <Button variant="outline" size="sm" onClick={() => setAssignFor({ id: n.id, number: n.number })}>
@@ -467,9 +435,7 @@ export default function AdminPhoneNumbersPage() {
     ) : null;
   };
 
-  /* The brand column is the platform owner's — a brand admin only ever sees
-   * their own numbers, so a column that reads "Acme" on every row tells them
-   * nothing. Column counts follow it. */
+  // Brand column is super admin only — a brand admin only sees their own numbers. Column counts follow.
   const poolCols = isSuperAdmin ? 6 : 5;
   const userCols = isSuperAdmin ? 9 : 8;
 
@@ -522,9 +488,7 @@ export default function AdminPhoneNumbersPage() {
         </TabsList>
 
         <TabsContent value="settings" className="space-y-4">
-          {/* Platform-owner cards — the shared SMS sender and the auto-stock pool
-              rules. Dropped from the DOM for anyone else; the country picker
-              below stays, since that's the one setting a brand admin needs. */}
+          {/* Super admin only — SMS sender + auto-stock pool. The country picker below stays for brand admins. */}
           {isSuperAdmin && (
           <div className="grid gap-4 lg:grid-cols-2">
       {/* SMS sender number */}
@@ -1154,9 +1118,7 @@ function PoolStatusBadge({ n }: { n: PhonePoolNumber }) {
   return <Badge variant={variant}>{n.status}</Badge>;
 }
 
-/** Whole days until the platform reclaims an unused brand number; 0 reads as
- *  "today". Clamped at zero so one the hourly sweep hasn't collected yet shows
- *  as due, never overdue. */
+// Days until reclaim; clamped at 0 so a number the hourly sweep hasn't collected shows as due, never overdue.
 function daysLeft(iso: string): number {
   return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));
 }

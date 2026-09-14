@@ -2,23 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-/* ------------------------------------------------------------------ *
- *  Bonus minutes are granted per BILLING CYCLE.
- *
- *  A coupon's bonus (e.g. +200 minutes) belongs to a cycle, and every path that
- *  opens one — checkout, trial conversion, date renewal, early renewal, manual
- *  renew — grants it through `effectiveIncludedMinutes`.
- *
- *  A mid-cycle upgrade is NOT such a path: the delta is a standalone invoice,
- *  not a subscription cycle (which is also why nothing calls consumeCycle
- *  there). It used to grant the bonus again anyway, on top of a reset
- *  allowance — so a customer could upgrade, spend 200 bonus minutes, upgrade
- *  again, and collect another 200, inside a single cycle.
- *
- *  This is a source-inspection test in the house style: the route is a long
- *  Express handler wired to Stripe, and what matters is which allowance is
- *  passed at each call site.
- * ------------------------------------------------------------------------- */
+// Coupon bonus minutes are granted per billing cycle. A mid-cycle upgrade is not a new cycle (standalone
+// invoice), yet it used to re-grant the bonus — upgrade twice, collect 200 minutes twice. Source-inspection test.
 
 const src = readFileSync(resolve(import.meta.dirname, "billing.routes.ts"), "utf8");
 const trialSrc = readFileSync(resolve(import.meta.dirname, "../services/trial.ts"), "utf8");

@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  The thin customer directory: brand, id, email, name, role — kept in
- *  Main so "which brand is this email in?" and "how many people does
- *  this brand have?" are answered without opening a tenant. Writes are
- *  best-effort; the rebuild is exact.
- * ------------------------------------------------------------------ */
+// Thin customer directory in Main (brand, id, email, name, role) so brand lookups and counts
+// never open a tenant. Writes are best-effort; the rebuild is exact.
 
 const h = vi.hoisted(() => ({
   upsert: vi.fn(async (_args?: unknown) => ({}) as unknown),

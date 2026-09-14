@@ -65,11 +65,8 @@ function cleanServices(items: string[]): string[] {
 
 const SERVICE_SECTION = /services|what we (do|offer)|our (services|solutions|offerings|expertise)|expertise|capabilities|offerings/i;
 
-/**
- * Best source: a dedicated "Our Services / What We Do" section. Find such a
- * heading and pull the card titles / list items that immediately follow it —
- * this skips nav menus and portfolio/client logos elsewhere on the page.
- */
+// Best source: items right after an "Our Services / What We Do" heading, which
+// skips nav menus and client-logo blocks elsewhere on the page.
 function servicesFromSection(html: string): string[] {
   const headingRe = /<h[1-4][^>]*>([\s\S]{2,60}?)<\/h[1-4]>/gi;
   let m: RegExpExecArray | null;
@@ -91,11 +88,7 @@ function servicesFromSection(html: string): string[] {
   return [];
 }
 
-/**
- * Fallback: many sites summarise their offerings in the meta description, e.g.
- * "…digital transformation, software development, cloud engineering…". Split it
- * into short, service-like noun phrases.
- */
+// Fallback: split the meta description into short, service-like noun phrases.
 function servicesFromDescription(description: string): string[] {
   if (!description) return [];
   const SERVICEY =
@@ -117,13 +110,7 @@ function servicesFromDescription(description: string): string[] {
   return cleanServices(parts);
 }
 
-/**
- * Pick a business's services, best source first:
- *  1. a dedicated "Our Services / What We Do" section,
- *  2. the offerings listed in the meta description,
- *  3. a junk-filtered scan of all headings/list items.
- * Exported for unit testing.
- */
+/** Services, best source first: services section, then meta description, then a junk-filtered scan of headings/list items. */
 export function pickServices(html: string, description: string): string[] {
   const section = servicesFromSection(html);
   if (section.length >= 2) return section;
@@ -157,12 +144,8 @@ function capFirst(s: string): string {
 
 const IMG_EXT = /\.(png|jpe?g|gif|svg|webp)$/;
 
-/**
- * Pick the business email. Only trusts reliable signals — schema.org, `mailto:`
- * links, and addresses on the site's own domain — so a stray third-party email
- * scraped from page copy (a testimonial, embed, screenshot alt-text) is ignored.
- * Returns "" rather than guessing wrong.
- */
+// Only trusts schema.org, mailto: links and same-domain addresses — a stray third-party
+// email in page copy must not become the business email. "" rather than a wrong guess.
 function pickEmail(html: string, host: string, ldEmail: string): string {
   if (ldEmail) return ldEmail;
   const clean = (e: string) =>
@@ -178,11 +161,8 @@ function pickEmail(html: string, host: string, ldEmail: string): string {
   return [...mailto, ...text].find(onDomain) || mailto[0] || "";
 }
 
-/**
- * Pick the business phone. Only trusts schema.org `telephone` and `tel:` links —
- * never a raw run of digits scraped from the page (prices, stats, etc.), which
- * produced bogus "phone numbers". Returns "" rather than guessing wrong.
- */
+// Only schema.org `telephone` and tel: links — raw digit runs from the page (prices,
+// stats) produced bogus phone numbers. "" rather than a wrong guess.
 function pickPhone(html: string, ldPhone: string): string {
   if (ldPhone) return ldPhone;
   const tel = Array.from(html.matchAll(/href=["']tel:([^"'>\s]+)/gi))
@@ -250,11 +230,8 @@ function htmlToPlain(s: string): string {
     .trim();
 }
 
-/**
- * Pull FAQs out of schema.org JSON-LD (`FAQPage` → `mainEntity` → `Question` /
- * `acceptedAnswer`). The most reliable source when present — walks the whole
- * tree (incl. `@graph`) so nested FAQ blocks are found. Capped at 8 pairs.
- */
+// FAQs from schema.org JSON-LD. Walks the whole tree (incl. `@graph`) so nested
+// FAQ blocks are found; capped at 8.
 function extractFaqJsonLd(html: string): FaqPair[] {
   const out: FaqPair[] = [];
   const seen = new Set<string>();
@@ -360,23 +337,19 @@ function extract(html: string, url: string) {
   };
 }
 
-// Use a real browser User-Agent. A bot UA gets blocked (403) or the connection
-// reset by Akamai/Cloudflare-protected sites (e.g. adidas.co.in), which makes
-// fetchHtml throw and the scrape fall back to the manual-entry error.
+// Real browser UA: Akamai/Cloudflare sites 403 or reset a bot UA, which would
+// throw here and dump the user on manual entry.
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
-// Cap how much of a page we read. Some sites inline megabytes of base64 images
-// (virtusconcrete.com.au ships ~20 MB), which blows past the fetch timeout if
-// fully downloaded — but the useful HTML (<head>, headings, services) sits near
-// the top, so the first couple of MB is enough.
+// Some sites inline ~20 MB of base64 images and blow the fetch timeout; the useful
+// HTML sits near the top, so the first couple of MB is enough.
 const MAX_HTML_BYTES = 2_000_000;
 
 async function fetchHtml(url: string, timeoutMs: number): Promise<string> {
-  // SSRF guard: only fetch public http(s) hosts — never localhost, private
-  // ranges, or the cloud metadata endpoint. Throws (→ scrape falls back to
-  // manual entry) for anything internal.
+  // SSRF guard: public http(s) hosts only — never localhost, private ranges or cloud
+  // metadata. Throws for anything internal.
   await assertPublicHttpUrl(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -494,11 +467,8 @@ function parseLlmJson(raw: string): {
   }
 }
 
-/**
- * Deep analysis fallback: when the site doesn't clearly state its description or
- * services, read the full scraped text and have the LLM infer them. Returns blanks
- * (caller keeps its heuristic/generic values) if OpenAI isn't configured or fails.
- */
+// LLM pass over the scraped text. Returns blanks (caller keeps its heuristic values)
+// when OpenAI isn't configured or fails.
 async function analyzeWithLLM(input: {
   url: string;
   businessName: string;
@@ -586,11 +556,8 @@ async function analyzeWithLLM(input: {
 
     const content = `Website: ${input.url}\nBusiness name: ${input.businessName}\n\nWebsite content:\n${input.pageText.slice(0, 18000)}`;
 
-    // Two attempts: a transient OpenAI error (429/timeout) or a truncated/unparseable
-    // JSON reply used to silently zero out the whole extraction for that run — the
-    // main reason the SAME website returned services/FAQs one time and nothing the
-    // next. An all-empty parse counts as a failed attempt too (truncation looks
-    // exactly like that), so it gets one more try before we fall back.
+    // Two attempts: a 429/timeout or truncated JSON used to zero the whole extraction,
+    // so the same site gave results one run and nothing the next. Empty parse = failed attempt.
     for (let attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 1000));
       try {
@@ -609,11 +576,8 @@ async function analyzeWithLLM(input: {
               maxTokens: 3000,
               // Deterministic: the same site content should extract the same list.
               temperature: 0,
-              // Strict JSON out (the prompt already asks for JSON). "minimal" reasoning
-              // (matching every other LLM call in the app) — on a gpt-5 reasoning model
-              // "low" added a large, fixed thinking delay that made this public analyze
-              // endpoint feel slow regardless of site size. Structured extraction from
-              // the provided page text doesn't need deeper reasoning.
+              // "minimal" like every other LLM call here — "low" on gpt-5 added a big fixed
+              // thinking delay to this public endpoint, and extraction doesn't need it.
               jsonObject: true,
               reasoningEffort: "minimal",
             }),
@@ -676,12 +640,8 @@ async function analyzeWithLLM(input: {
   return { description: "", services: [], faqs: [], scenarios: [], businessHours: "" };
 }
 
-/**
- * Take the heuristic extraction and deepen it: when the site doesn't clearly state
- * its description or services, analyse the real scraped text via the LLM. Returns
- * whatever could actually be determined — NO fabricated/generic placeholders, so an
- * empty description+services signals "nothing found" to the caller.
- */
+// Deepen the heuristic extraction with the LLM. No generic placeholders — an empty
+// description + services means "nothing found" to the caller.
 async function enrichResult(
   base: ReturnType<typeof extract>,
   url: string,
@@ -693,15 +653,8 @@ async function enrichResult(
 
   const descriptionWeak = !description || description.length < 40;
 
-  // Always deep-analyse via the LLM (not gated on scraped text length). The
-  // heuristic <li>/<h2> scrape grabs nav/menu labels as "services" on SPA /
-  // e-commerce homepages (e.g. "Choose your option", "Call us", "Collection"), so
-  // the LLM — which reasons about the business type and returns genuine
-  // customer-facing services — is the source of truth. It also recognises
-  // well-known brands from the name/URL even when the page is JS-heavy or
-  // bot-blocked (e.g. amazon.in), and returns empty only when it neither has
-  // usable content nor recognises the business. (analyzeWithLLM no-ops without
-  // an OpenAI key, falling back to the heuristic below.)
+  // Always run the LLM: the heuristic scrape grabs nav labels as "services" on SPA
+  // pages, and the LLM recognises known brands from the URL when bot-blocked. No-ops without a key.
   const llm = await analyzeWithLLM({ url, businessName: base.businessName, pageText });
   if (descriptionWeak && llm.description) description = llm.description;
   // Prefer the LLM's (cleaned) services over the nav-polluted heuristic ones.
@@ -712,9 +665,7 @@ async function enrichResult(
   // actual content, not a generic placeholder.
   if (!services.length) services = servicesFromDescription(description);
 
-  // AI-suggested, business-specific call-handling rules. Seeded into the agent's
-  // Scenario Handling at onboarding so it isn't a one-size-fits-all default; the
-  // owner can edit/add/remove them later in the AI Brain.
+  // Business-specific call-handling rules, seeded into Scenario Handling at onboarding.
   const scenarios: ScenarioPair[] = llm.scenarios ?? [];
 
   // Opening hours, ONLY when the site actually stated them. Empty otherwise so the
@@ -746,16 +697,8 @@ router.post(
         .json({ error: "That doesn't look like a valid website address. Please check it and try again." });
     }
 
-    // 2) Fetch the site. Retry ONLY a genuine timeout: a slow-but-fine site
-    // deserves one more, slightly longer try. A definitive block (403 / blocked
-    // page / reset — as Akamai/Cloudflare sites like adidas serve) won't improve
-    // on retry, so we don't burn another ~15s on it.
-    //
-    // Crucially, we do NOT hard-fail when scraping yields nothing. We still run
-    // the LLM with the URL + business name so it can fall back to brand
-    // recognition for well-known businesses (e.g. adidas, amazon.in) — the same
-    // way ChatGPT identifies them from the domain alone. Genuinely unknown sites
-    // produce no content and no recognition, and get the 422 at step 3 below.
+    // 2) Fetch. Retry only a real timeout (a 403/reset won't improve). An empty scrape
+    // is NOT a hard fail: the LLM still gets URL + name; unknown sites hit the 422 below.
     let html = "";
     try {
       html = await fetchHtml(normalized, 8000);
@@ -772,19 +715,14 @@ router.post(
 
     const base = extract(html, normalized);
 
-    // Read a few key internal pages (About / Services / Products) so the deep
-    // analysis sees the whole site, not just the landing page. Best-effort and
-    // parallel; these block the LLM step, so keep the per-page timeout tight —
-    // a single slow subpage shouldn't stall the whole analyze request. The
-    // landing page alone is enough to extract from if a subpage times out.
+    // A few About/Services/Products pages, best-effort and parallel. These block the
+    // LLM step, so the per-page timeout stays tight; the landing page alone is enough.
     const extras = await Promise.allSettled(
       internalLinks(html, normalized).map((link) => fetchHtml(link, 6000)),
     );
     const pages = [html, ...extras.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []))];
-    // Give every fetched page a guaranteed share of the LLM's text window. A flat
-    // slice let a long homepage (nav/footer noise) crowd the About/Services/FAQ
-    // pages out entirely — the homepage gets 6k chars, each subpage 4k, matching
-    // the 18k cap in analyzeWithLLM.
+    // Each page gets a guaranteed share of the 18k LLM window (6k home, 4k per subpage);
+    // a flat slice let a noisy homepage crowd the subpages out entirely.
     const pageTexts = pages.map(htmlToText).filter(Boolean);
     const pageText = [pageTexts[0]?.slice(0, 6000), ...pageTexts.slice(1).map((t) => t.slice(0, 4000))]
       .filter(Boolean)
@@ -817,9 +755,7 @@ router.post(
       return res.json({ reachable: false });
     }
 
-    // Use a real browser User-Agent. Sites behind Akamai/Cloudflare bot
-    // protection (e.g. adidas.co.in) reject non-browser UAs — often by
-    // resetting the connection, which would make fetch throw below.
+    // Real browser UA: Akamai/Cloudflare sites reset non-browser UAs, which would throw below.
     const BROWSER_UA =
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
@@ -837,9 +773,8 @@ router.post(
       // Any HTTP response (even 4xx/5xx) means the host exists.
       return res.json({ reachable: resp.status > 0 });
     } catch (err) {
-      // Only a genuine DNS-resolution failure means the site doesn't exist.
-      // A timeout, connection reset, or bot-block means the host is up but
-      // refusing us — that's still a reachable website, so don't false-negative.
+      // Only a DNS failure means "doesn't exist". Timeout/reset/bot-block = host is up
+      // but refusing us, so don't false-negative.
       const code =
         (err as { cause?: { code?: string }; code?: string } | undefined)?.cause?.code ??
         (err as { code?: string } | undefined)?.code;

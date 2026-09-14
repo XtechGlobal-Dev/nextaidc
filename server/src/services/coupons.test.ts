@@ -201,9 +201,7 @@ describe("validateCoupon — one redemption per user, forever", () => {
     },
   );
 
-  // Abandoning checkout must never cost you your own coupon. The user reaches
-  // the card step, backs out, returns to the plan step and re-enters the code —
-  // their own `pending` row is an unfinished attempt, not a redemption.
+  // Backing out of checkout must never cost you your own coupon — a `pending` row is an unfinished attempt, not a redemption.
   it("does NOT block on the user's own FRESH reservation (they backed out of checkout)", async () => {
     couponFindUnique.mockResolvedValue(coupon());
     redemptionFindUnique.mockResolvedValue(redemption({ status: "pending", reservedAt: new Date() }));
@@ -305,19 +303,8 @@ describe("consumeCycle", () => {
     expect(detachDiscount).not.toHaveBeenCalled();
   });
 
-  /* The reported bug: a 2-cycle coupon kept discounting the 3rd charge.
-   *
-   * renewActivePlanIfExhausted renews EARLY whenever a user burns their minutes,
-   * and renewSubscriptionNow sets `billing_cycle_anchor: "now"` — so a cycle that
-   * is charged today ends today + one interval. Two such renewals on the same day
-   * therefore report period ends only minutes apart, and the "same period" dedupe
-   * (a one-hour window) threw the second one away as a duplicate event. Cycles
-   * stopped being counted, the budget never ran out, and the `forever` Stripe
-   * coupon behind every multi-cycle discount was never detached.
-   *
-   * This is exactly the case the module was built for — its own header says
-   * cycles are counted by us, "never by Stripe's calendar-month duration",
-   * because "a heavy user can consume several cycles inside one calendar month". */
+  // Bug: a 2-cycle coupon discounted the 3rd charge. Early renewals (billing_cycle_anchor: "now") put two
+  // period ends minutes apart, so the one-hour "same period" dedupe dropped the second and the budget never ran out.
   it("counts a second charge made the same day, minutes after the first", async () => {
     const firstCycleEnd = new Date("2026-09-11T10:00:00.000Z");
     const secondCycleEnd = new Date("2026-09-11T10:12:00.000Z"); // renewed 12 min later
@@ -350,9 +337,7 @@ describe("consumeCycle", () => {
   });
 
   it("still ignores a repeat event for a charge already counted", async () => {
-    // The dedupe's real job: customer.subscription.updated fires for edits that
-    // move no money (auto-renew toggle, downgrade scheduled, price swap). Those
-    // carry the invoice that was already counted.
+    // The dedupe's real job: subscription.updated fires for edits that move no money and carry an already-counted invoice.
     redemptionFindFirst.mockResolvedValue(
       redemption({ cyclesUsed: 1, lastCountedInvoiceId: "in_first" }),
     );
@@ -380,12 +365,8 @@ describe("consumeCycle", () => {
     expect(fake.couponRedemption.delete).not.toHaveBeenCalled();
   });
 
-  /* Stripe can drop a subscription discount without anyone asking — writing a
-   * schedule's phases replaces them wholesale. Nothing errors, the customer just
-   * starts paying full price with cycles still owed, so the cycle boundary
-   * double-checks it. Deliberately here and not on the reconcile path: that runs
-   * on every gated API request, and a Stripe call per request would be a heavy
-   * price for a rare repair. */
+  // Writing schedule phases can silently drop a Stripe discount, so the cycle boundary re-checks it.
+  // Here and not on reconcile — that runs on every gated request, too often for a Stripe call.
   describe("re-attaches a discount that went missing", () => {
     it("puts it back when Stripe shows none and cycles remain", async () => {
       redemptionFindFirst.mockResolvedValue(redemption({ cyclesUsed: 0 }));
@@ -582,11 +563,8 @@ describe("grantCoupon — admin grant guards", () => {
     expect(await grantCoupon(...args)).toEqual({ ok: true });
   });
 
-  /* An admin could grant a coupon whose redemption window had closed months
-   * earlier and nothing anywhere said a word — the window was treated as a
-   * self-serve-only rule. It now binds admins too, as an override rather than a
-   * wall: comping a lapsed offer to a customer who missed the deadline is
-   * legitimate, doing it by accident is not. */
+  // The redemption window binds admins too, as an override rather than a wall: comping a lapsed
+  // offer deliberately is fine, doing it by accident is not.
   const PAST = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const FUTURE = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -775,9 +753,8 @@ describe("grantableCoupons — what the admin picker renders", () => {
   });
 });
 
-/* A one-cycle coupon is the commonest campaign shape — "first month half price"
- * — and the one where a mistake is invisible until a customer notices they're
- * still being discounted months later. The whole lifecycle in one place. */
+// The commonest campaign shape ("first month half price"), where a mistake is invisible until a
+// customer notices they're still discounted months later.
 describe("a 1-cycle coupon: discounted once, then full price", () => {
   const oneCycle = coupon({ durationCycles: 1, bonusMinutes: 200 });
 
@@ -840,12 +817,8 @@ describe("effectiveIncludedMinutes", () => {
   });
 });
 
-/* ONE LIVE DISCOUNT PER ACCOUNT.
- *
- * Nothing in the schema enforces it — @@unique([couponId, userId]) only blocks
- * the SAME coupon twice, so two different coupons can both reach status
- * "active". Profile.activeCouponRedemptionId is single-valued and therefore
- * cannot express two, which is why every read resolves through it. */
+// ONE LIVE DISCOUNT PER ACCOUNT. The schema can't enforce it (the unique only blocks the SAME coupon
+// twice), so every read resolves through the single-valued Profile.activeCouponRedemptionId.
 describe("coupon stacking is impossible", () => {
   const redemptionUpdateMany = fake.couponRedemption
     .updateMany as unknown as ReturnType<typeof vi.fn>;
@@ -959,9 +932,8 @@ describe("coupon stacking is impossible", () => {
   });
 
   it("clears a money discount when a bonus-minutes coupon takes over", async () => {
-    // A bonus-only coupon has no Stripe object, so attaching cannot replace the
-    // percentage already there. Left alone, the customer keeps paying less under
-    // a redemption that is no longer theirs and that nothing will retire.
+    // A bonus-only coupon has no Stripe object to replace the old percentage, so it must be detached
+    // explicitly or the customer keeps paying less under a redemption nothing will retire.
     grantSetup({ percentOff: null, bonusMinutes: 500, stripeCouponId: null });
     getAttached.mockResolvedValue("co_previous");
 
@@ -971,10 +943,8 @@ describe("coupon stacking is impossible", () => {
   });
 
   it("refuses a SECOND code while a discount is already running", async () => {
-    // /subscribe writes Stripe's discount straight from the code in the request,
-    // and its only cleanup touches pending rows — never the live one. Without
-    // this the subscription would start billing under the new code while our
-    // records still counted cycles and granted bonus minutes for the old one.
+    // /subscribe applies the requested code straight to Stripe and only cleans up pending rows, so without
+    // this the sub would bill under the new code while we still counted cycles for the old one.
     couponFindUnique.mockResolvedValue(coupon({ id: "c_new", code: "SECOND" }));
     redemptionFindUnique.mockResolvedValue(null); // never redeemed THIS code
     profileFindUnique.mockResolvedValue({
@@ -1065,10 +1035,8 @@ describe("coupon stacking is impossible", () => {
   });
 });
 
-/* Deploy-order insurance. The coupon reads are threaded through code every
- * customer hits, so if the app ever runs against a database the migration
- * hasn't reached, the feature has to go inert rather than 500 the whole
- * customer base over something none of them use. */
+// Deploy-order insurance: coupon reads sit in paths every customer hits, so a database the migration
+// hasn't reached must make the feature inert rather than 500 everyone.
 describe("database without the coupon tables (P2021)", () => {
   const missingTable = Object.assign(new Error("table does not exist"), { code: "P2021" });
 
@@ -1105,10 +1073,8 @@ describe("database without the coupon tables (P2021)", () => {
 });
 
 describe("healDiscountDrift", () => {
-  // This runs from reconcileSubscription, which the validateTrial middleware
-  // calls on EVERY gated API request. Reaching Stripe from here for users who
-  // never touched a coupon would put a network round-trip on every request the
-  // whole customer base makes.
+  // Runs from reconcileSubscription on EVERY gated request — a Stripe call here for users who never
+  // held a coupon would add a network round-trip to every request the customer base makes.
   it("never touches Stripe for a user who has never held a coupon", async () => {
     redemptionFindFirst.mockResolvedValue(null); // no ended redemption
     await healDiscountDrift("u1", "sub_1");

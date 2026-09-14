@@ -9,13 +9,8 @@ import { textBookingConfirmation } from "../sms.js";
 import { formatLocal, generateSlots } from "./hours.js";
 import type { BookingConfig } from "./config.js";
 
-/* ------------------------------------------------------------------ *
- *  Booking engine: create / cancel / reschedule an Appointment.
- *  The Appointment row is the source of truth; the Google Calendar write is
- *  FIRE-AND-FORGET so the AI tool responds fast (Vapi times tools out quickly).
- *  Everything is best-effort around the row: a Google/SMS hiccup never loses the
- *  booking.
- * ------------------------------------------------------------------ */
+// Booking engine. The Appointment row is the source of truth; Google and SMS writes are fire-and-forget
+// (Vapi times tools out quickly), so a Google/SMS hiccup never loses the booking.
 
 /** Display name for an unnamed caller (never fabricate a name). */
 export const UNNAMED = "Customer";
@@ -30,10 +25,7 @@ export interface BookInput {
   source?: "ai" | "manual";
 }
 
-/** Event title: lead with WHAT was booked (the caller's reason/notes, e.g.
- *  "Haircut", "Room booking"), then the customer name — so the calendar shows the
- *  real booking instead of a generic "Appointment". Falls back to "Appointment"
- *  when no reason was captured. */
+// Lead with WHAT was booked, then who, so the calendar shows the real booking rather than a generic "Appointment".
 function eventSummary(name: string, notes: string): string {
   const reason = notes.trim();
   const subject = reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : "Appointment";
@@ -52,11 +44,7 @@ function eventDescription(a: { name: string; phone: string; email: string; notes
     .join("\n");
 }
 
-/**
- * Book an appointment: persist the row immediately, then fire off the Google
- * event + confirmation SMS in the background. Returns the created row. Never
- * throws for the Google/SMS side effects.
- */
+/** Persists the row immediately, then fires the Google event and confirmation SMS in the background. Never throws for those side effects. */
 export async function bookAppointment(
   userId: string,
   config: BookingConfig,
@@ -203,12 +191,7 @@ export async function rescheduleAppointment(
   return updated;
 }
 
-/**
- * Resolve a caller-supplied date + time to a concrete slot INSTANT by matching
- * against the generated slots for that date (compared by instant, not string —
- * LLMs echo times in varying formats). Accepts a bare "HH:mm" (24h) or a label
- * like "3:00 PM" / "3pm". Returns the slot's start/end ISO or null on no match.
- */
+/** Resolves a caller's date + time ("HH:mm", "3:00 PM", "3pm") to a generated slot, matched by instant rather than string since LLMs echo times in varying formats. */
 export function resolveSlotInstant(
   config: BookingConfig,
   dateISO: string,

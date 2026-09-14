@@ -2,23 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-/* ------------------------------------------------------------------ *
- *  A subscription cannot change currency.
- *
- *  Stripe fixes a subscription's currency when it is created, so swapping in a
- *  price denominated in another one is rejected. Nothing checked for it, so a
- *  customer on a $20 AUD plan could click through to a $20 USD plan: the two
- *  prices compared equal as bare integers, the change was classified "same",
- *  and it ran all the way to Stripe — failing at the price swap, which sits
- *  AFTER the charge step.
- *
- *  Reported from staging as "We took the upgrade payment but couldn't switch
- *  your plan", on a change that had in fact charged nothing.
- *
- *  Source-inspection test in the house style (see bonusMinutesCycle.test.ts):
- *  the route is a long Express handler wired to Stripe, and what matters is
- *  where the guard sits relative to the money.
- * ------------------------------------------------------------------------- */
+// Stripe fixes a subscription's currency at creation. Nothing checked, so $20 AUD → $20 USD compared equal as bare
+// integers and ran to Stripe, failing at the swap AFTER the charge step. Source-inspection test (see bonusMinutesCycle.test.ts).
 
 const src = readFileSync(resolve(import.meta.dirname, "billing.routes.ts"), "utf8");
 
@@ -50,9 +35,7 @@ describe("a plan change across currencies is refused", () => {
   });
 
   it("refuses BEFORE the prices are compared", () => {
-    // computeProration takes bare integers. Reaching it with two currencies
-    // reads $20 USD and $20 AUD as the same price — which is exactly what the
-    // confirmation dialog told the customer.
+    // computeProration takes bare integers, so $20 USD and $20 AUD read as the same price.
     expect(contextLoader.indexOf("target.currency !== current.currency")).toBeLessThan(
       contextLoader.indexOf("computeProration"),
     );
@@ -70,20 +53,15 @@ describe("a plan change across currencies is refused", () => {
 
 describe("the failure message matches what actually happened", () => {
   it("only claims a payment was taken when one was", () => {
-    // A same-price switch charges nothing (amountDueCents is 0 unless the
-    // direction is "upgrade"), so this path is reached with charged === 0 too.
-    // Promising a refund there sends the customer and support hunting for a
-    // payment that never existed.
+    // A same-price switch charges nothing, so this path is reached with charged === 0 too —
+    // promising a refund there sends support hunting for a payment that never existed.
     expect(changePlan).toMatch(/charged > 0\s*\n?\s*\?\s*"We took the upgrade payment/);
     expect(changePlan).toMatch(/nothing was charged/);
   });
 
   it("still charges before swapping, so a decline changes nothing", () => {
-    // Pre-existing ordering worth pinning while editing around it: the swap
-    // running first would leave a customer on a plan they hadn't paid for.
-    //
-    // Scoped to the paid branch on purpose — the trial path swaps the price with
-    // no charge at all, and that earlier call would otherwise be the one measured.
+    // Swap-first would leave a customer on a plan they hadn't paid for. Scoped to the paid
+    // branch because the trial path swaps with no charge and would otherwise be measured.
     const paidBranch = changePlan.slice(changePlan.indexOf("COLLECT FIRST"));
     expect(paidBranch.indexOf("chargeOneTime")).toBeGreaterThan(-1);
     expect(paidBranch.indexOf("chargeOneTime")).toBeLessThan(

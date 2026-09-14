@@ -1,13 +1,5 @@
-/**
- * Self-healing for stale code-split chunks after a deploy.
- *
- * Vite builds hashed chunk files; after a new deploy the old hashes are gone. A
- * browser holding a stale `index.html` then fails to `import()` a lazy route —
- * which, without handling, unmounts the app to a blank white screen. We detect
- * that specific failure and reload ONCE (guarded against loops) to pull the fresh
- * build. A genuinely broken build won't loop — it falls through to the
- * ErrorBoundary's "Reload" fallback instead.
- */
+// Self-healing for stale hashed chunks after a deploy: a stale index.html fails to import() a lazy route and
+// blanks the app, so reload ONCE (loop-guarded); a truly broken build falls through to the ErrorBoundary.
 
 const RELOAD_FLAG = "hello22:chunk-reloaded";
 
@@ -42,9 +34,7 @@ export function clearChunkReloadGuard(): void {
   }
 }
 
-/** Clear the boot-watchdog guard (set by the inline script in index.html) once the
- *  app mounts cleanly, so a LATER deploy's failed boot can self-heal again. Key must
- *  match the one in index.html. */
+/** Clear the boot-watchdog guard set by the inline script in index.html (key must match) so a later failed boot can self-heal. */
 export function clearBootReloadGuard(): void {
   try {
     sessionStorage.removeItem("hello22:boot-reloaded");

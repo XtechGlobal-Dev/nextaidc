@@ -7,12 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/input";
 import { api, ApiError, type SeoScripts } from "@/lib/api";
 
-/* ------------------------------------------------------------------ *
- *  Admin editor for custom scripts/tags (SEO & tracking). Paste any
- *  snippet a tool gives you — Google Analytics, Tag Manager, Meta
- *  Pixel, site-verification meta tags — pick the slot, Save, done.
- *  Injected on every page load by SeoManager; no code deploy needed.
- * ------------------------------------------------------------------ */
+// Custom SEO/tracking snippets per slot; SeoManager injects them on every page load, no deploy needed.
 
 const EMPTY: SeoScripts = { head: "", body: "", footer: "" };
 

@@ -4,14 +4,8 @@ import { compileMasterPrompt, DEFAULT_AGENT_CONFIG, type AgentConfig } from "../
 import { buildChatBody, openAiTokenUnits } from "../lib/openai.js";
 import { traceFetch } from "./apiTrace.js";
 
-/* ------------------------------------------------------------------ *
- *  Inbound WhatsApp → AI reply. The platform has a single WhatsApp
- *  number, so every inbound message is answered by one agent's "brain"
- *  (the same compiled config that drives the voice receptionist),
- *  adapted for short text replies. Uses the configured OpenAI key; if
- *  none is set we fall back to a polite holding reply so the sender
- *  always gets something back.
- * ------------------------------------------------------------------ */
+// Inbound WhatsApp -> AI reply. One platform number, so one agent's brain answers
+// everything; without an OpenAI key the sender still gets a holding reply.
 
 interface ResolvedAgent {
   userId: string;

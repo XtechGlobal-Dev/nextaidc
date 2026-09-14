@@ -2,10 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import { MAX_DEPARTMENTS, transferDepartmentAllowance } from "./transfer.js";
 
-/* The stored shape is deliberately ambiguous on its own — `callTransferLimit`
- * is 0 for BOTH "unlimited" and "irrelevant, the feature is off". Every one of
- * these pins a case where reading the number without the flag would get the
- * answer exactly backwards. */
+// `callTransferLimit` is 0 for both "unlimited" and "feature off" — each case here is one a raw read gets backwards.
 
 describe("transferDepartmentAllowance", () => {
   it("gives nothing when the plan excludes transfer, whatever the limit says", () => {

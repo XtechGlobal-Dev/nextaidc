@@ -1,11 +1,6 @@
 import "dotenv/config";
 
-/** One-off, user-requested:
- *  1. Capitalize scenario If/Then first letters for the two named accounts
- *     (michaelbt8699@gmail.com, admin@hello22.ai) — the only ones still lowercase.
- *  2. Delete the demo@hello22.ai account entirely (no longer wanted). Prisma
- *     cascades remove its profile, conversion + call logs, CRM row, and
- *     notifications. */
+// One-off: capitalize scenario text for two named accounts and delete demo@hello22.ai (cascades clean up its data).
 // A brand's workspace lives in the brand's database (phase 6): BRAND=<slug> picks it.
 import { prisma } from "./_brandDb.js";
 

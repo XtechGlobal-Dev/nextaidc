@@ -1,23 +1,7 @@
 import type { Response } from "express";
 
-/**
- * In-memory Server-Sent Events (SSE) hub. Long-lived Express connections
- * subscribe to one or more channels; write points publish tiny "something
- * changed" events to a channel and every subscribed client is nudged to refresh.
- *
- * Channels:
- *   user:<userId>  — that user's own tabs
- *   admin          — all admin/staff tabs (aggregate dashboards)
- *
- * Events carry only a small `{ type }` tag — never the changed data itself. The
- * client reacts by re-fetching just what the current screen shows, so a burst of
- * activity never balloons into large pushes and idle tabs make zero requests.
- *
- * State is per-process and intentionally ephemeral: if the API restarts, clients
- * transparently reconnect (EventSource auto-retry) and re-subscribe. This works
- * because the API runs as a single long-lived server; it is NOT safe to assume
- * cross-instance delivery if the API is ever horizontally scaled (see NOTE).
- */
+// In-memory SSE hub. Channels: `user:<id>` and `admin`. Events carry only a `{ type }`
+// tag, never data — clients re-fetch. Per-process state; see the scaling note at the bottom.
 
 type Client = {
   id: number;
@@ -78,15 +62,8 @@ export function removeClient(id: number): void {
   if (presenceId !== null && !isOnline(presenceId)) announcePresence(presenceId, false);
 }
 
-/**
- * Tell admin/staff tabs that someone came online or went offline.
- *
- * Presence is derived from open streams, so it changes without any write to the
- * database — nothing else publishes for it, and an admin watching the customer
- * list would otherwise see a stale dot until some unrelated activity happened to
- * push an event (or they reloaded the page). Admins only: presence is not a
- * customer's own business, and this keeps the customer's channel quiet.
- */
+// Presence comes from open streams, not DB writes, so nothing else would publish it.
+// Admins only — it's not the customer's business and keeps their channel quiet.
 function announcePresence(userId: string, online: boolean): void {
   publishToAdmins({ type: "presence", userId, online });
 }
@@ -117,20 +94,7 @@ export function liveClientCount(): number {
   return clients.size;
 }
 
-/**
- * Ids of every user with at least one open stream — i.e. who has the app open
- * right now. Derived from the live client map (each client subscribes to its own
- * `user:<id>` channel), so presence costs nothing extra: no polling, no writes,
- * no new table.
- *
- * Reflects only THIS process's connections (see the scaling note below) and only
- * an app tab being open — a background tab still counts as online, which is the
- * usual meaning elsewhere. After a restart everyone reads offline until the
- * browsers reconnect (~5s, the client's `retry` hint).
- *
- * Impersonated sessions are excluded: an admin opening a customer's panel must
- * never make that customer look like they're here.
- */
+/** Users with an open stream in THIS process. Impersonated sessions excluded — an admin viewing a customer must never make them look present. */
 export function onlineUserIds(): Set<string> {
   const ids = new Set<string>();
   for (const c of clients.values()) {
@@ -142,7 +106,5 @@ export function onlineUserIds(): Set<string> {
   return ids;
 }
 
-// NOTE: horizontal scaling — if the API is ever run as more than one instance,
-// swap this in-memory hub for a shared bus (Redis pub/sub, Postgres LISTEN/NOTIFY)
-// so an event published on instance A reaches a client connected to instance B.
-// The publish/subscribe surface above is deliberately small to make that swap easy.
+// NOTE: not safe across instances. If the API ever scales horizontally, swap this
+// for a shared bus (Redis pub/sub, Postgres LISTEN/NOTIFY); the surface is small on purpose.

@@ -1,20 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-/**
- * The brand (tenant) the CURRENT request belongs to, carried implicitly.
- *
- * Why not thread a brandId parameter through every call? The senders that need
- * it — email, SMS, WhatsApp — sit five or six frames below the route, behind
- * services that have nothing to do with tenancy. Async-local storage lets the
- * one middleware that resolves the host set it once, and lets the sender read
- * it at the bottom, without rewriting everything in between.
- *
- * Outside a request (schedulers, webhook workers, CLI scripts) the store is
- * empty and every read returns null — which resolves to the platform's own
- * settings, i.e. exactly the behaviour that existed before brands. Anything
- * running off-request that needs a brand must pass one explicitly (see
- * `brandIdForUser`).
- */
+/** Ambient brand for the current request (async-local) so deep senders don't need a threaded brandId.
+ *  Off-request (schedulers, workers) reads null = platform; pass a brand explicitly there. */
 export interface BrandContext {
   brandId: string | null;
 }

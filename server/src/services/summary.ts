@@ -2,12 +2,8 @@ import { getEffective, integrationsStatus } from "./settings.js";
 import { buildChatBody, openAiTokenUnits } from "../lib/openai.js";
 import { traceFetch } from "./apiTrace.js";
 
-/* ------------------------------------------------------------------ *
- *  Call-transcript summariser + translator. Uses OpenAI when an admin
- *  has configured a key (Admin → Settings, DB → env fallback). Every
- *  function is best-effort and never throws — callers fall back to the
- *  original English text on any failure.
- * ------------------------------------------------------------------ */
+// Transcript summariser + translator over OpenAI. Everything is best-effort and
+// never throws; callers keep the original English on failure.
 
 interface Turn {
   role: string; // "agent" | anything else (treated as caller)
@@ -20,9 +16,7 @@ export function needsTranslation(language: string | null | undefined): boolean {
   return l.length > 0 && l !== "english";
 }
 
-/** Normalise a stored transcript into `{ role, text, at? }` turns. Vapi phone
- *  calls store the transcript as a "Role: text" STRING; the web widget stores an
- *  array. This unifies both so translation/rendering works the same everywhere. */
+/** Normalises a transcript to turns. Vapi stores a "Role: text" string, the web widget an array. */
 export function normalizeTranscript(raw: unknown): { role: string; text: string; at?: number }[] {
   if (typeof raw === "string") {
     return raw
@@ -100,21 +94,11 @@ export async function summarizeCallTranscript(turns: Turn[], language?: string):
 export interface CallIntentRead {
   /** "support" | "spam" | "none" — never "booking" or "lead", by design. */
   category: string;
-  /** True when the caller gave, or the AI successfully took, a way to reach
-   *  them back. Feeds the deterministic `lead` rule for calls that carry no
-   *  Vapi structuredData. */
+  /** Caller left a way to reach them. Feeds the `lead` rule when there's no Vapi structuredData. */
   contactCaptured: boolean;
 }
 
-/** Read a call for the inbox badge: what kind of call it was, and whether we
- *  ended up with a way to contact the caller.
- *
- *  Only used where Vapi didn't extract this for us — WEB/TEST calls carry no
- *  structuredData at all, so without this a test call could never be a lead no
- *  matter how much the AI collected. One request answers both questions.
- *
- *  Returns nulls when OpenAI isn't configured or the reply doesn't parse; the
- *  caller then falls back to the keyword heuristic and the structuredData rule. */
+/** Classifies a call for the inbox badge. Only for calls Vapi gave no structuredData (web/test) — otherwise a test call could never be a lead. Empty result on failure; caller falls back to heuristics. */
 export async function classifyCallIntent(turns: Turn[]): Promise<CallIntentRead> {
   const empty: CallIntentRead = { category: "", contactCaptured: false };
   if (!turns.length) return empty;
@@ -178,9 +162,7 @@ export async function translateText(text: string, language: string): Promise<str
   );
 }
 
-/** Translate every turn of a transcript into `language`, preserving roles and order.
- *  Returns the translated turns, or `null` if translation isn't possible/failed so
- *  the caller keeps the original transcript. */
+/** Translates every turn, preserving roles and order. Null on failure so the caller keeps the original. */
 export async function translateTranscript(
   turns: Turn[],
   language: string,

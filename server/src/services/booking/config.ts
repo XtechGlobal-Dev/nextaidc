@@ -1,12 +1,8 @@
 import { tenantForUser } from "../tenantDb.js";
 import { parseWorkingHours, type WorkingHours } from "./hours.js";
 
-/* ------------------------------------------------------------------ *
- *  Booking config — resolved from the CrmIntegration row. The whole model is
- *  intentionally simple: the AI books directly when the owner has turned
- *  auto-booking on AND connected Google Calendar. Nothing else. (There is no
- *  "pitch a website link" path — that was removed.)
- * ------------------------------------------------------------------ */
+// Booking config from the CrmIntegration row. Intentionally simple: the AI books directly only when
+// auto-booking is on AND Google Calendar is connected. The old "pitch a website link" path is gone.
 
 export interface BookingConfig {
   /** Google Calendar is connected for this owner. */

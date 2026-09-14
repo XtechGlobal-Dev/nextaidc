@@ -13,14 +13,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ *
- *  Realistic phone "screenshots" for the call-forwarding guide. These
- *  are CSS mockups (not real screenshots) that imitate the actual iOS
- *  Settings / Android UI for each step, inside a device frame with a
- *  status bar, notch and home indicator. The screens render in a fixed
- *  light appearance (like a real phone showing its own UI), independent
- *  of the app's theme. A looping "demo" animation taps through each step.
- * ------------------------------------------------------------------ */
+// CSS phone mockups for the call-forwarding guide. Fixed light appearance on purpose (a real phone
+// showing its own UI), independent of the app theme.
 
 /* --------------------------------- chrome -------------------------------- */
 
@@ -404,9 +398,7 @@ export function LandlineKeypad({
     "2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL", "6": "MNO",
     "7": "PQRS", "8": "TUV", "9": "WXYZ",
   };
-  // Highlight the control keys (* and #) so the code is easy to read at a glance —
-  // shown statically, with no key-press/typing animation (users found the moving
-  // demo confusing; they just need to see the exact number to dial).
+  // Highlight * and # statically — users found the typing animation confusing; they just need the exact number.
   const hot = new Set(["*", ...(suffix.includes("#") ? ["#"] : [])]);
   return (
     <div className="relative mx-auto w-[150px] [zoom:1.35]">

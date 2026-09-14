@@ -30,15 +30,8 @@ import type {
   TicketPriority,
 } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Raise a request on someone's behalf — one that arrived by phone, or
- *  a conversation that started elsewhere and needs a thread to live in.
- *
- *  Who "someone" is depends on the lane, and the server decides that
- *  from the caller's role: a brand admin picks one of their own
- *  customers, the platform owner picks a brand admin. The picker just
- *  asks /requesters and shows what comes back.
- * ------------------------------------------------------------------ */
+// Raise a ticket on someone's behalf. Who is pickable is decided server-side by lane (brand admin → own customers,
+// platform owner → brand admins); the picker just shows what /requesters returns.
 
 const PRIORITY_TINT: Record<TicketPriority, string> = {
   low: "text-muted-foreground",

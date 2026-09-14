@@ -1,19 +1,7 @@
 import { AGENT_LLM_OPTIONS, type AgentLlmOption } from "../lib/agentConfig.js";
 
-/* ------------------------------------------------------------------ *
- *  Live LLM catalogue — providers + models pulled from Vapi at runtime.
- *
- *  The provider/model list is fetched LIVE from Vapi's public OpenAPI schema
- *  (https://api.vapi.ai/api-json) so the admin dropdown always reflects Vapi's
- *  current catalogue without a redeploy. Result is cached in memory (TTL) with a
- *  single in-flight fetch, and falls back to the bundled snapshot
- *  (AGENT_LLM_OPTIONS) whenever Vapi is unreachable or returns nothing.
- *
- *  Cost/min + latency are NOT exposed by any Vapi API — they live only in Vapi's
- *  dashboard bundle. We therefore merge them in from the bundled snapshot (keep
- *  it fresh with `node scripts/syncVapiModels.mjs`). A live model with no snapshot
- *  entry simply shows without a cost/latency badge.
- * ------------------------------------------------------------------ */
+// LLM provider/model list pulled live from Vapi's OpenAPI schema, cached, snapshot fallback.
+// Cost/latency aren't in any Vapi API, so they're merged from the snapshot (scripts/syncVapiModels.mjs).
 
 const OPENAPI_URL = "https://api.vapi.ai/api-json";
 const TTL_MS = 6 * 60 * 60 * 1000; // re-fetch at most every 6h
@@ -74,12 +62,7 @@ async function fetchLive(): Promise<AgentLlmOption[]> {
   return out;
 }
 
-/**
- * Live provider/model catalogue (cost/latency merged from the snapshot).
- * Cached for TTL_MS; concurrent callers share one fetch. On any failure returns
- * the last good cache, else the bundled snapshot — so the admin UI never breaks.
- * Pass `force` to bypass the cache (the admin "Refresh from Vapi" button).
- */
+/** Live provider/model catalogue. Cached; falls back to last-good or the bundled snapshot so the admin UI never breaks. `force` bypasses the cache. */
 export async function getAgentLlmOptions(force = false): Promise<AgentLlmOption[]> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.options;
   if (inFlight) return inFlight;

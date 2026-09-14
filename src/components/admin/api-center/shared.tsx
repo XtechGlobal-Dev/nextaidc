@@ -18,17 +18,8 @@ import { Sparkline } from "@/components/charts/Charts";
 import { compactNumber, formatPct } from "@/components/charts/primitives";
 import type { AuthStatus, HealthState, ProviderRow, StatusIndicator } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  The shared vocabulary of the API Center.
- *
- *  Health, auth and vendor-incident states are each rendered by exactly one
- *  component here, so "degraded" looks and reads identically on the Overview,
- *  in the drawer and on the Health screen.
- *
- *  Every state pairs a colour with an icon AND a word. Colour alone would fail
- *  anyone with a colour-vision deficiency, and these are precisely the states
- *  where being wrong matters most.
- * ------------------------------------------------------------------ */
+// Shared API Center state pills/tiles so each state renders one way everywhere.
+// Every state pairs colour with an icon and a word; colour alone fails colour-blind users.
 
 /* ------------------------------ Health ----------------------------- */
 
@@ -165,15 +156,7 @@ export function AuthPill({ status, className }: { status: AuthStatus; className?
 
 /* --------------------------- Environment --------------------------- */
 
-/**
- * Marks a provider that is pointed at its vendor's SANDBOX rather than live.
- *
- * Renders nothing for production, on purpose. Production is the default and the
- * overwhelming majority, so a "PROD" chip on every row was pure noise — it
- * appeared 23 times and told you nothing. Sandbox is the exception worth
- * shouting about: mistaking test traffic for live traffic (or the reverse) is
- * the expensive direction of that error.
- */
+/** Sandbox marker. Renders nothing for production on purpose: a PROD chip on every row was noise; sandbox is the exception worth flagging. */
 export function EnvBadge({ environment, className }: { environment: string; className?: string }) {
   if (environment !== "sandbox") return null;
   return (
@@ -238,13 +221,7 @@ export function ProviderAvatar({ name, className }: { name: string; className?: 
 
 /* ---------------------------- Stat tile ---------------------------- */
 
-/**
- * The KPI tile used across every section.
- *
- * The value is the hero; the sparkline is context, not decoration; the tone is
- * only ever set when a threshold has genuinely been crossed, so a coloured tile
- * always means something.
- */
+/** KPI tile. Only set `tone` when a threshold is actually crossed, so a coloured tile always means something. */
 export function MetricTile({
   label,
   value,
@@ -333,12 +310,7 @@ export function MetricTile({
 
 /* ---------------------------- Quota meter -------------------------- */
 
-/**
- * Consumption against a configured ceiling.
- *
- * A provider with no quota set renders "Not set" rather than an empty 0% bar —
- * a full-looking meter and an unconfigured one must never look the same.
- */
+/** Quota meter. No quota renders "not set" text, never an empty 0% bar, so unconfigured and full can't look alike. */
 export function QuotaMeter({
   used,
   quota,
@@ -384,14 +356,7 @@ export function QuotaMeter({
 
 /* -------------------------- View switcher -------------------------- */
 
-/**
- * The segmented control that replaced eight of the old tabs.
- *
- * Switching a view swaps which columns or which chart you're looking at — it
- * never changes the data behind it. That's the whole reason the merge works:
- * "status vs quota" was never a different screen, only a different question
- * about the same rows.
- */
+/** Segmented view switcher. Switching a view changes which columns/chart you see, never the data behind it. */
 export function Segmented<T extends string>({
   value,
   onChange,
@@ -440,13 +405,7 @@ export function Segmented<T extends string>({
 
 /* --------------------------- Summary bar --------------------------- */
 
-/**
- * The fleet in one line.
- *
- * Replaces the four-tile KPI grid the Overview used to open with. Four tiles
- * read as four things to think about; one strip reads as one sentence, which is
- * what "is everything OK?" deserves as an answer.
- */
+/** Fleet summary in one strip; reads as one sentence rather than four tiles. */
 export function SummaryBar({
   stats,
   className,
@@ -527,13 +486,7 @@ export function SectionHeading({
 
 /* ---------------------------- Cost caveat -------------------------- */
 
-/**
- * Cost confidence, stated inline wherever a dollar figure appears.
- *
- * These numbers are `units x list price`, not invoices. Saying so next to the
- * figure is the difference between a useful estimate and a number someone
- * budgets against and is then wrong about.
- */
+/** Cost confidence note shown beside every dollar figure: these are `units x list price` estimates, not invoices. */
 export function CostConfidenceNote({
   confidence,
   className,

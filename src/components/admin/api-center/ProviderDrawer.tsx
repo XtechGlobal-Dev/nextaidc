@@ -38,14 +38,7 @@ import {
 import { useApiCenter } from "./ApiCenterContext";
 import type { ApiLogEntry, ProviderDetail } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  The provider deep-dive.
- *
- *  Opening a provider must answer, in this order: is it healthy, what broke,
- *  what is it costing, and how do I get to the vendor. A side panel rather than
- *  a route so the operator never loses the grid they were scanning — close it
- *  and they are exactly where they were.
- * ------------------------------------------------------------------ */
+// Provider deep-dive. A side panel rather than a route so closing it lands you back on the grid you were scanning.
 
 function StatRow({ label, value, tone }: { label: string; value: React.ReactNode; tone?: string }) {
   return (

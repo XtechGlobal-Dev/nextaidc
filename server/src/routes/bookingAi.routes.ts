@@ -13,18 +13,12 @@ import { formatLocal } from "../services/booking/hours.js";
 import { isTwilioConfigured } from "../services/sms.js";
 import { parseToolCalls, toolArgString as str } from "../lib/vapiToolCalls.js";
 
-/* ------------------------------------------------------------------ *
- *  Vapi booking tool dispatcher (PUBLIC — Vapi posts here mid-call, no auth).
- *  The owning business is resolved from `?uid=<userId>` stamped on the tool URL
- *  (web test calls run a transient assistant with no persisted id, so the id has
- *  to travel on the URL). Every tool responds with a short spoken string.
- * ------------------------------------------------------------------ */
+// Vapi booking tool dispatcher. PUBLIC, no auth — owner comes from `?uid=` on the tool URL
+// (web test calls use a transient assistant, so the id can't come from anywhere else).
 
 const router = express.Router();
 
-/** Spoken fallback when a booking tool fires but auto-booking isn't available
- *  (e.g. a stale assistant whose settings changed). Takes a message — there is
- *  no online-booking path any more. */
+/** Spoken fallback when a booking tool fires but auto-booking is off (e.g. stale assistant). No online-booking path any more. */
 function noAutoBookReply(what: string): string {
   return `I can't ${what}, but I can take your details and the team will get you booked in.`;
 }

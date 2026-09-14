@@ -2,18 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  Vapi call webhook must authenticate.
- *
- *  POST /api/calls/webhook/vapi is public and, on the end-of-call report,
- *  records billable minutes and can auto-charge. Without auth, anyone who
- *  knows a customer's assistantId could POST a fake "call ended" event and
- *  drain that customer's minutes (or trigger a renewal charge).
- *
- *  The fix: when a webhook secret is configured, Vapi echoes it in the
- *  `x-vapi-secret` header and we require a match. These tests assert a forged
- *  request is rejected BEFORE any usage is recorded.
- * ------------------------------------------------------------------ */
+// The public Vapi webhook records billable minutes, so anyone with an assistantId
+// could drain a customer's minutes. With a secret configured, `x-vapi-secret` must
+// match, and a forged request is rejected before any usage is recorded.
 
 const h = vi.hoisted(() => ({
   conversionFindFirst: vi.fn(),

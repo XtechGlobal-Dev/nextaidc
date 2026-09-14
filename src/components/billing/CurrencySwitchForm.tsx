@@ -7,19 +7,9 @@ import { stripePromise } from "@/lib/stripe";
 import { api, ApiError } from "@/lib/api";
 import { useUiStore } from "@/stores/useUiStore";
 
-/**
- * Card step for a cross-currency plan switch.
- *
- * Separate from {@link CardForm} because the intent type differs: that flow saves
- * a card for later (`confirmSetup` / SetupIntent), while this one pays the new
- * subscription's first invoice up front (`confirmPayment` / PaymentIntent). The
- * payment has to land before the server will cancel the customer's existing
- * subscription, so this is the step the whole safety ordering hangs on.
- *
- * A new card is unavoidable: Stripe locks a customer to one currency, so the
- * switch runs on a NEW customer, and payment methods cannot be moved between
- * customers.
- */
+// Cross-currency switch card step. Uses a PaymentIntent (pays the first invoice up front) unlike CardForm's
+// SetupIntent; the old subscription is only cancelled after payment lands. A new card is unavoidable:
+// Stripe locks a customer to one currency, so the switch runs on a new customer and cards can't move.
 function SwitchPaymentForm({
   onDone,
   onCancel,

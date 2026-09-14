@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Parking Stripe events no brand holds: what an event is about, which
- *  events are worth parking, and that a parked event is kept once
- *  however many times Stripe retries it.
- * ------------------------------------------------------------------ */
+// Parking Stripe events no brand holds; a retry must not duplicate a parked event.
 
 const h = vi.hoisted(() => ({ upsert: vi.fn(), findMany: vi.fn(), update: vi.fn(), count: vi.fn() }));
 

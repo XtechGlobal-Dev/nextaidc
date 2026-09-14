@@ -76,9 +76,8 @@ export const useTourStore = create<TourState>()(
     }),
     {
       name: "hello22_tour",
-      // Only remember whether the tour was finished — `active`/`currentStep` are
-      // session state and must not survive a reload (else it reopens on its own,
-      // even over the Quick Setup wizard).
+      // Only `completed` persists — a restored `active` reopened the tour on reload,
+      // even over the Quick Setup wizard.
       partialize: (s) => ({ completed: s.completed }),
     },
   ),

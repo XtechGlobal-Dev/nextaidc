@@ -58,11 +58,7 @@ import { toCsv, downloadCsv, datedCsvName, type CsvColumn } from "@/lib/csv";
 import { intervalLabel } from "@/lib/billingInterval";
 import { env } from "@/lib/env";
 
-/**
- * Column-level visibility for the Subscriptions table (allow-list). ADMINs pass
- * every check; STAFF see a column only when their role grants the matching
- * `subscriptions.field.*` permission. The Customer (identity) column always shows.
- */
+// Column allow-list: STAFF see a column only with the matching `subscriptions.field.*` grant; Customer always shows.
 function useSubscriptionColumns() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   return {
@@ -124,10 +120,7 @@ function relativeDay(iso: string): string {
   return days > 0 ? `in ${days} days` : `${-days} days ago`;
 }
 
-/* ------------------------------ Onboarding leads ------------------------------ *
- *  "Under onboarding" = registered but never subscribed. onboardingStep is the
- *  funnel step they'll resume at (0 = finished the funnel or direct signup),
- *  so it doubles as the drop-off point for the call list.                        */
+// "Under onboarding" = registered, never subscribed. onboardingStep is where they'll resume (0 = finished), so it doubles as the drop-off point.
 
 const ONBOARDING_STEP_LABELS: Record<number, string> = {
   5: "Services setup",
@@ -160,11 +153,7 @@ function statusBadge(status: string): { label: string; variant: BadgeVariant } {
   }
 }
 
-/** A "trialing" subscription whose minutes are used up or whose trial date has
- *  passed — the server reports this as expired_minutes/expired_date and pauses the
- *  customer's calls, but subscriptionStatus stays "trialing" until they renew (or
- *  it auto-converts). Mirrors evaluateTrialStatus() so the admin badge matches what
- *  the customer sees ("Trial Expired"). */
+// Trial with minutes or date used up. Status stays "trialing" server-side, so mirror evaluateTrialStatus() to match the customer's badge.
 function isTrialExpired(s: {
   status: string;
   minutesUsed: number;
@@ -177,11 +166,7 @@ function isTrialExpired(s: {
   return minutesUp || dateUp;
 }
 
-/** A live PAID plan whose minutes are used up with auto-renew off — the server
- *  reports this as expired_minutes and pauses the customer's calls (no early
- *  renewal to top the minutes back up), but subscriptionStatus stays "active"
- *  until the period ends. Mirrors the active-plan branch of the entitlement builder
- *  (exhausted && !autoRenew); unlimited plans (allocated 0) never count. */
+// Paid plan, minutes used up, auto-renew off: calls paused but status stays "active". Mirrors the entitlement builder; unlimited (0) never counts.
 function isPlanPaused(s: {
   status: string;
   autoRenew: boolean;
@@ -196,9 +181,7 @@ function isPlanPaused(s: {
   );
 }
 
-/** Row/drawer status badge — onboarding leads, used-up trials, and used-up paid
- *  plans (calls paused) get their own label so the admin isn't shown a bare
- *  "Trial"/"Active" for an exhausted, paused account. */
+// Status badge; exhausted/paused accounts get their own label instead of a bare "Trial"/"Active".
 function subscriptionBadge(s: {
   status: string;
   underOnboarding: boolean;
@@ -213,9 +196,7 @@ function subscriptionBadge(s: {
   return statusBadge(s.status);
 }
 
-/* ------------------------- At-risk + win-back contact ------------------------ *
- *  Single source of truth for both the table accent/quick-action and the
- *  drawer's "Needs attention" callout.                                          */
+// At-risk / win-back rules — shared by the table accent and the drawer callout.
 
 interface RiskSubject {
   fullName: string;
@@ -504,10 +485,7 @@ export default function AdminSubscriptionsPage() {
     }
   }, []);
 
-  // Initial load, then keep the table live off the global heartbeat: every tick
-  // (and on tab focus, which the driver also fires) silently refetch so status
-  // changes (onboarding → trial, etc.) show up without a manual reload. `silent`
-  // skips the skeleton, so the table quietly stays in sync.
+  // Initial load, then silent refetch on every heartbeat tick (and tab focus) so status changes show without a reload.
   const liveTick = useLiveTick();
   const didInit = useRef(false);
   useEffect(() => {
@@ -552,17 +530,8 @@ export default function AdminSubscriptionsPage() {
 
   const filtersActive = filter !== "all" || search.trim() !== "";
 
-  /**
-   * Download the subscriptions currently on screen as a spreadsheet.
-   *
-   * Exports the FILTERED set for the same reason the customers export does: the
-   * admin narrowed the list on purpose, so "export" means "give me these". The
-   * full list is one click away — clear the filters first.
-   *
-   * Columns follow the same role allow-list as the table (`cols`): a STAFF member
-   * who can't see prices on screen must not get them in a file either, or the
-   * export becomes a way around the permission.
-   */
+  // Exports the filtered set. Columns follow the same allow-list as the table (`cols`) —
+  // otherwise the export becomes a way around a field permission.
   function exportCsv() {
     if (!filtered.length) {
       toast.error("Nothing to export — no subscriptions match these filters.");
@@ -769,9 +738,7 @@ export default function AdminSubscriptionsPage() {
         {cols.price && (
           <PastelStat
             label="MRR"
-            // Currency comes from the response, not a default: plans are priced
-            // in more than one, and the server normalises the total to a single
-            // reporting currency before sending it.
+            // Currency from the response — plans span currencies and the server normalises to one.
             value={summary ? fmtMoney(summary.mrrCents, summary.mrrCurrency) : "—"}
             sub={`Across ${summary?.total ?? 0} customer${(summary?.total ?? 0) === 1 ? "" : "s"}${
               summary?.mrrCurrency ? ` · ${summary.mrrCurrency.toUpperCase()}` : ""

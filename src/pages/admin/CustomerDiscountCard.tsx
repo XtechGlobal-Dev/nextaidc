@@ -65,14 +65,7 @@ function Pill({
   );
 }
 
-/**
- * One selectable coupon in the grant picker.
- *
- * Ineligible coupons are shown rather than hidden — "why can't I give them
- * this?" is the question an admin actually has, and hiding the row leaves it
- * unanswered. They're visibly inert (dimmed, no hover, radio removed) with the
- * server's reason underneath, so there's no ambiguity about what's clickable.
- */
+// One coupon in the grant picker. Ineligible ones are shown inert with the server's reason, not hidden.
 function CouponOption({
   coupon,
   selected,
@@ -162,14 +155,7 @@ function Divider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Grant or remove a customer's coupon discount, from the admin customer page.
- *
- * Eligibility is resolved SERVER-side (`GET /customers/:id/coupon`) and merely
- * rendered here, so the option the admin sees and the rule the API enforces
- * can't drift apart. Every mutation re-checks on the server regardless — this
- * exists so the admin learns the answer before clicking, not after.
- */
+/** Grant/remove a customer's coupon. Eligibility is resolved server-side and only rendered here so UI and API rules can't drift. */
 export function CustomerDiscountCard({
   userId,
   customerName,
@@ -186,10 +172,7 @@ export function CustomerDiscountCard({
   const [grantOpen, setGrantOpen] = useState(false);
   const [removeOpen, setRemoveOpen] = useState(false);
   const [selected, setSelected] = useState<GrantableCoupon | null>(null);
-  /** Ticked to grant a coupon that breaks a rule normally enforced at checkout —
-   *  expired, not started yet, or restricted to other plans. Cleared whenever the
-   *  selection changes so consent can never carry over from a coupon the admin
-   *  looked at and moved on from. */
+  // Consent to grant past a checkout rule; cleared on every selection change so it can't carry over.
   const [override, setOverride] = useState(false);
   const [releaseSlot, setReleaseSlot] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -213,12 +196,7 @@ export function CustomerDiscountCard({
 
   const discount = state?.discount ?? null;
   const coupons = state?.coupons ?? [];
-  // Three groups, not two. A coupon the customer doesn't qualify for used to sit
-  // at the top of the list looking like a normal choice, which reads as "the
-  // system is offering me this" — the admin only found out it was wrong after
-  // selecting it. It stays in the dialog (an admin may deliberately comp it, and
-  // hiding it leaves "why isn't this listed?" unanswered) but below the ones
-  // that genuinely apply, under its own heading.
+  // Three groups: coupons needing an override stay listed (an admin may comp them) but below the ones that apply.
   const available = coupons.filter((c) => c.eligible && !c.requiresOverride);
   const needsOverride = coupons.filter((c) => c.eligible && c.requiresOverride);
   const blocked = coupons.filter((c) => !c.eligible);
@@ -368,9 +346,7 @@ export function CustomerDiscountCard({
               </p>
             </div>
           ) : grantableCount === 0 ? (
-            /* Nothing can be granted. Lead with WHY and what to do about it —
-               a bare "not available" divider with no section above it reads as
-               a rendering mistake, and repeating the message below it is noise. */
+            // Nothing grantable — lead with why, or a bare divider reads as a rendering mistake.
             <div className="space-y-3">
               <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning-tint px-4 py-3">
                 <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-warning text-white shadow-sm">

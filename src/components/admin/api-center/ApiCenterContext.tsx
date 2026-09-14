@@ -5,26 +5,12 @@ import { useLiveTick } from "@/hooks/useLiveData";
 import { deriveSeries, deriveTotals } from "./derive";
 import type { ApiCenterSnapshot, ApiCenterTotals, ProviderRow, RangeKey, SeriesPoint } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  One snapshot, twelve screens.
- *
- *  Every API Center section is a view of the same provider rows, so they share a
- *  single fetch held here rather than each pulling its own. That keeps the
- *  numbers consistent across a tab switch (all screens describe the same moment),
- *  makes navigation instant, and means the live tick refreshes one request
- *  instead of twelve.
- *
- *  Filters live here too, so a range or environment chosen on Overview is still
- *  applied when the operator lands on Errors.
- * ------------------------------------------------------------------ */
+// One shared snapshot fetch for every API Center section, so numbers agree across tabs and the
+// live tick refreshes one request. Filters live here too so they persist between sections.
 
 export type EnvFilter = "all" | "production" | "sandbox";
 export type HealthFilter = "all" | "attention" | "healthy" | "degraded" | "failed" | "disconnected";
-/**
- * Which slice of the registry to show.
- *  - `inUse`  — providers this deployment actually calls (the default)
- *  - `all`    — plus every vendor the platform *could* integrate with
- */
+/** Registry slice: `inUse` = providers this deployment calls (default); `all` adds every possible vendor. */
 export type ScopeFilter = "inUse" | "all";
 
 export interface ApiCenterFilters {
@@ -36,13 +22,7 @@ export interface ApiCenterFilters {
   scope: ScopeFilter;
 }
 
-/**
- * Totals and time series for whatever is currently *visible*.
- *
- * Every screen reads these instead of `snapshot.totals` / `snapshot.series`, so
- * narrowing to a category or searching for a provider changes the headline
- * numbers and the charts too — not just the list underneath them.
- */
+/** Totals/series for the visible providers. Screens read these, not `snapshot.totals`, so filters move the headline numbers too. */
 export interface ApiCenterView {
   totals: ApiCenterTotals;
   series: SeriesPoint[];
@@ -75,9 +55,7 @@ const DEFAULT_FILTERS: ApiCenterFilters = {
   category: "all",
   health: "all",
   search: "",
-  // Default to what this deployment actually calls. Listing every vendor the
-  // platform could ever integrate with buried the handful that matter under a
-  // dozen permanently-grey "Not connected" rows.
+  // Default to providers actually in use; listing every possible vendor buried the ones that matter.
   scope: "inUse",
 };
 
@@ -156,9 +134,7 @@ export function ApiCenterProvider({ children }: { children: React.ReactNode }) {
     });
   }, [snapshot, filters.scope, filters.category, filters.health, filters.search]);
 
-  // Derived from the outcome rather than from which controls are set: the
-  // default scope already hides unused providers, and a category filter that
-  // happens to match everything isn't really a narrowing.
+  // Judged by outcome, not by which controls are set: a filter that matches everything isn't a narrowing.
   const narrowed = !!snapshot && visibleProviders.length !== snapshot.providers.length;
 
   const view = React.useMemo<ApiCenterView | null>(() => {

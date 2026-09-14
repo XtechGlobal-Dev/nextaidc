@@ -1,19 +1,6 @@
 import "dotenv/config";
 
-/* ------------------------------------------------------------------ *
- *  One-time backfill: bring existing agents in line with the new
- *  capture-field defaults.
- *
- *  - cf_phone: the old "Confirm best contact number" wording becomes
- *    an instruction to NOT ask — the caller's own number is used
- *    unless they give a different one.
- *  - cf_date ("Preferred job date") and cf_suburb ("Suburb / location")
- *    are removed — they are no longer part of the product's defaults.
- *
- *  Only fields still carrying the exact old default label are
- *  rewritten/removed — anything the owner renamed is left alone.
- *  Idempotent — safe to run more than once.
- * ------------------------------------------------------------------ */
+// One-time: cf_phone reworded to "don't ask", cf_date/cf_suburb removed. Only exact old-default labels are touched; idempotent.
 // A brand's workspace lives in the brand's database (phase 6): BRAND=<slug> picks it.
 import { prisma } from "./_brandDb.js";
 

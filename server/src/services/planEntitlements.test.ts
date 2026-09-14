@@ -52,10 +52,8 @@ const row = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-/* Entitlements hinge on PAYMENT, not on finishing the number wizard. The old
- * rule unlocked everything until a receptionist number existed, so someone who
- * had paid for a cheap plan kept every premium add-on until they got around to
- * claiming a number. These pin the new boundary. */
+// Entitlements hinge on PAYMENT, not on claiming a number. The old rule left a
+// paid cheap plan with every premium add-on until a number existed.
 
 describe("getPlanFeatures", () => {
   beforeEach(() => findUnique.mockReset());
@@ -97,10 +95,8 @@ describe("getPlanFeatures", () => {
     });
   });
 
-  /* Counts are the exception to the wide-open trial. A boolean flips off at
-   * conversion and leaves nothing behind; a department the customer created
-   * would be orphaned — still configured, no longer used, and blocking their
-   * next plan change. These pin that the trial previews the real number. */
+  // Counts are the exception to the open trial: a boolean flips off cleanly at
+  // conversion, but an extra department would be orphaned and block the next plan change.
 
   it("caps trial departments at the plan's limit, not the ceiling", async () => {
     findUnique.mockResolvedValue(
@@ -130,12 +126,8 @@ describe("getPlanFeatures", () => {
     expect(f.smsToCaller).toBe(true);
   });
 
-  /* Feature restriction is a PLAN concern, not an access one: nothing is
-   * restricted until a plan activates, and then only to what that plan includes.
-   * The card wall is deliberately NOT enforced here — an account with no card is
-   * stopped by getEntitlement (and by the routes that spend money), not by
-   * quietly stripping its add-ons. These pin that separation so a future change
-   * doesn't smuggle access control back into this function. */
+  // Features are a PLAN concern, not access control. The card wall is deliberately
+  // NOT enforced here — getEntitlement and the money-spending routes do that.
   it("keeps every add-on open through a card-required trial", async () => {
     findUnique.mockResolvedValue(
       row({

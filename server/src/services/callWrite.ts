@@ -2,31 +2,15 @@ import type { Prisma as TenantPrisma } from "@prisma/tenant-client";
 import { prisma } from "../prisma.js";
 import { callDb } from "./tenantDb.js";
 
-/* ------------------------------------------------------------------ *
- *  Writing a call. A brand's calls live whole in the brand's own
- *  database (phase 2a of docs/tenant-db-expansion-plan.md), so every
- *  write goes there — never to the control plane, not even briefly. A
- *  residency promise kept a few milliseconds late is not kept: the write
- *  would already be in the wrong region's WAL, backups and replicas.
- *
- *  The one thing the control plane keeps is `call_shares`: which brand's
- *  database a public share slug points into, because the public page is
- *  served from the platform's host and cannot tell from the request.
- * ------------------------------------------------------------------ */
+// Calls are written only to the brand's database — never the control plane, not even briefly (residency:
+// it'd already be in the wrong region's WAL). The control plane keeps just call_shares, mapping a public slug to its brand.
 
 export interface CallKey {
   id: string;
   createdAt: Date;
 }
 
-/**
- * Record a call in the brand's database.
- *
- * Callers still build the payload with the control plane's types (which is
- * where the enums live for them); `brandId` is dropped, because the database
- * IS the brand. Throws if the brand's database is not ready — a customer
- * always has a brand, and a call has nowhere else to go.
- */
+/** Records a call in the brand's database. `brandId` is dropped (the database IS the brand); throws if the tenant DB isn't ready — a call has nowhere else to go. */
 export async function createCall(
   brandId: string | null | undefined,
   data: TenantPrisma.CallLogUncheckedCreateInput & { brandId?: string | null },

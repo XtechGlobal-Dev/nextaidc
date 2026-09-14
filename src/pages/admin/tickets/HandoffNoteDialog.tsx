@@ -10,17 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-/* ------------------------------------------------------------------ *
- *  The pause before a hand-over.
- *
- *  Reassigning a request or moving it to another department is a
- *  message to someone — "this is yours now" — and a bare change tells
- *  them nothing about why. So the change waits here for a note. It is
- *  optional, but asked for: it goes out with the email and the bell
- *  notification, and stays on the ticket as a line only handlers can
- *  see. The page decides the wording of the change; this only collects
- *  the note.
- * ------------------------------------------------------------------ */
+// Optional note before a reassign/department move. Goes out with the email + bell and stays on the ticket as a handler-only line.
 
 export function HandoffNoteDialog({
   open,

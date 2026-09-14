@@ -4,17 +4,8 @@ import { migrateTenant, markStaleTenants } from "../src/services/tenantProvision
 import { latestTenantMigration } from "../src/services/tenantMigrations.js";
 import { backfillStripeCustomerIndex } from "../src/services/stripeCustomers.js";
 
-/* ------------------------------------------------------------------ *
- *  Bring every brand's database up to the newest tenant migration.
- *
- *    npm run tenant:migrate
- *
- *  Runs in the deploy right after the control plane's own migration, and by
- *  hand after adding a file under prisma/tenant/migrations. Each tenant is
- *  independent: one that fails is left in `migrating` (its door shut, the
- *  error on its brand page) and the rest still get done. Exits non-zero if
- *  any failed, so a deploy that could not update a brand fails loudly.
- * ------------------------------------------------------------------ */
+// `npm run tenant:migrate` — bring every brand DB to the newest tenant migration. Tenants are independent:
+// a failure leaves that one in `migrating` (door shut) and the rest proceed; exits non-zero if any failed.
 
 const target = latestTenantMigration();
 console.log(`Tenant schema target: ${target || "(no migrations on disk)"}\n`);
@@ -22,9 +13,7 @@ console.log(`Tenant schema target: ${target || "(no migrations on disk)"}\n`);
 const stale = await markStaleTenants();
 if (stale.length) console.log(`${stale.length} tenant(s) were behind and have stopped routing.\n`);
 
-// Control-plane housekeeping that rides along with every deploy: the Stripe
-// customer index is how a payment finds its brand, so it is rebuilt from the
-// profiles here — a one-off after it was introduced, a repair every time after.
+// The Stripe customer index is how a payment finds its brand; rebuild it every deploy as a repair.
 const indexed = await backfillStripeCustomerIndex();
 if (indexed) console.log(`Stripe customer index: ${indexed} customer(s) indexed.\n`);
 

@@ -88,9 +88,7 @@ describe("resolveIntent", () => {
   });
 
   it("treats an unfinished booking that captured details as a LEAD", () => {
-    // The real regression: caller asked to book a table, no time was ever
-    // confirmed, but she gave her name and callback number. Nothing is in the
-    // diary — the owner has to ring her back. That is a lead.
+    // The real regression: asked to book, nothing confirmed, but left name + number → lead.
     expect(
       resolveIntent({
         bookingConfirmed: false,
@@ -202,10 +200,7 @@ describe("resolveIntent", () => {
   });
 });
 
-/* ------------------------------------------------------------------ *
- *  The agreed spec, one test per case. If this block passes, the five
- *  categories behave exactly as specified — no ambiguity between them.
- * ------------------------------------------------------------------ */
+// The agreed spec, one test per category.
 describe("the five categories, end to end", () => {
   const AGENT = "Agent: Thanks for calling. How can I help you today?";
 
@@ -253,10 +248,7 @@ describe("the five categories, end to end", () => {
   });
 
   it("LEAD — a web/test call, where there is no structuredData to read", () => {
-    // The real regression: the caller asked to book a room, the AI couldn't book
-    // so it took their name and confirmed the callback number, and the team was
-    // told to follow up. Web calls carry structuredData: null, so this can only
-    // work via the transcript read.
+    // Web calls carry structuredData: null, so this can only work via the transcript read.
     expect(
       resolveIntent({
         bookingConfirmed: false,

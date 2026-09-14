@@ -24,9 +24,8 @@ export function stripeWebhookSecret(): string {
 let client: Stripe | null = null;
 let clientKey = "";
 export function stripe(): Stripe {
-  // Trim defensively: a stray trailing newline/space in the env value (a common
-  // copy-paste artifact in hosting dashboards) corrupts the Authorization header
-  // and surfaces as a StripeConnectionError, not an obvious auth error.
+  // Trim: a stray newline in the env value corrupts the Authorization header and
+  // shows up as a StripeConnectionError, not an auth error.
   const key = env.STRIPE_SECRET_KEY.trim();
   if (!key) throw notImplemented("Stripe is not configured (set STRIPE_SECRET_KEY in the server environment)");
   // Rebuild the client if the key changed at runtime.
@@ -42,19 +41,7 @@ export function constructEvent(rawBody: Buffer, signature: string): Stripe.Event
   return stripe().webhooks.constructEvent(rawBody, signature, stripeWebhookSecret());
 }
 
-/**
- * Ensure a subscription can be charged OFF-SESSION by pointing it (and the
- * customer's invoice default) at the saved card when no default is set yet.
- *
- * A trial subscription is created via a SetupIntent and never takes a payment
- * while trialing, so Stripe often leaves `subscription.default_payment_method`
- * null throughout the trial. An immediate renewal / trial-end charge
- * (`renewSubscriptionNow`, `endTrialNow`) then has no card to bill and Stripe
- * fails the invoice as "incomplete" — surfacing as "we couldn't charge your
- * saved card" even though the card is perfectly valid. Setting the default here
- * makes the off-session charge succeed. Best-effort + idempotent: a no-op when a
- * default already exists or no card is on file (callers handle the empty case).
- */
+/** Points a subscription at the saved card when it has no default. Trial subs often have none (SetupIntent, no payment yet), so off-session charges failed as "incomplete" on a perfectly valid card. No-op if a default exists. */
 export async function ensureSubscriptionDefaultPaymentMethod(subscriptionId: string): Promise<void> {
   const s = stripe();
   const sub = await s.subscriptions.retrieve(subscriptionId);
@@ -71,15 +58,7 @@ export async function ensureSubscriptionDefaultPaymentMethod(subscriptionId: str
     .catch(() => {});
 }
 
-/**
- * Force a specific card to be the default for a subscription (and the customer's
- * invoices), so the next charge bills THAT card.
- *
- * Distinct from `ensureSubscriptionDefaultPaymentMethod`, which deliberately
- * leaves an existing default alone. That is wrong for a retry: after a decline
- * the existing default IS the refused card, so charging again just fails the same
- * way and the customer can never recover by adding a working one.
- */
+/** Forces THIS card as the subscription + invoice default. Unlike `ensure...`, overwrites an existing default — after a decline the existing default IS the refused card. */
 export async function setSubscriptionDefaultPaymentMethod(
   subscriptionId: string,
   paymentMethodId: string,
@@ -95,16 +74,7 @@ export async function setSubscriptionDefaultPaymentMethod(
     .catch(() => {});
 }
 
-/**
- * End a subscription's trial immediately — charges the saved card and moves it to
- * active.
- *
- * With `errorIfIncomplete`, the update is ATOMIC: if the card is declined or needs
- * authentication (3DS off-session), Stripe throws AND leaves the subscription
- * trialing (rolled back) rather than ending the trial and dropping it to past_due.
- * The default (no flag) keeps the legacy fire-and-settle behaviour for the reconcile
- * / renew paths, where the trial is already over so there's nothing to preserve.
- */
+/** Ends the trial now and charges the card. With `errorIfIncomplete` a decline throws and leaves the sub trialing (rolled back) instead of dropping it to past_due. */
 export async function endTrialNow(
   subscriptionId: string,
   opts: { errorIfIncomplete?: boolean } = {},
@@ -141,12 +111,7 @@ export async function getSubscription(subscriptionId: string): Promise<{
   };
 }
 
-/**
- * Switch a subscription to a new price IMMEDIATELY with no Stripe proration — we
- * compute our own minutes-based credit and charge the delta separately. Used for
- * upgrades (and trial users changing their post-trial plan). Returns the new
- * current_period_end.
- */
+/** Swaps the price now with no Stripe proration — we compute our own minutes-based credit and charge the delta separately. */
 export async function swapSubscriptionPriceNow(
   subscriptionId: string,
   newPriceId: string,
@@ -161,17 +126,7 @@ export async function swapSubscriptionPriceNow(
   return { currentPeriodEnd: updated.current_period_end ?? null };
 }
 
-/**
- * Switch an IN-TRIAL subscription to a different plan price WITHOUT opening a
- * second subscription. Used by /subscribe when the user re-picks a plan during
- * signup (before saving a card): creating a fresh subscription each time would
- * orphan the previous one in Stripe and log a duplicate "trial started".
- *
- * No charge — the swap only decides which plan activates at trial end. Returns a
- * SetupIntent client secret so the signup card step still works: it reuses the
- * subscription's pending SetupIntent when the card isn't on file yet, otherwise
- * mints a standalone one.
- */
+/** Re-picks the plan on an in-trial sub without opening a second one (which would orphan the first and log a duplicate "trial started"). No charge; returns a SetupIntent secret so the card step still works. */
 export async function switchTrialSubscriptionPlan(
   subscriptionId: string,
   newPriceId: string,
@@ -207,12 +162,7 @@ export async function switchTrialSubscriptionPlan(
   return { subscriptionId: sub.id, clientSecret, trialEnd: sub.trial_end ?? null };
 }
 
-/**
- * Create a fresh subscription that charges the customer's saved card RIGHT NOW
- * (no trial) — used to renew a plan whose previous subscription has ended/canceled.
- * Picks the customer's first saved card as the subscription default so the initial
- * invoice is paid immediately. `error_if_incomplete` throws on a declined card.
- */
+/** New subscription charged right now (no trial), for renewing after a canceled one. Throws on a declined card. */
 export async function createImmediateSubscription(
   customerId: string,
   priceId: string,
@@ -235,20 +185,7 @@ export async function createImmediateSubscription(
   };
 }
 
-/**
- * Open a paid subscription for a CURRENCY SWITCH, on a brand-new customer.
- *
- * A Stripe customer is permanently locked to the currency of its first invoice,
- * so an AUD customer can never hold a USD subscription — `subscriptions.create`
- * fails with "cannot combine currencies". The only route is a fresh customer,
- * which also means a fresh card: payment methods cannot be moved between
- * customers, so the caller must collect one.
- *
- * Returns `default_incomplete`, so nothing is charged until the client confirms
- * the returned PaymentIntent. That is what lets the caller keep the customer's
- * EXISTING subscription running until this one is genuinely paid — the whole
- * point, since cancel-then-create would strand them on a declined card.
- */
+/** Currency switch on a brand-new customer — a Stripe customer is locked to its first invoice's currency, and cards can't move between customers so a new one must be collected. `default_incomplete` so the old sub keeps running until this one is actually paid. */
 export async function createCurrencySwitchSubscription(opts: {
   email: string;
   name?: string;
@@ -285,45 +222,25 @@ export async function createCurrencySwitchSubscription(opts: {
   };
 }
 
-/**
- * Renew a subscription IMMEDIATELY by resetting its billing cycle anchor to now.
- * Used when a user burns through their included minutes before the period date:
- * Stripe invoices a fresh full period right away (no proration credit for the
- * unused old period), charges the saved card, and restarts the 30-day clock so
- * the next renewal is a full interval out. `error_if_incomplete` makes a declined
- * card throw so the caller can flip the user to past_due. Returns the new
- * current_period_end and whether the subscription is active after the charge.
- */
+/** Renews now by re-anchoring the billing cycle (minutes ran out early). Full period billed, no proration credit; a declined card throws so the caller can flip to past_due. */
 export async function renewSubscriptionNow(
   subscriptionId: string,
   opts: {
-    /** Collapse concurrent AUTOMATIC renewals of the same cycle into one charge.
-     *  Deliberately OFF for user-initiated retries: Stripe caches failed responses
-     *  under the key too, so a customer who fixes their card and retries within
-     *  24h would otherwise get the cached decline back instead of a real attempt. */
+    /** Idempotency for concurrent AUTOMATIC renewals. Off for user retries — Stripe caches the decline under the key too, so a fixed card would get the old decline back. */
     dedupeConcurrent?: boolean;
   } = {},
 ): Promise<{ currentPeriodEnd: number | null; active: boolean; releasedScheduleId: string | null }> {
-  // Point the subscription at the saved card first — a sub created from a trial
-  // may have no default_payment_method, which makes the off-session renewal
-  // charge fail with "incomplete" even on a valid card.
+  // A trial-born sub may have no default card, which fails the off-session charge.
   await ensureSubscriptionDefaultPaymentMethod(subscriptionId);
 
-  // Same restriction as `setSubscriptionAutoRenew`: a schedule-managed
-  // subscription (pending downgrade) rejects a `billing_cycle_anchor` write, so
-  // an early renewal would throw and drop the user to past_due — line frozen —
-  // purely because they had a downgrade queued. Release the schedule first: the
-  // user renews on their CURRENT plan and the queued change is dropped, since
-  // the cycle boundary it was pinned to is the one being consumed right now.
+  // A schedule-managed sub (pending downgrade) rejects billing_cycle_anchor writes and would
+  // drop the user to past_due. Release it first — its cycle boundary is being consumed now anyway.
   const sub = await stripe().subscriptions.retrieve(subscriptionId);
   const scheduleId = typeof sub.schedule === "string" ? sub.schedule : sub.schedule?.id ?? null;
   if (scheduleId) await releaseSchedule(scheduleId);
 
-  // Idempotency key derived from the cycle being replaced, as a second line of
-  // defence behind the caller's DB claim: if two requests still race here they
-  // both read the SAME current_period_end, so Stripe collapses them into one
-  // charge instead of billing the customer twice. A genuine later renewal has a
-  // different period end → a different key → it charges normally.
+  // Key derived from the cycle being replaced: racing requests read the same period end
+  // and collapse into one charge; a genuine later renewal gets a new key.
   const updated = await stripe().subscriptions.update(
     subscriptionId,
     {
@@ -342,12 +259,7 @@ export async function renewSubscriptionNow(
   };
 }
 
-/**
- * Schedule a price change for the NEXT renewal (downgrade). The current price
- * stays active and billed until period end; the new price takes over after.
- * Returns the schedule id + when it takes effect. Implemented via Stripe
- * subscription schedules so billing flips atomically at the cycle boundary.
- */
+/** Queues a downgrade for the next renewal via a subscription schedule, so billing flips atomically at the cycle boundary. */
 export async function scheduleDowngrade(
   subscriptionId: string,
   newPriceId: string,
@@ -356,12 +268,8 @@ export async function scheduleDowngrade(
   const item = sub.items.data[0];
   const currentPriceId = typeof item.price === "string" ? item.price : item.price.id;
 
-  // A live coupon MUST be restated on every phase we write. Stripe's rule for a
-  // phase is "if `discounts` is not specified, inherit from the subscription's
-  // CUSTOMER" — and our coupons sit on the subscription, not the customer. So
-  // writing phases without it silently strips the discount the moment the
-  // schedule takes over, and a customer with cycles left on their coupon quietly
-  // starts paying full price. Nothing errors; the money just changes.
+  // A live coupon MUST be restated on every phase: an unspecified `discounts` inherits
+  // from the CUSTOMER, and ours sit on the subscription — so it'd be silently stripped.
   const coupons: string[] = [];
   for (const d of sub.discounts ?? []) {
     if (typeof d === "string") continue; // unexpanded id — nothing to read
@@ -382,9 +290,7 @@ export async function scheduleDowngrade(
         ...(discounts.length > 0 ? { discounts } : {}),
       },
       {
-        // The downgraded phase carries it too: a coupon is a number of BILLING
-        // CYCLES, not a plan, so cycles bought before the downgrade are still
-        // owed on the cheaper plan. Our own counter retires it on schedule.
+        // The cheaper phase carries it too — a coupon is billing CYCLES, not a plan.
         items: [{ price: newPriceId, quantity: 1 }],
         ...(discounts.length > 0 ? { discounts } : {}),
       },
@@ -393,22 +299,7 @@ export async function scheduleDowngrade(
   return { scheduleId: schedule.id, effectiveAt: sub.current_period_end ?? null };
 }
 
-/**
- * Rewrite the discount on a pending schedule's remaining phases.
- *
- * `scheduleDowngrade` bakes the coupon that was attached AT THE MOMENT it ran
- * into every phase, and nothing refreshes it afterwards. If the account's
- * discount changes in the meantime — replaced by an admin grant, or retired when
- * its cycles ran out — the schedule still re-applies the OLD coupon when it takes
- * over at the period boundary. The customer is then billed under a coupon our
- * records no longer consider live, while cycles are counted against a different
- * one: two coupons on one account, and a `forever` Stripe coupon never expires by
- * itself.
- *
- * `couponId` null clears the discount from the remaining phases.
- * Best-effort: a schedule that has already been released or completed is not an
- * error, it just means there is nothing left to correct.
- */
+/** Rewrites the discount on a pending schedule's future phases. `scheduleDowngrade` bakes in the coupon of the moment, so a later change (admin grant, cycles spent) would otherwise re-apply the OLD coupon at the boundary. Null clears; released/completed schedules are a no-op. */
 export async function setSchedulePhaseDiscounts(
   scheduleId: string,
   couponId: string | null,
@@ -428,10 +319,8 @@ export async function setSchedulePhaseDiscounts(
     })),
     start_date: p.start_date,
     ...(p.end_date ? { end_date: p.end_date } : {}),
-    // "" to clear, never [] — an empty array is dropped entirely by the
-    // form encoder (see detachSubscriptionDiscount), which here would write a
-    // phase with no `discounts` key and leave Stripe to fall back to its
-    // "inherit from the customer" rule rather than stating the clear.
+    // "" to clear, never [] — the form encoder drops an empty array entirely
+    // (see detachSubscriptionDiscount), leaving Stripe to inherit from the customer.
     discounts: couponId ? [{ coupon: couponId }] : "",
   }));
   await stripe().subscriptionSchedules.update(scheduleId, { phases });
@@ -446,16 +335,8 @@ export async function releaseSchedule(scheduleId: string): Promise<void> {
   }
 }
 
-/**
- * Charge the customer's saved default card a ONE-TIME amount via a standalone
- * invoice (used for the upgrade delta and add-on purchases). Returns the invoice
- * id. Throws if the charge can't be collected so callers can surface the error.
- */
-/**
- * The card a standalone invoice should charge: the customer's own invoice default
- * when set, otherwise their most recent saved card. Returns null when there is no
- * card at all, so the caller can let Stripe surface the real "no card" error.
- */
+// Card for a standalone invoice: the customer's invoice default, else the latest saved
+// card. Null when there's none so Stripe surfaces the real "no card" error.
 async function defaultCardFor(customerId: string): Promise<string | null> {
   const s = stripe();
   try {
@@ -472,6 +353,7 @@ async function defaultCardFor(customerId: string): Promise<string | null> {
   return pms.data[0]?.id ?? null;
 }
 
+/** One-time charge via a standalone invoice (upgrade delta, add-ons). Returns paid:false rather than throwing when collection fails. */
 export async function chargeOneTime(
   customerId: string,
   amountCents: number,
@@ -481,18 +363,8 @@ export async function chargeOneTime(
   if (amountCents <= 0) return { invoiceId: "", paid: true };
   const s = stripe();
 
-  // Create the DRAFT invoice first, then attach the line item to it by id. A
-  // customer-level invoice item (no `invoice`) is merely *pending*: if this
-  // invoice never collects it, Stripe silently sweeps it onto the customer's
-  // NEXT subscription invoice. That is how a $6 upgrade delta resurfaced a month
-  // later as part of a bigger renewal bill the customer never agreed to.
-  // Resolve the card to charge and pin it ON the invoice. A standalone invoice
-  // bills the CUSTOMER's `invoice_settings.default_payment_method` — NOT the
-  // subscription's. Those are different fields, and
-  // `ensureSubscriptionDefaultPaymentMethod` returns early when the subscription
-  // already has a card, so the customer-level default is often never set. Without
-  // this the invoice has no card to charge and `pay` fails with "no attached
-  // payment method" even though the customer plainly has a working card on file.
+  // Draft first, line item attached BY ID (a pending customer-level item gets swept onto the NEXT
+  // subscription invoice). Card pinned ON the invoice: standalone invoices bill the customer default, not the sub's.
   const paymentMethodId = await defaultCardFor(customerId);
 
   const draft = await s.invoices.create({
@@ -512,17 +384,13 @@ export async function chargeOneTime(
 
   try {
     const finalized = await s.invoices.finalizeInvoice(draft.id);
-    // `finalizeInvoice` does NOT take the money — with auto_advance it is collected
-    // asynchronously, so reading `status` here returned "open" and made every
-    // upgrade look like a failed charge. `pay` actually charges the saved card and
-    // resolves with the settled invoice.
+    // finalizeInvoice doesn't take the money — `pay` does. Reading status after
+    // finalize returned "open" and made every upgrade look like a failed charge.
     const paidInvoice =
       finalized.status === "paid" ? finalized : await s.invoices.pay(draft.id);
     return { invoiceId: paidInvoice.id, paid: paidInvoice.status === "paid" };
   } catch (e) {
-    // Collection failed (declined card, no card on file…). VOID the invoice so the
-    // amount cannot be picked up by a later invoice — an uncollected charge must
-    // disappear, never reappear unannounced on the next renewal.
+    // VOID the invoice so an uncollected charge never resurfaces on the next renewal.
     await s.invoices.voidInvoice(draft.id).catch(async () => {
       await s.invoices.del(draft.id).catch(() => {}); // still a draft → delete instead
     });
@@ -534,9 +402,7 @@ export async function chargeOneTime(
   }
 }
 
-/** Read a payment method's card fingerprint (stable per physical card across
- *  customers) and its owning customer id. Used to stop the same card opening a
- *  second trial account. Fingerprint is null for non-card methods. */
+/** Card fingerprint (stable per physical card) + owning customer — stops one card opening a second trial. Null for non-card methods. */
 export async function getCardFingerprint(paymentMethodId: string): Promise<{
   fingerprint: string | null;
   customerId: string | null;
@@ -550,10 +416,7 @@ export async function getCardFingerprint(paymentMethodId: string): Promise<{
   return { fingerprint, customerId };
 }
 
-/** Attach a payment method to a customer. Normally the SetupIntent does this on
- *  success, so this is the repair path for a method that reached us unattached —
- *  see /confirm-card, where "a card is on file" is a security decision, not a
- *  formality. Throws if Stripe refuses (unusable or already someone else's). */
+/** Repair path for a card that reached us unattached (the SetupIntent normally does this). Throws if Stripe refuses. */
 export async function attachPaymentMethod(
   paymentMethodId: string,
   customerId: string,
@@ -561,11 +424,7 @@ export async function attachPaymentMethod(
   await stripe().paymentMethods.attach(paymentMethodId, { customer: customerId });
 }
 
-/** Latest PAID invoice for a subscription (id + amount + customer + when), or
- *  null. Used to accrue reseller commission in dev where the invoice webhook
- *  doesn't reach us, and to establish what a customer actually paid for the
- *  cycle a plan change is replacing — `amount_paid` is after any discount,
- *  which is exactly what proration credit must be a share of. */
+/** Latest PAID invoice for a subscription. `amount_paid` is post-discount — exactly what proration credit must be a share of. */
 export async function getLatestPaidInvoice(subscriptionId: string): Promise<{
   id: string;
   amountPaidCents: number;
@@ -607,21 +466,7 @@ export async function detachPaymentMethod(paymentMethodId: string): Promise<void
   }
 }
 
-/**
- * Toggle auto-renew on a subscription. `enabled=false` sets
- * `cancel_at_period_end` so the plan (or trial) ends at the current period with
- * no further charge; `true` clears it so it renews + charges as normal.
- *
- * A subscription attached to a subscription schedule (i.e. a pending downgrade)
- * rejects any direct cancelation-behaviour update — Stripe answers "The
- * subscription is managed by the subscription schedule `sub_sched_…`, and
- * updating any cancelation behavior directly is not allowed." So we release the
- * schedule first. Releasing detaches it and leaves the subscription exactly as
- * it is (same price, same period), so the *current* plan is untouched; only the
- * queued next-cycle price change goes away — which is moot anyway once there is
- * no next cycle. Returns the released schedule id so the caller can clear the
- * pending-downgrade bookkeeping it mirrors in our own DB.
- */
+/** Toggles cancel_at_period_end. A schedule-managed sub (pending downgrade) rejects cancelation writes, so the schedule is released first — current plan untouched, only the queued change goes. Returns the released id so the caller can clear its bookkeeping. */
 export async function setSubscriptionAutoRenew(
   subscriptionId: string,
   enabled: boolean,
@@ -638,12 +483,7 @@ export async function setSubscriptionAutoRenew(
   return { releasedScheduleId: scheduleId };
 }
 
-/**
- * Read the live auto-renew state of a subscription from Stripe. Returns `false`
- * when the subscription is set to cancel at period end (or is gone/canceled).
- * Used as a safety net before an early minutes-exhausted renewal so a cancel
- * done in the hosted portal is honoured even if its webhook hasn't landed yet.
- */
+/** Live auto-renew state from Stripe — a safety net so a portal cancel is honoured before an early renewal even if its webhook hasn't landed. */
 export async function getSubscriptionAutoRenew(subscriptionId: string): Promise<boolean> {
   const sub = await stripe().subscriptions.retrieve(subscriptionId);
   const alive = sub.status === "active" || sub.status === "trialing";
@@ -659,11 +499,7 @@ export async function cancelSubscription(subscriptionId: string): Promise<void> 
   }
 }
 
-/* ------------------------------------------------------------------ *
- *  Product / price sync for admin-created plans & add-ons.
- *  Stripe prices are immutable, so a price change = a new price + the
- *  old one archived. Products are archived (not deleted) on removal.
- * ------------------------------------------------------------------ */
+// Product/price sync for admin plans. Stripe prices are immutable: a change = new price + old archived.
 export type StripeInterval = "week" | "month" | "year";
 
 /** True when a Stripe secret key is configured in the environment. */
@@ -747,25 +583,8 @@ export async function archiveStripeProduct(productId: string): Promise<void> {
   await stripe().products.update(productId, { active: false });
 }
 
-/* ------------------------------------------------------------------ *
- *  Coupons.
- *
- *  Our `Coupon` rows are mirrored to Stripe coupon objects, which do the
- *  arithmetic on subscription invoices (so hosted invoices, the customer
- *  portal and Stripe reporting all show the discount without us
- *  reimplementing it) — the same mirror pattern as plans → products/prices.
- *
- *  Duration deliberately only ever uses "once" or "forever", never Stripe's
- *  `duration_in_months`:
- *    • once    — a single-cycle coupon. Stripe drops it after the first
- *                invoice itself, so there is nothing for us to leak.
- *    • forever — a multi-cycle coupon. WE count billing cycles and detach it
- *                when the budget is spent, because Stripe's month-based
- *                duration is wrong here: `renewActivePlanIfExhausted` renews
- *                early whenever a user burns their minutes, so a heavy user
- *                can consume several cycles inside one calendar month and
- *                Stripe would discount every one of them.
- * ------------------------------------------------------------------ */
+// Coupons mirror to Stripe. Duration is only "once" or "forever", never duration_in_months —
+// early renewals fit several cycles in one month, so WE count cycles and detach when spent.
 export type StripeCouponDuration = "once" | "forever";
 
 /** Create a percentage-off Stripe coupon. Returns the new coupon id. */
@@ -792,14 +611,7 @@ export async function deleteStripeCoupon(couponId: string): Promise<void> {
   }
 }
 
-/**
- * Apply a coupon to a subscription as its discount.
- *
- * Uses the modern `discounts` array rather than the deprecated top-level
- * `coupon` field. Passing a single-element array also means attaching replaces
- * whatever discount was there — we only ever allow one live discount per
- * account, so that is exactly the semantics we want.
- */
+/** Sets the subscription's discount, replacing whatever was there (one live discount per account). */
 export async function attachSubscriptionDiscount(
   subscriptionId: string,
   couponId: string,
@@ -809,39 +621,12 @@ export async function attachSubscriptionDiscount(
   });
 }
 
-/**
- * Remove whatever discount a subscription currently carries.
- *
- * The clear MUST be the empty STRING, not an empty array. Stripe's API is
- * form-encoded, and stripe-node runs the params through `qs.stringify` — which
- * emits nothing at all for an empty array:
- *
- *   qs.stringify({ discounts: [] })  →  ""            (no parameter is sent)
- *   qs.stringify({ discounts: "" })  →  "discounts="  (Stripe clears it)
- *
- * So `discounts: []` posted an EMPTY body: a successful, silent no-op update
- * that left the coupon exactly where it was. That is how a 2-cycle coupon went
- * on discounting every invoice forever — our own bookkeeping retired the
- * redemption on time (`cyclesUsed` hit the budget, status `exhausted`), this
- * call reported success, and Stripe never heard about it. Nothing threw, so
- * neither the caller's catch nor `healDiscountDrift` — which clears through
- * this same function — could tell anything had gone wrong.
- *
- * Stripe's own typing says as much: the param is `Emptyable<Array<Discount>>`,
- * i.e. `"" | Discount[]`, and "" is the documented way to remove.
- */
+/** Clears the discount. MUST be "" not [] — stripe-node's form encoder emits nothing for an empty array, so `[]` was a silent no-op that left a 2-cycle coupon discounting forever. */
 export async function detachSubscriptionDiscount(subscriptionId: string): Promise<void> {
   await stripe().subscriptions.update(subscriptionId, { discounts: "" });
 }
 
-/**
- * The coupon id currently discounting a subscription, or null. Used by the
- * reconcile safety net to spot a discount that outlived its cycle budget (e.g.
- * a missed webhook meant we never detached it) and heal it.
- *
- * Returns null rather than throwing when the subscription is gone, so a caller
- * that is merely checking for drift is never broken by a deleted subscription.
- */
+/** Coupon currently on a subscription, or null (also null for a gone subscription — drift checks must not break). */
 export async function getSubscriptionDiscountCouponId(
   subscriptionId: string,
 ): Promise<string | null> {
@@ -878,10 +663,7 @@ export async function getCustomerInvoices(
 }>> {
   const s = stripe();
   const list = await s.invoices.list({ customer: customerId, limit });
-  // Stripe auto-creates $0 invoices for trial starts (`subscription_create`) and
-  // zero-net plan swaps (`subscription_update`). They're bookkeeping noise — showing
-  // them makes a paid plan look like a wall of "$0 Paid" rows — so only surface
-  // invoices where money actually moved (or is genuinely owed on an open invoice).
+  // Hide Stripe's auto $0 invoices (trial start, zero-net swaps) — a wall of "$0 Paid" rows is noise.
   return list.data
     .filter((inv) => inv.total !== 0 || inv.amount_paid !== 0 || inv.amount_due !== 0)
     .map((inv) => ({
@@ -897,13 +679,7 @@ export async function getCustomerInvoices(
   }));
 }
 
-/**
- * Pick the Stripe customer to attach a new subscription to, respecting Stripe's
- * per-customer currency lock. Returns the existing customer when it's safe to
- * reuse, otherwise a freshly-created one. A customer's `currency` is set by
- * Stripe on its first subscription/invoice and can never change; once locked,
- * a subscription in any other currency is rejected.
- */
+// Reuse the existing customer unless it's locked to a different currency (set on first invoice, never changes).
 async function resolveSubscriptionCustomer(
   s: Stripe,
   existingCustomerId: string | null,
@@ -927,13 +703,7 @@ async function resolveSubscriptionCustomer(
   }
 }
 
-/* ------------------------------------------------------------------ *
- *  Trial subscription (card required, in-app via Elements).
- *  Creates a customer + a subscription with a trial. Because a trial
- *  has no immediate charge, Stripe returns a pending SetupIntent whose
- *  client_secret the frontend uses (Stripe Elements) to save the card.
- *  When the trial ends Stripe auto-charges the saved card.
- * ------------------------------------------------------------------ */
+/** Trial subscription (card via Elements). No immediate charge, so Stripe returns a pending SetupIntent whose client_secret saves the card; the trial end auto-charges it. */
 export async function createTrialSubscription(opts: {
   email: string;
   name?: string;
@@ -942,14 +712,9 @@ export async function createTrialSubscription(opts: {
   existingCustomerId?: string | null;
   /** Plan currency (e.g. "usd"/"aud"). Used to detect a currency-locked customer. */
   currency?: string;
-  /** Stripe coupon to discount this subscription from its very first invoice.
-   *  Applied at creation rather than in a follow-up update because the checkout
-   *  charge (`endTrialNow` from /confirm-card) bills that first invoice — a
-   *  discount attached afterwards would arrive too late to reduce it. */
+  /** Coupon applied at creation — /confirm-card bills the first invoice right away, so a follow-up attach would be too late. */
   couponId?: string | null;
-  /** Whose customer this is — stamped on a newly created Stripe customer so a
-   *  payment can always be placed in the right brand, even if our own index
-   *  is lost. */
+  /** Stamped on a new Stripe customer so a payment finds its brand even if our index is lost. */
   owner?: StripeCustomerOwner | null;
 }): Promise<{
   customerId: string;
@@ -964,11 +729,7 @@ export async function createTrialSubscription(opts: {
       .create({ email: opts.email, name: opts.name?.trim() || undefined, metadata: ownerMetadata(opts.owner) })
       .then((c) => c.id);
 
-  // A Stripe customer is permanently locked to the currency of its first
-  // subscription/invoice. If we switched the plan currency (e.g. USD → AUD),
-  // reusing the old customer makes subscriptions.create fail with "You cannot
-  // combine currencies on a single customer". Detect the mismatch and mint a
-  // fresh customer so the new-currency subscription can be created.
+  // A currency-locked customer can't take a subscription in another currency — mint a fresh one.
   const customerId = await resolveSubscriptionCustomer(
     s,
     opts.existingCustomerId ?? null,
@@ -982,9 +743,7 @@ export async function createTrialSubscription(opts: {
     ...(opts.couponId ? { discounts: [{ coupon: opts.couponId }] } : {}),
     trial_period_days: opts.trialDays,
     payment_behavior: "default_incomplete",
-    // Card only — don't surface Klarna/pay-later etc. from the Stripe dashboard's
-    // automatic payment methods. Forces the auto-generated SetupIntent to card,
-    // which flows through to the frontend Payment Element.
+    // Card only — keeps Klarna/pay-later out of the SetupIntent and the Payment Element.
     payment_settings: {
       save_default_payment_method: "on_subscription",
       payment_method_types: ["card"],

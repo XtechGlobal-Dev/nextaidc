@@ -2,17 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  Public conversation page (/c/:publicId) — HTTP-level coverage.
- *  Boots the real router against a stubbed Prisma so we observe the
- *  actual rendered HTML, status codes and expiry handling end-to-end.
- * ------------------------------------------------------------------ */
+// HTTP-level coverage of /c/:publicId: real router, stubbed Prisma, real rendered HTML.
 
 const h = vi.hoisted(() => ({ findFirst: vi.fn(), shareFind: vi.fn(), update: vi.fn() }));
 
-// Mocking a module replaces ALL of its exports, so every export something in
-// this route's import graph reads has to be present — a partial mock made the
-// whole suite fail to load (and silently run zero tests).
+// A mock replaces ALL exports; a partial env mock made the suite fail to load and
+// silently run zero tests.
 vi.mock("../env.js", () => ({
   // Brand hosts resolve against these; the real module exports them, so a
   // mock that omits them fails to link for anything importing brandUrls.
@@ -34,9 +29,7 @@ vi.mock("../env.js", () => ({
     CORS_ORIGIN: "https://app.test",
   },
 }));
-// The share route resolves the slug through the control plane's share index
-// (which brand, which call), then reads the call from that brand's own
-// database — stood in for here — with `findFirst` on its partitioned key.
+// Slug → Main share index (brand + call) → that brand's DB via findFirst on the partitioned key.
 vi.mock("../prisma.js", () => ({
   prisma: {
     callShare: { findUnique: h.shareFind },
@@ -46,9 +39,8 @@ vi.mock("../prisma.js", () => ({
 vi.mock("../services/tenantDb.js", async () =>
   (await import("../test/tenantDbFake.js")).tenantDbFake({ callLog: { findFirst: h.findFirst, update: h.update } }),
 );
-// Answers with the AMBIENT brand's name, the way the real emailGlobals() does —
-// so the page can be checked for painting the call owner's brand rather than
-// the platform's, even though it is served from the platform's API host.
+// Answers with the ambient brand's name like the real emailGlobals(), so we can check
+// the page paints the call owner's brand, not the platform's.
 vi.mock("../services/emailTemplates.js", async () => {
   const { currentBrandId } = await import("../lib/brandContext.js");
   return {
@@ -101,11 +93,8 @@ const sampleCall = {
     { role: "user", text: "I'd like to book a haircut." },
   ],
   createdAt: new Date("2026-07-14T09:00:00Z"),
-  // Relative, NOT a hardcoded date. This was "2026-08-14", which was safely in
-  // the future when it was written and quietly became the past — from then on
-  // the route correctly returned 410 and both render tests failed for a reason
-  // that had nothing to do with the code. A share link that is always ~30 days
-  // from now can't rot the same way.
+  // Relative, not hardcoded: a fixed future date quietly became the past and both
+  // render tests started failing with 410.
   shareExpiresAt: new Date(Date.now() + 30 * 86_400_000),
 };
 

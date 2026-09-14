@@ -65,18 +65,14 @@ const HEADLINE_WORDS: ReadonlyArray<{ text: string; delay: number }> = [
   { text: "into", delay: 300 },
 ];
 
-/** Phrases the gradient tail of the headline cycles through. Keep the first
- *  entry as the canonical copy — it's what screen readers announce and what
- *  prefers-reduced-motion users see. */
+// Headline cycle phrases. The first entry is canonical — screen readers and reduced-motion users get only that one.
 const HERO_PHRASES = [
   "instant revenue.",
   "captured leads.",
   "happy customers.",
 ];
 
-/** Cycles `index` through [0, count) every `holdMs`, exposing the previous
- *  index so the outgoing phrase can animate away. Never starts under
- *  prefers-reduced-motion and pauses while the tab is hidden. */
+// Cycles `index` every `holdMs`, exposing `prev` so the outgoing phrase can animate away. Off under reduced-motion; paused when hidden.
 function useWordCycle(count: number, holdMs = 3400) {
   const [cycle, setCycle] = useState({ index: 0, prev: -1 });
   useEffect(() => {
@@ -109,10 +105,7 @@ export default function LandingPage() {
   const spotRef = useRef<HTMLDivElement>(null);
   const { index: wordIndex, prev: wordPrev } = useWordCycle(HERO_PHRASES.length);
 
-  // Cursor spotlight: a soft pool of light trails the pointer across the
-  // canvas. Desktop pointers only — on touch it rests at its default spot
-  // behind the stage. Writes the style directly (no re-render per mousemove);
-  // the CSS transition supplies the damped "chase".
+  // Cursor spotlight, fine pointers only. Writes the style directly (no re-render per mousemove); CSS transition does the chase.
   useEffect(() => {
     if (!window.matchMedia("(pointer: fine)").matches) return;
     let raf = 0;
@@ -144,9 +137,7 @@ export default function LandingPage() {
     navigate("/onboarding");
   }
 
-  // Triggered by the button click and by Enter in the URL field — NOT a native
-  // form submit, so GTM's built-in form-submission listener never fires
-  // `gtm.formSubmit`. Only our own `generate_ai_receptionist` event goes out.
+  // Button click / Enter, NOT a native form submit — keeps GTM's `gtm.formSubmit` from firing alongside our own event.
   async function buildAgent() {
     if (checking) return; // ignore rapid double-clicks while a check is in flight
 
@@ -171,11 +162,7 @@ export default function LandingPage() {
         toast.error("We couldn't reach that website. Check the address and try again.", { id: errId });
         return;
       }
-      // Marketing conversion signal — a UNIQUE event (not GTM's generic
-      // gtm.formSubmit) so this can be tracked on its own in GTM / GA4 / Google
-      // Ads. Fired only here, on the success path: the URL is non-blank, a valid
-      // website, AND reachable, and we're actually generating the receptionist —
-      // never on a blank or rejected submission.
+      // Conversion event for GTM / GA4 / Ads. Fired ONLY on the success path (valid + reachable URL), never on a rejected submit.
       trackEvent("generate_ai_receptionist", { website_url: v });
       stopSpeaking();
       const keepVoice = voiceId;
@@ -196,9 +183,7 @@ export default function LandingPage() {
     const v = LANDING_VOICES.find((x) => x.id === id);
     if (!v) return;
     setPlayingId(id);
-    // Pass the raw id — LANDING_VOICES are ElevenLabs voice_ids, and squeezing
-    // them through deepgramVoiceFor() collapsed every sample to the default
-    // Deepgram voice. providerForVoiceId picks the right engine per id.
+    // Raw id on purpose — routing ElevenLabs ids through deepgramVoiceFor() collapsed every sample to the default Deepgram voice.
     speak(`Hi, I'm ${v.name}, your AI receptionist. I'll answer every call and book your jobs.`, {
       voiceId: id,
       provider: providerForVoiceId(id),
@@ -233,9 +218,7 @@ export default function LandingPage() {
       </header>
 
       {/* Hero — single centered column, the URL form is the sole focus */}
-      {/* Backdrop: flowing sound waves (the product's voice, humming across
-          the canvas) + a cursor spotlight that trails the pointer. Both
-          respond while a voice sample plays. Reduced-motion safe. */}
+      {/* Backdrop: sound waves + cursor spotlight, both react while a sample plays. Reduced-motion safe. */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <svg
           className={cn(
@@ -311,10 +294,8 @@ export default function LandingPage() {
                     </Fragment>
                   ))}
                 </span>
-                {/* Rotating gradient phrase — grid-stacked so the line never
-                    changes height; hw-payoff gives it the initial blur-reveal.
-                    Motion stays on the wrapper, the gradient (bg-clip:text)
-                    stays on the inner span — never merge the two. */}
+                {/* Grid-stacked so the line never changes height. Motion stays on the wrapper and the
+                    gradient (bg-clip:text) on the inner span — never merge the two. */}
                 <span className="word-cycle hw-payoff" style={{ animationDelay: "420ms" }}>
                   {HERO_PHRASES.map((phrase, i) => (
                     <span
@@ -347,9 +328,7 @@ export default function LandingPage() {
             {/* URL form — the #1 element on the page: chromatic halo + glass card,
                 full-width banner CTA */}
             <div className="animate-rise group relative mt-9" style={rise(520)}>
-              {/* Decorative glow — must not catch clicks: -inset-8 extends it over
-                  the buttons below (opacity-0 still hit-tests), which was swallowing
-                  clicks on "How it works" / "I don't have a website". */}
+              {/* pointer-events-none is load-bearing: -inset-8 overlaps the buttons below and opacity-0 still hit-tests, swallowing their clicks. */}
               <div
                 aria-hidden
                 className="pointer-events-none absolute -inset-8 rounded-[36px] bg-primary/15 opacity-0 blur-2xl transition-opacity duration-500 group-focus-within:opacity-70"
@@ -430,10 +409,7 @@ export default function LandingPage() {
               </button>
             </div>
 
-            {/* Select your voice — tap a chip to hear a live sample. Rendered as a
-                highlighted panel (tinted + glowing border + pulsing badge) so the
-                picker reads as the hero's second step instead of fading into the
-                background below the CTA. */}
+            {/* Voice picker as a highlighted panel so it reads as the hero's second step, not background below the CTA. */}
             <div
               className="animate-rise mt-9 rounded-3xl border border-primary/25 bg-primary/[0.04] p-4 sm:p-5"
               style={rise(660)}

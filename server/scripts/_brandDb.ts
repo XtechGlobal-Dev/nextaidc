@@ -1,22 +1,8 @@
 import { prisma as main } from "../src/prisma.js";
 import { tenantFor } from "../src/services/tenantDb.js";
 
-/* ------------------------------------------------------------------ *
- *  A database client for one-off maintenance scripts, after phase 6.
- *
- *  A customer's profile, agent record, calls and the rest of their
- *  workspace live in their brand's own database; the platform's tables
- *  stay in Main. These scripts were written when everything was in one
- *  place and address models directly (`prisma.conversion.findMany`), so
- *  this client routes each model to the plane it lives in — the brand
- *  named by BRAND=<slug> for the brand's models, Main for the rest:
- *
- *      BRAND=acme npm run backfill-greetings
- *
- *  This ambient routing is deliberately confined to scripts run by hand
- *  against ONE brand. Application code names the database it means
- *  (services/tenantDb.ts) and never gets a client that guesses.
- * ------------------------------------------------------------------ */
+// Client for one-off scripts: routes tenant models to the brand named by BRAND=<slug>, the rest to Main
+// (e.g. `BRAND=acme npm run backfill-greetings`). Scripts only — app code names its database explicitly.
 
 const TENANT_MODELS = new Set([
   "user",

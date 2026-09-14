@@ -1,11 +1,5 @@
-/**
- * Industry / niche options for the AI Brain → Identity section's
- * "Industry / Niche" dropdown. Plain display strings — the selected value is
- * stored verbatim on `profile.industry` and fed to the assistant's regional &
- * industry context (e.g. "a Plumbing business based in Australia"), so keep the
- * labels natural. Ordered by broad category. Adjust to taste — this is a
- * product list, not a fixed taxonomy.
- */
+/** Industry dropdown options. Stored verbatim on `profile.industry` and read into the prompt
+ *  ("a Plumbing business based in Australia"), so keep labels natural. */
 export const INDUSTRIES: string[] = [
   // Trades & home services
   "Plumbing",
@@ -74,11 +68,8 @@ export const INDUSTRIES: string[] = [
   "Other",
 ];
 
-/* ------------------------------------------------------------------ *
- *  Custom-industry validation — mirrors the server's sanitizeIndustry
- *  (server/src/lib/industries.ts) so the combobox can flag bad input
- *  instantly. The server always re-checks; this is UX only.
- * ------------------------------------------------------------------ */
+// Custom-industry validation — mirrors sanitizeIndustry in server/src/lib/industries.ts, keep in
+// step. UX only; the server re-checks.
 
 export const INDUSTRY_MIN_LEN = 2;
 export const INDUSTRY_MAX_LEN = 50;

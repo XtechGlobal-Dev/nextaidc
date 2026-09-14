@@ -8,11 +8,7 @@ const isMac =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
 const NOTIF_SHORTCUT = isMac ? "⌥N" : "Alt+N";
 
-/**
- * Header bell: unread badge + toggle for the notifications slide-over. The
- * panel itself is NotificationPanel (mounted once in AppLayout), so this
- * button is safe to render in both the desktop and the mobile header.
- */
+/** Header bell with unread badge. The panel is mounted once in AppLayout, so this is safe in both headers. */
 export function NotificationBell() {
   const panelOpen = useNotificationStore((s) => s.panelOpen);
   const setPanelOpen = useNotificationStore((s) => s.setPanelOpen);

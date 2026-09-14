@@ -1,23 +1,11 @@
-/* ------------------------------------------------------------------ *
- *  Multi-tenant access boundaries, end to end over HTTP.
- *
- *  Boots the REAL router stack — brandContext, requireAuth,
- *  requireSuperAdmin, the actual login handler and serialiser — against
- *  an in-memory Prisma stand-in, and drives it with real fetch calls.
- *  Unit tests can't catch what this is for: middleware ordering, a route
- *  mounted behind the wrong guard, a token that doesn't round-trip, or a
- *  brand admin reaching the platform's integration keys.
- * ------------------------------------------------------------------ */
+// Multi-tenant access boundaries end to end over HTTP: the real router stack against an in-memory
+// Prisma stand-in. Catches what unit tests can't — middleware order, a route behind the wrong guard.
 
-// env.ts validates at import time and exits the process if these are missing.
-// Set them before anything in the graph is imported (the router is pulled in
-// with a dynamic import below, after this runs).
+// env.ts validates at import time and exits if these are missing; the router is dynamically imported after this.
 process.env.DATABASE_URL ||= "postgresql://user:pass@localhost:5432/test";
 process.env.JWT_SECRET ||= "test-secret-at-least-thirty-two-characters-long";
 process.env.NODE_ENV = "test";
-// env.ts derives the wildcard apex from deployment config rather than
-// hardcoding a brand's own domain as the default — set it explicitly so the
-// new-brand subdomain assertion below has a known apex to check against.
+// env.ts has no default apex; set one so the new-brand subdomain assertion has a known value.
 process.env.PLATFORM_DOMAIN ||= "hello22.ai";
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
@@ -132,15 +120,9 @@ vi.mock("../prisma.js", () => {
     brandSetting: db.model(() => db.state.brandSettings),
     profile: db.model(() => db.state.profiles),
   };
-  // Any other model answers as an empty table. A Proxy rather than a hand-kept
-  // list: these routes touch a long tail of models (transfer settings, bookings,
-  // CRM rows) that this suite doesn't care about, and a missing one would
-  // otherwise surface as "cannot read findUnique of undefined" — a crash that
-  // looks like a product bug in a test about access control.
+  // Any other model is an empty table via Proxy — a missing model would crash like a product bug.
   const cache = new Map<string, unknown>();
-  // $transaction just runs the callback against the same store: there is no
-  // rollback to model here, and the point of these tests is the access
-  // boundary, not atomicity.
+  // $transaction just runs the callback on the same store; atomicity isn't what's under test.
   backed.$transaction = (fn: unknown) =>
     typeof fn === "function"
       ? (fn as (tx: unknown) => unknown)(proxy)
@@ -150,10 +132,7 @@ vi.mock("../prisma.js", () => {
     get(target, prop: string) {
       if (prop in target) return target[prop];
       if (!cache.has(prop)) {
-        // Each fallback model gets its OWN persistent array. Handing the model
-        // a `() => []` thunk instead would mint a fresh array per call, so a
-        // create() would vanish and the update() right after it would throw —
-        // a failure of the stand-in that reads exactly like a broken route.
+        // One persistent array per model — a `() => []` thunk would lose every create().
         const rows: Row[] = [];
         cache.set(prop, db.model(() => rows));
       }
@@ -170,10 +149,7 @@ vi.mock("../services/trial.js", async (orig) => ({
   reconcileSubscription: vi.fn(async () => undefined),
 }));
 
-// Creating a brand also creates its database — a Neon project, or a schema on
-// a real Postgres. That is infrastructure, and none of it belongs in a test
-// about access boundaries, so the whole provisioning module is a stand-in that
-// succeeds at once (tenantProvisioning.test.ts covers the real thing).
+// Brand creation provisions a real database; stubbed here (tenantProvisioning.test.ts covers it).
 vi.mock("../services/tenantProvisioning.js", () => ({
   provisionBrandDatabase: vi.fn(async (opts: { brandId: string }) => ({
     brandId: opts.brandId,
@@ -198,18 +174,13 @@ vi.mock("../services/tenantProvisioning.js", () => ({
   TENANT_RETIREMENT_DAYS: 30,
 }));
 
-// Sign-in throttling has its own suite (middleware/rateLimit.test.ts). Here it
-// would only turn the thirtieth sign-in of a run into a 429 that looks like an
-// access-boundary failure.
+// Rate limiting has its own suite; here it would only turn the 30th sign-in into a confusing 429.
 vi.mock("../middleware/rateLimit.js", () => ({
   rateLimit: () =>
     Object.assign((_req: unknown, _res: unknown, next: () => void) => next(), { size: () => 0 }),
 }));
 
-// A brand's people live in the brand's own database, and sign-in reads it
-// there. The stand-in for that plane is the same in-memory user list, filtered
-// to the brand — which is exactly what the real tenant holds: this brand's
-// accounts and nobody else's.
+// Tenant plane stand-in: the same in-memory user list filtered to the brand — exactly what a real tenant holds.
 vi.mock("../services/tenantDb.js", async () => {
   const { prisma } = await import("../prisma.js");
   class TenantUnavailableError extends Error {
@@ -220,10 +191,7 @@ vi.mock("../services/tenantDb.js", async () => {
       super(`Brand ${brandId}'s database is not available (status: ${status}).`);
     }
   }
-  // Per brand, every other model is an empty in-memory table of its own — the
-  // customer's workspace lives here now (calls, CRM, transfer, bookings, chat,
-  // codes), and these suites only need the routes to get past the guard and
-  // answer. Same shape as the control-plane stand-in above.
+  // Per brand, every other model is its own empty table — the routes only need to get past the guard.
   const workspaces = new Map<string, Map<string, unknown>>();
   const tenantFor = async (brandId: string | null | undefined) => {
     if (!brandId) throw new TenantUnavailableError("", "none");
@@ -509,9 +477,7 @@ describe("the customer workspace is closed to the super admin", () => {
     brandToken = (await login(BRAND_ADMIN)).body.token;
   });
 
-  // The platform owner runs the platform; they have no business, no agent and no
-  // subscription. Hiding the nav isn't enough — a typed URL has to be refused
-  // too, and a stray GET must never mint a Profile for them.
+  // The platform owner has no business/agent/subscription: a typed URL must be refused and never mint a Profile.
   const CUSTOMER_APIS = [
     "/api/agent",
     "/api/calls",
@@ -535,13 +501,8 @@ describe("the customer workspace is closed to the super admin", () => {
   });
 
   it("lets a brand ADMIN past the same guard", async () => {
-    // The wall is specifically the SUPER_ADMIN's: a brand admin keeps a real
-    // agent and profile so they can place test calls through their own tenant.
-    //
-    // Asserted as "the guard didn't refuse them" rather than "200", because what
-    // a route does AFTER the guard depends on rows this stand-in doesn't hold
-    // (a trial needs a Profile). Pinning 200 here would test the stub, not the
-    // boundary — so check the refusal specifically, by its status AND message.
+    // The wall is the SUPER_ADMIN's only. Asserted as "not refused" rather than 200, since what
+    // happens after the guard depends on rows the stand-in doesn't hold.
     for (const path of CUSTOMER_APIS) {
       const res = await authed(brandToken, path);
       const body = await res.text();
@@ -565,9 +526,7 @@ describe("brand-scoped admin sections are closed to the super admin", () => {
     brandToken = (await login(BRAND_ADMIN)).body.token;
   });
 
-  // A tenant's own customer base — its signup metrics, its customers, their
-  // subscriptions, the voices they may pick from. The brand admin runs those,
-  // and one brand's customer list is not something the platform owner browses.
+  // A tenant's own customer base — the brand admin runs it; the platform owner doesn't browse it.
   const BRAND_SECTIONS = [
     "/api/admin/overview",
     "/api/admin/customers",
@@ -624,13 +583,8 @@ describe("platform-only admin sections", () => {
     brandToken = (await login(BRAND_ADMIN)).body.token;
   });
 
-  // The audit trail belongs to the platform owner — an audit log a tenant's own
-  // admin can read is a weak audit log.
-  //
-  // The reseller/affiliate programme used to sit here too. It no longer does: a
-  // brand recruits and pays its own resellers, so a brand admin reaches those
-  // routes and `tenantScope` inside the handlers is what keeps one brand out of
-  // another's rows. Covered by "opens the reseller programme to a brand admin".
+  // Audit log is platform-only — one a tenant admin can read is a weak audit log. Resellers moved
+  // out: a brand runs its own programme, with tenantScope inside the handlers as the wall.
   const PLATFORM_APIS = ["/api/admin/audit"];
 
   it("refuses them to a brand admin", async () => {
@@ -647,9 +601,7 @@ describe("platform-only admin sections", () => {
   });
 
   it("opens the reseller programme to a brand admin", async () => {
-    // The mirror of the test above: a brand runs its own reseller programme, so
-    // requirePermission lets any ADMIN through these two. The tenant walls move
-    // into the handlers (tenantScope), they are no longer a flat 403.
+    // Any ADMIN gets through; the tenant wall is tenantScope inside the handlers, not a flat 403.
     for (const path of ["/api/admin/resellers", "/api/admin/commissions"]) {
       const res = await authed(brandToken, path);
       expect({ path, status: res.status }).toEqual({ path, status: 200 });
@@ -664,22 +616,15 @@ describe("platform-only admin sections", () => {
   });
 
   it("drops them from the staff permission matrix", async () => {
-    // Audit: leaving a grantable box that authorizes nothing would be a trap —
-    // a role with only that box ticked would leave its members with no usable
-    // access. Resellers is absent for the opposite reason: it is open to every
-    // ADMIN, but is deliberately not delegated down to staff, so there is no
-    // box to tick for it either.
+    // A grantable box that authorizes nothing is a trap (audit). Resellers is open to every ADMIN
+    // but deliberately not delegated to staff.
     const res = await authed(superToken, "/api/admin/permissions");
     expect(res.status).toBe(200);
     const cfg = (await res.json()) as { sections: { key: string }[] };
     const keys = cfg.sections.map((sec) => sec.key);
     expect(keys).not.toContain("resellers");
     expect(keys).not.toContain("audit");
-    // The platform's own team never delegates a BRAND's day-to-day either —
-    // same trap, same fix: a brand-scoped box would authorize nothing for
-    // platform staff (requirePermission refuses the super admin outright, and
-    // a platform STAFF member has no tenant for the key to act on), so the
-    // matrix doesn't offer it.
+    // Same trap the other way: a brand-scoped box authorizes nothing for platform staff (no tenant to act on).
     expect(keys).not.toContain("customers");
     expect(keys).not.toContain("tickets");
     // …while the sections the platform genuinely runs stay grantable.
@@ -687,9 +632,7 @@ describe("platform-only admin sections", () => {
   });
 
   it("offers a brand admin their own sections instead", async () => {
-    // The mirror image: a brand delegates its OWN customer base to its staff,
-    // and never the platform's inbox (that queue is between this brand and the
-    // platform, not something to hand a teammate).
+    // A brand delegates its OWN customer base, never the platform's inbox.
     const res = await authed(brandToken, "/api/admin/permissions");
     expect(res.status).toBe(200);
     const cfg = (await res.json()) as { sections: { key: string }[] };
@@ -834,9 +777,7 @@ describe("brand editor endpoints", () => {
     expect(out.brand.fontStyle).toBe("classic");
     expect(out.admin?.email).toBe("owner@northwind.test");
 
-    // The brand's own subdomain, which the wildcard record and its wildcard
-    // certificate already cover — so a new brand is reachable immediately with
-    // no DNS to add and nothing to wait on.
+    // Wildcard DNS + cert already cover the subdomain, so a new brand is reachable immediately.
     expect(out.loginUrl).toBe("https://northwind.hello22.ai");
     // The path-routed address survives alongside it: it needs no DNS at all, so
     // it still works while a wildcard propagates or on a preview deployment.
@@ -845,9 +786,7 @@ describe("brand editor endpoints", () => {
     expect(out.brand.domainStatus).toBe("none");
     expect(out.domain).toBeNull();
 
-    // The new admin is a real, scoped account — they can sign in, they land
-    // inside the brand that was just created, and they are NOT admitted to the
-    // panel that created them.
+    // The new admin signs in, lands inside their brand, and is NOT admitted to the panel that created them.
     const brandId = (out.brand as unknown as { id: string }).id;
     const theirs = await login({ email: "owner@northwind.test", password: "Northwind@1" });
     expect(theirs.status).toBe(200);
@@ -929,9 +868,7 @@ describe("brand setup policies", () => {
   });
 
   it("never takes a sign-up on the platform's own door", async () => {
-    // Every customer belongs to a brand. With no brand resolved there is nowhere
-    // for the account to go, so it is refused before the body is read — not
-    // quietly filed under the platform, which is what used to happen.
+    // No brand, nowhere for the account to go — refused before the body is read (it used to be filed under the platform).
     const platform = await fetch(`${base}/api/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1069,10 +1006,7 @@ describe("brand pricing and wallet", () => {
 /* -------------------------- The platform's own team ----------------------- */
 
 describe("the platform's own team", () => {
-  // Every account belongs to a brand except the platform's own people: the
-  // super admin, and the support staff they employ. So the super admin CAN add
-  // staff — they land with no brand — but not resellers, which are a brand's
-  // programme.
+  // Only the platform's own people have no brand, so the super admin can add staff but not resellers.
   let superToken = "";
   let brandToken = "";
 
@@ -1136,9 +1070,7 @@ describe("departments are the platform's call", () => {
   });
 
   it("refuses a brand admin renaming one, while still letting them staff it", async () => {
-    // Renaming is refused up front (403) — before the row is even looked up.
-    // Membership alone gets through to the lookup, which is a 404 here only
-    // because the stand-in database holds no departments.
+    // Rename is a 403 before lookup; membership reaches the lookup (404 only because the stand-in has no departments).
     const rename = await authed(brandToken, "/api/admin/tickets/departments/d_missing", {
       method: "PATCH",
       body: JSON.stringify({ name: "Refunds" }),

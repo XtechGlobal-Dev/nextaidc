@@ -4,54 +4,12 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 
-/* ------------------------------------------------------------------ *
- *  One-time: teach Prisma that the migrations already in this database
- *  are already applied, so `prisma migrate deploy` can take over from
- *  `prisma db push`.
- *
- *  WHY THIS IS NEEDED
- *    This project used to deploy with `prisma db push`, which applies the
- *    schema directly and records nothing. So `_prisma_migrations` is empty even
- *    though every migration's effect is present. Point `migrate deploy` at that
- *    database and it starts from 0001_init, tries `CREATE TABLE "users"`, and
- *    the deploy dies. `render:build` now runs `migrate deploy`, so any database
- *    that was ever synced with `db push` needs this once before its first
- *    deploy. A brand-new empty database does NOT — never run this against one;
- *    it would stamp every migration as applied without running any.
- *
- *    Baselining fixes that by RECORDING migrations as applied without running
- *    them. Nothing in the database changes.
- *
- *  WHY IT MATTERS
- *    `db push --accept-data-loss` cannot see that `call_logs` is partitioned,
- *    so a future schema edit could have it drop and recreate the table, taking
- *    every call with it. `migrate deploy` only ever runs the SQL in
- *    prisma/migrations, and never invents a destructive plan.
- *
- *  HOW TO USE IT
- *      npm run migrate-baseline -- --dry-run   # see what it would mark
- *      npm run migrate-baseline                # mark them
- *
- *    Then switch render:build to `prisma migrate deploy` and deploy.
- *
- *  THE ONE JUDGEMENT CALL
- *    Migrations whose effects are NOT yet in the database must be left
- *    unmarked, so `migrate deploy` actually runs them. This script decides that
- *    by probing for a table each migration creates — see PENDING_PROBES — and
- *    it prints its reasoning for every migration so you can check it before
- *    committing. Read that output. Marking a migration that has not really been
- *    applied means it is skipped forever.
- * ------------------------------------------------------------------ */
+// One-time baseline for a `db push` DB: records migrations as applied so `migrate deploy` can take over. NEVER run
+// against an empty DB, and read the `--dry-run` verdicts — a wrongly marked migration is skipped forever.
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
-/**
- * Migrations identified by an object they create. If the object is absent the
- * migration has not been applied, so it must NOT be baselined.
- *
- * Only the recent ones need entries: everything older predates this work and is
- * certainly present in any database that has been deployed to.
- */
+// Probe objects per migration: absent → not applied → must NOT be baselined. Older migrations need no entry.
 const PENDING_PROBES: Record<
   string,
   { kind: "table" | "column" | "constraint" | "dropped"; name: string; table?: string }
@@ -80,9 +38,7 @@ const prisma = new PrismaClient({
   datasources: { db: { url: process.env.DIRECT_URL || process.env.DATABASE_URL } },
 });
 
-// Every probe is pinned to `public`: the tenant schemas (`tenant_<slug>`) carry
-// tables of the same names, and a match there says nothing about the control
-// plane.
+// Pinned to `public`: tenant schemas carry same-named tables and say nothing about the control plane.
 async function tableExists(name: string): Promise<boolean> {
   const rows = await prisma.$queryRaw<{ count: bigint }[]>`
     SELECT count(*) AS count FROM pg_class c
@@ -119,9 +75,7 @@ const migrations = readdirSync(dir)
   .filter((name) => statSync(join(dir, name)).isDirectory())
   .sort();
 
-// An empty database has nothing to baseline and everything to run: `migrate
-// deploy` handles it from 0001_init. Stamping it here would skip every
-// migration for good, so refuse before any probe gets a chance to look right.
+// Refuse an empty DB before any probe can look right — stamping it would skip every migration for good.
 if (!(await tableExists("users"))) {
   console.error("No `users` table in `public` — this database is empty. Run `prisma migrate deploy` instead.");
   await prisma.$disconnect();
@@ -131,11 +85,8 @@ if (!(await tableExists("users"))) {
 const recorded = await alreadyRecorded();
 console.log(`${migrations.length} migration(s) on disk, ${recorded.size} already recorded.\n`);
 
-// Migrations are linear: once a later one is in effect, every earlier one was
-// run before it. So a probe only has a say up to the newest migration whose
-// probe passes — objects an earlier migration created may since have been
-// dropped by a later one (the cutover removed `call_logs`, whose column the
-// 0054 probe looks for), and that must not read as "never applied".
+// Migrations are linear, so anything before the newest passing probe counts as applied — a later
+// migration may have dropped an earlier one's object (the cutover removed `call_logs`).
 const verdict = new Map<string, boolean>();
 for (const [name, probe] of Object.entries(PENDING_PROBES)) {
   verdict.set(
@@ -192,9 +143,7 @@ if (toMark.length === 0) {
     // `migrate resolve --applied` records the migration WITHOUT running it.
     execFileSync("npx", ["prisma", "migrate", "resolve", "--applied", name], {
       stdio: "inherit",
-      // On Windows `npx` is `npx.cmd`, which Node will only run through a shell
-      // (spawning it directly is ENOENT, or EINVAL on newer Node). Migration
-      // names are [0-9a-z_], so nothing here needs quoting.
+      // Windows `npx.cmd` only runs through a shell (ENOENT/EINVAL otherwise); names are [0-9a-z_], no quoting needed.
       shell: process.platform === "win32",
     });
   }

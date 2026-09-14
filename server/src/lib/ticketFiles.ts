@@ -1,16 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  What may go into a ticket: how long a message can be, and what may
- *  be attached to it.
- *
- *  Allow-list, never a block-list: anything not named here is rejected,
- *  so a new dangerous extension can't sneak in by default. The browser's
- *  reported MIME type is only a hint, so the extension has to line up
- *  with it too — that is what stops `payload.exe` renamed to `.png`.
- *
- *  Mirrored (labels + limits only) in src/lib/ticketFiles.ts so the
- *  composer can reject a file before it ever leaves the browser. The
- *  server list here is the one that actually enforces.
- * ------------------------------------------------------------------ */
+// Ticket message + attachment limits. Allow-list only (a new dangerous extension can't sneak in), and
+// MIME must agree with the extension — that's what stops `payload.exe` renamed `.png`. Mirrored in src/lib/ticketFiles.ts.
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB per file
 /** Video is the one thing nobody can make small — a screen recording gets more room. */
@@ -64,12 +53,7 @@ export function extensionOf(filename: string): string {
   return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
 }
 
-/**
- * True when the MIME type is allowed AND the filename's extension is one that
- * type legitimately uses. Both must agree — a `.exe` announcing itself as
- * `image/png` fails on the extension, and a real `.png` posted with a forged
- * `application/x-msdownload` fails on the type.
- */
+/** MIME allowed AND the extension legitimately carries it — both must agree. */
 export function isAllowedAttachment(mime: string, filename: string): boolean {
   const exts = ALLOWED[(mime || "").toLowerCase()];
   if (!exts) return false;

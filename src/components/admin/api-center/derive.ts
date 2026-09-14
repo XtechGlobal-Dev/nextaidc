@@ -1,16 +1,7 @@
 import type { ApiCenterSnapshot, ApiCenterTotals, ProviderRow, SeriesPoint } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  Recomputing the headline numbers for a filtered subset of providers.
- *
- *  The server sends fleet totals plus each provider's own per-bucket trend. When
- *  a filter narrows the fleet, these functions rebuild the totals and the time
- *  series from just the surviving providers, so the number at the top of a
- *  screen always describes the rows underneath it.
- *
- *  Pure functions in their own module so the arithmetic can be tested without
- *  mounting React.
- * ------------------------------------------------------------------ */
+// Rebuilds totals and time series from a filtered subset of providers so headline numbers match the
+// rows below. Pure functions so the arithmetic tests without React.
 
 /** Percentage to one decimal place, 0 when there's nothing to divide by. */
 function pct(part: number, whole: number): number {
@@ -23,13 +14,7 @@ function round(n: number, dp: number): number {
   return Math.round(n * f) / f;
 }
 
-/**
- * Traffic-weighted mean of a per-provider latency figure.
- *
- * Percentiles cannot be summed or averaged flat: a provider that served three
- * slow calls must not weigh the same as one that served thirty thousand fast
- * ones. Weighting by request count matches how the server builds the same figure.
- */
+/** Traffic-weighted latency. Percentiles can't be averaged flat; weighting by requests matches the server's figure. */
 function weightedLatency(rows: ProviderRow[], pick: (p: ProviderRow) => number, totalRequests: number): number {
   if (totalRequests <= 0) return 0;
   return Math.round(rows.reduce((sum, p) => sum + pick(p) * p.requests, 0) / totalRequests);
@@ -40,10 +25,7 @@ export function deriveTotals(rows: ProviderRow[], snapshot: ApiCenterSnapshot): 
   const requests = rows.reduce((s, p) => s + p.requests, 0);
   const errors = rows.reduce((s, p) => s + p.errors, 0);
 
-  // Availability counts vendor-side failures only. We don't have the raw
-  // vendor-error count per provider, but we do have each provider's uptime over
-  // the same window — so weight those by traffic, which is the same figure by a
-  // different route.
+  // No per-provider vendor-error count, but traffic-weighting each provider's uptime gives the same figure.
   const uptimePct =
     requests > 0
       ? round(rows.reduce((s, p) => s + p.uptimePct * p.requests, 0) / requests, 1)
@@ -84,13 +66,7 @@ export function deriveTotals(rows: ProviderRow[], snapshot: ApiCenterSnapshot): 
   };
 }
 
-/**
- * Fleet time series rebuilt from the given providers' trend arrays.
- *
- * Every provider's arrays are already aligned to the same bucket timeline by the
- * server, so this is an element-wise sum — except p95, which is traffic-weighted
- * per bucket for the same reason as above.
- */
+/** Series rebuilt from the providers' trend arrays (server-aligned buckets): element-wise sum, p95 traffic-weighted. */
 export function deriveSeries(rows: ProviderRow[], snapshot: ApiCenterSnapshot): SeriesPoint[] {
   return snapshot.series.map((point, i) => {
     let requests = 0;

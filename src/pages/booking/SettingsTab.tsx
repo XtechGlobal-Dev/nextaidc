@@ -87,11 +87,8 @@ function serialize(s: {
   });
 }
 
-/** All times of day at 15-minute steps as { value: "HH:mm", label: "9:00 AM" }.
- *  Used for the bookable-hours pickers so open/close always render in 12-hour
- *  AM/PM (matching the rest of the app) regardless of the browser/OS locale —
- *  a native <input type="time"> can't be forced to 12-hour. The stored value
- *  stays 24-hour "HH:mm" (what the backend expects). */
+// 15-minute time options as { value: "HH:mm", label: "9:00 AM" }. A native <input type="time"> can't be
+// forced to 12-hour regardless of locale, hence the select; stored value stays 24-hour for the backend.
 const TIME_OPTIONS: { value: string; label: string }[] = (() => {
   const out: { value: string; label: string }[] = [];
   for (let m = 0; m < 24 * 60; m += 15) {
@@ -299,9 +296,7 @@ export function SettingsTab() {
 
   return (
     <div className="space-y-6 pb-24">
-      {/* Google Calendar + book-on-the-call. Booking is simple: the AI books the
-          caller in during the call when auto-booking is on AND the calendar is
-          connected — otherwise it takes a message. */}
+      {/* Google Calendar + book-on-the-call. Booking needs auto-booking on AND a connected calendar; otherwise the AI takes a message. */}
       <Card className="animate-rise card-glass">
         <SectionHeader
           icon={CalendarDays}
@@ -492,10 +487,7 @@ export function SettingsTab() {
         </CardContent>
       </Card>
 
-      {/* Sticky unsaved-changes pill — appears the moment anything changes so the
-          Save action is never missed after toggling a setting far up the page.
-          Sized to its content and centred (rather than a full-width bar) so it
-          reads as a floating prompt and keeps the settings behind it visible. */}
+      {/* Sticky unsaved-changes pill so Save isn't missed after toggling something far up the page. */}
       {dirty && (
         <div className="pointer-events-none sticky bottom-4 z-30 flex justify-center">
           <div className="animate-rise pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-x-6 gap-y-2 rounded-full border border-primary/30 bg-card py-3 pl-6 pr-3 shadow-[var(--shadow-panel)] ring-4 ring-background/80">
@@ -522,9 +514,7 @@ export function SettingsTab() {
   );
 }
 
-/** Loading skeleton matching the Settings layout (3 cards). */
-/** Mirrors the real two-card layout: "Book on the call" (connection row +
- *  book-directly toggle + timezone/slot grid) then "Bookable hours" (7 days). */
+// Loading skeleton mirroring the real two-card layout ("Book on the call", then "Bookable hours").
 function SettingsSkeleton() {
   return (
     <div className="space-y-6">

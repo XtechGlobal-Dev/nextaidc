@@ -3,11 +3,8 @@ import { toast } from "sonner";
 import type { HumanTransferSettings, TransferDepartment } from "@/types";
 import { api, ApiError } from "@/lib/api";
 
-/**
- * Human Call Transfer settings store. Loaded on demand (not persisted — a
- * settings concern, always fetched fresh). Updates are optimistic and reconciled
- * with the server response.
- */
+// Human Call Transfer settings. Not persisted — always fetched fresh; updates are
+// optimistic and reconciled with the server response.
 interface TransferState {
   settings: HumanTransferSettings | null;
   departments: TransferDepartment[];

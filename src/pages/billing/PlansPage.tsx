@@ -71,9 +71,7 @@ export default function PlansPage() {
     formatMoney(cents, currency ?? sub?.currency);
 
   const [changeTarget, setChangeTarget] = useState<SubscriptionPlan | null>(null);
-  // Cross-currency switch: a separate flow from changeTarget because it is a NEW
-  // subscription on a NEW Stripe customer, paid with a re-entered card — not a
-  // price swap on the existing one.
+  // Cross-currency switch is its own flow: a NEW subscription on a NEW Stripe customer with a re-entered card, not a price swap.
   const [switchTarget, setSwitchTarget] = useState<SubscriptionPlan | null>(null);
   const [switchSecret, setSwitchSecret] = useState<string | null>(null);
   const [switchStarting, setSwitchStarting] = useState(false);
@@ -100,9 +98,7 @@ export default function PlansPage() {
     ]);
     setPlans(planList);
     setSub(subRes.subscription);
-    // A plan change / renewal / cancellation just landed, and entitlements are
-    // enforced from that moment — drop the cached copy so gated screens don't
-    // keep showing the old answer.
+    // Entitlements apply the moment a change lands — drop the cache so gated screens don't show the old answer.
     clearCachedEntitlements();
     void hydrateTrial();
   }, [hydrateTrial]);
@@ -111,9 +107,7 @@ export default function PlansPage() {
     void reload().finally(() => setLoading(false));
   }, [reload]);
 
-  // Keep the usage meter + plan state live while this page is open: poll on a
-  // short interval and refresh the instant the tab regains focus (a real call
-  // records usage server-side with no client event to push it).
+  // Poll + refresh on focus: a real call records usage server-side with no client event to push it.
   useEffect(() => {
     const id = window.setInterval(() => void reload(), 15_000);
     const onFocus = () => void reload();
@@ -153,9 +147,7 @@ export default function PlansPage() {
     }
   }
 
-  /** Open the currency-switch dialog and reserve the new (unpaid) subscription.
-   *  Nothing is charged here and the current plan is untouched — the customer
-   *  can still close the dialog and stay exactly where they are. */
+  // Reserves the new (unpaid) subscription. Nothing is charged and the current plan is untouched — closing the dialog is a no-op.
   async function openSwitch(plan: SubscriptionPlan) {
     setSwitchTarget(plan);
     setSwitchSecret(null);
@@ -275,11 +267,8 @@ export default function PlansPage() {
   function planRelation(plan: SubscriptionPlan) {
     const isCurrent = plan.id === currentPlanId;
     const isScheduledTarget = !isTrial && scheduled?.id === plan.id;
-    // Stripe fixes a subscription's currency at creation, so a plan priced in
-    // another one can't be switched to at all. Offering the button anyway sent
-    // the customer through a preview and a confirm before the server refused.
-    // Comparing the two prices would be meaningless as well: $20 USD against
-    // $20 AUD is not "the same price", it is a different amount of money.
+    // Stripe fixes a subscription's currency at creation, so another-currency plan can't be swapped to
+    // (the server refused after preview + confirm). Price comparison is meaningless across currencies too.
     const otherCurrency =
       !!sub?.currency && !!plan.currency && plan.currency !== sub.currency;
     const cmp = plan.priceCents - (sub?.priceCents ?? 0);
@@ -418,9 +407,7 @@ export default function PlansPage() {
             </div>
           </div>
 
-          {/* Live coupon discount — what's applied, and how much of it is left, so
-              a smaller charge is never a mystery and the return to full price
-              isn't a surprise. */}
+          {/* Live coupon: show what's applied and how long it lasts so the return to full price isn't a surprise. */}
           {sub?.discount && (
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-success/30 bg-success-tint px-3 py-2.5">
               <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-success text-white">
@@ -615,9 +602,7 @@ export default function PlansPage() {
             />
           </div>
 
-          {/* A bare "Manage billing" button told nobody what was behind it, so
-              customers never discovered they could change the card at all. Name
-              the thing and say what they can do with it. */}
+          {/* Spell out what the portal does — a bare "Manage billing" button meant nobody found the card change. */}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-card)] border border-border bg-muted/40 p-3.5">
             <div className="flex items-start gap-3">
               <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-tint text-primary">
@@ -649,10 +634,7 @@ export default function PlansPage() {
           </span>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {/* The caller's current plan when it's been retired (legacy): the active
-              plan list no longer includes it, so we surface it here — disabled, so
-              they can see exactly what they're on today and compare it against the
-              current plans side-by-side. */}
+          {/* Retired (legacy) current plan isn't in the active list, so show it here disabled for comparison. */}
           {sub?.legacy && !plans.some((p) => p.id === currentPlanId) && (
             <Card className="flex flex-col border-warning/40 ring-1 ring-warning/30">
               <CardHeader>
@@ -968,9 +950,7 @@ export default function PlansPage() {
                       {preview.currentPeriodEnd ? ` on ${fmtDate(preview.currentPeriodEnd)}` : ""}.
                     </span>
                   </div>
-                  {/* A live coupon discounts RENEWALS, not this one-off upgrade
-                      charge — it's a separate invoice we price ourselves. Saying
-                      so plainly stops the untouched total reading as a bug. */}
+                  {/* A coupon discounts RENEWALS, not this one-off upgrade invoice — say so or the full total reads as a bug. */}
                   {sub?.discount && sub.discount.cyclesLeft > 0 && (
                     <p className="flex items-start gap-1.5 text-muted-foreground">
                       <Ticket className="mt-0.5 size-3.5 shrink-0" />
@@ -1015,9 +995,8 @@ export default function PlansPage() {
       </Dialog>
 
       {/* Manage an already-scheduled downgrade (opened from the "Scheduled" plan tile). */}
-      {/* Cross-currency switch. Stripe locks a customer to one currency, so this
-          opens a NEW subscription on a NEW customer and needs a fresh card. The
-          existing plan keeps running until that payment succeeds. */}
+      {/* Cross-currency switch: Stripe locks a customer to one currency, so this is a NEW subscription on a
+          NEW customer with a fresh card. The existing plan keeps running until that payment succeeds. */}
       <Dialog open={!!switchTarget} onOpenChange={(o) => !o && void closeSwitch()}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1046,9 +1025,7 @@ export default function PlansPage() {
               </div>
             </div>
 
-            {/* Said plainly up front rather than discovered on the invoice:
-                Stripe cannot credit unused time across currencies, so this is a
-                fresh billing period, not a prorated swap. */}
+            {/* Stripe can't credit unused time across currencies — fresh billing period, not a prorated swap. */}
             <div className="rounded-lg border border-warning/40 bg-warning-tint px-3 py-2">
               <p className="text-xs text-warning">
                 This starts a new billing period today. Any unused time on your current plan is not

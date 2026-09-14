@@ -2,13 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  API contract pilot: GET / and POST /test-summary go through
- *  sendValidated() against the shared @shared/contracts/notifications
- *  schemas — a passing assertion here confirms the live response matches
- *  what src/lib/api.ts types against on the frontend (ApiNotification is
- *  now just an alias of the inferred Notification type).
- * ------------------------------------------------------------------ */
+// GET / and POST /test-summary go through sendValidated(), so a pass here also
+// proves the live response matches the shared contract the frontend types against.
 
 const h = vi.hoisted(() => ({
   listNotifications: vi.fn(),
@@ -100,9 +95,8 @@ describe("GET /api/notifications", () => {
     const res = await fetch(`${base}/api/notifications`);
     expect(res.status).toBe(200);
     const body = await res.json();
-    // The pre-serialization Date is transformed to an ISO string by the
-    // schema, and Prisma's extra `userId` field is stripped — both confirm
-    // sendValidated() sent the PARSED value, not the raw object.
+    // Date → ISO string and `userId` stripped both prove sendValidated() sent the
+    // parsed value, not the raw object.
     expect(body).toEqual({
       notifications: [
         {

@@ -12,16 +12,7 @@ type Line = { from: "agent" | "caller"; node: ReactNode };
 
 const CHIPS = ["Books jobs", "Captures leads", "Answers 24/7"];
 
-/**
- * A contextual preview of the AI receptionist, shown beside each onboarding
- * step so the right-hand space reinforces what that step sets up:
- *  - training: the agent learning your business (analysis step)
- *  - intro:    how it greets callers using your business name
- *  - services: a caller asking about one of your services
- *  - sms:      the call-summary text sent to the mobile you enter
- *  - email:    the call-summary email sent to the address you verify
- * All populated live from the onboarding data.
- */
+/** Per-step preview of the AI receptionist beside the onboarding form, populated live from onboarding data. */
 export function AgentCallPreview({ scenario = "intro" }: { scenario?: Scenario }) {
   const businessName = useOnboardingStore((s) => s.data.businessName).trim() || "your business";
   const services = useOnboardingStore((s) => s.data.services);

@@ -116,12 +116,8 @@ export default function ResellerPortalPage() {
     void load();
   }, [load]);
 
-  // Keep the portal live without a manual reload. This page renders outside the
-  // main AppLayout, so the SSE live driver doesn't reach it — and its figures are
-  // aggregates of its sub-customers' activity, which lands on those customers'
-  // channels, not the reseller's. A light self-contained poll (30s + on focus) is
-  // the right fit here. `silent` skips the spinner and error toast so the
-  // commission/customer stats quietly stay in sync.
+  // Self-contained poll (30s + focus): this page is outside AppLayout so the SSE driver doesn't reach it, and
+  // its figures come from sub-customers' channels anyway. `silent` skips the spinner and error toast.
   useEffect(() => {
     const refresh = () => void load(false, true);
     const id = window.setInterval(() => {
@@ -425,10 +421,7 @@ export default function ResellerPortalPage() {
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  Referred-customer detail modal — contact + subscription + the
- *  reseller's commission history for that customer. Read-only.
- * ------------------------------------------------------------------ */
+// Referred-customer detail modal (contact + subscription + commission history). Read-only.
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (

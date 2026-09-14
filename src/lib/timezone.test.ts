@@ -62,9 +62,7 @@ describe("groupedTimeZones", () => {
   });
 
   it("includes the selected zone when the runtime doesn't list it", () => {
-    // Stands in for a zone from a newer tz release than this runtime ships, or
-    // an old identifier we haven't mapped — either way the field must not go
-    // blank on a value the owner has stored.
+    // A newer tz release or an unmapped alias; the field must not go blank on a stored value.
     const unlisted = "Australia/Currie";
     expect(listTimeZones()).not.toContain(unlisted);
     expect(pickerZones(unlisted)).toContain(unlisted);

@@ -17,17 +17,8 @@ import { notify } from "./notifications.js";
 /** Subscription states that are actually being billed (or about to be). */
 const LIVE_STATUSES = ["trialing", "active", "past_due"];
 
-/* ------------------------------------------------------------------ *
- *  Brand pricing — the brand's charge on top of a platform plan.
- *
- *  The platform owner sets a plan's base price. A brand may add its own
- *  ADDON per billing cycle; its customers see and pay base + addon, to
- *  the platform. Stripe bills from Price objects, so a non-zero addon
- *  means a Stripe Price of the brand's own, created under the plan's
- *  product with the plan's currency and interval. Every path that starts
- *  or changes a subscription asks stripePriceIdFor() which Price to use,
- *  so the platform's base Price and a brand's Price never get mixed up.
- * ------------------------------------------------------------------ */
+// Brand pricing: customers pay base + the brand's addon, to the platform. A non-zero addon means a
+// brand-owned Stripe Price; every subscribe/change path must ask stripePriceIdFor() so base and brand Prices never mix.
 
 export interface BrandPricingRow {
   planId: string;
@@ -135,14 +126,7 @@ export async function brandAddonsFor(
   return out;
 }
 
-/**
- * Which Stripe Price a customer of `brandId` subscribes to for `plan`.
- *
- * The brand's own Price when it has an addon and that Price exists; the
- * platform's otherwise. A brand whose addon was saved before the plan was
- * linked to Stripe has no Price yet and sells at the base price until
- * setBrandAddon() is re-run — never a silent failure at checkout.
- */
+/** The brand's Price when it has an addon and the Price exists, else the platform's. An addon saved before the plan was Stripe-linked sells at base until re-saved — never a checkout failure. */
 export async function stripePriceIdFor(
   plan: Pick<SubscriptionPlan, "id" | "stripePriceId">,
   brandId: string | null | undefined,
@@ -157,13 +141,7 @@ export async function stripePriceIdFor(
   return plan.stripePriceId ?? null;
 }
 
-/**
- * Set (or clear, with 0) a brand's addon on a plan, and keep Stripe in step:
- * a new Price for the new total, the old brand Price archived. Existing
- * subscribers stay on the Price they signed up with — a price change applies
- * to new subscriptions and plan changes, never retroactively (phase 2 is the
- * migration tool).
- */
+/** Sets (or clears with 0) a brand's addon and keeps Stripe in step. Existing subscribers stay on their Price — never retroactive; applyBrandPriceToSubscribers is the migration tool. */
 export async function setBrandAddon(opts: {
   brandId: string;
   planId: string;
@@ -291,14 +269,7 @@ export async function brandAddonOnPrice(
   return addon && addon.addonCents > 0 && addon.stripePriceId === priceId ? addon.addonCents : 0;
 }
 
-/**
- * The price a customer is actually billed for their plan: base + the brand's
- * addon only when their subscription really is on the brand's Price. A
- * customer who subscribed before the brand set its addon stays on the base
- * price until migrated (applyBrandPriceToSubscribers), and their dashboard
- * must not claim otherwise. Falls back to the base price whenever Stripe can't
- * be asked.
- */
+/** What the customer is actually billed: base + addon only if their sub really is on the brand's Price (pre-addon subscribers stay on base). Falls back to base when Stripe can't be asked. */
 export async function customerPlanPriceCents(opts: {
   plan: { id: string; priceCents: number };
   brandId: string | null | undefined;
@@ -319,12 +290,7 @@ export async function customerPlanPriceCents(opts: {
   }
 }
 
-/**
- * The platform changed a plan's base price (or cycle): every brand Price built
- * on it is now wrong. Rebuild each one at the new base + the brand's addon,
- * retire the old, and tell the brand's admins what their customers now pay.
- * Best-effort per brand — one failed Stripe call must not stop the rest.
- */
+/** After a base-price change, rebuilds every brand Price on the plan and notifies brand admins. Best-effort per brand so one Stripe failure doesn't stop the rest. */
 export async function refreshBrandPricesForPlan(
   planId: string,
 ): Promise<{ refreshed: number; failed: number }> {
@@ -384,13 +350,7 @@ export interface ApplyPriceResult {
   skipped: { email: string; reason: string }[];
 }
 
-/**
- * Move a brand's EXISTING subscribers on a plan onto the brand's current Price
- * (or back to the platform's, when the addon was cleared). No proration and no
- * charge now: the new amount bills from the next cycle, which is what a price
- * change should mean to someone mid-period. A subscription with a scheduled
- * downgrade can't be re-priced in place and is reported, not forced.
- */
+/** Moves existing subscribers onto the brand's current Price. No proration, no charge now — bills from next cycle. Subs with a scheduled change are reported, not forced. */
 export async function applyBrandPriceToSubscribers(opts: {
   brandId: string;
   planId: string;

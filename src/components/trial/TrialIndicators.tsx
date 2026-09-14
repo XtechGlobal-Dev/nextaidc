@@ -5,11 +5,7 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { daysBadge, minutesBadge, TONE_FILL, TONE_TEXT } from "@/lib/trial";
 import { isAdminRole } from "@/lib/roles";
 
-/**
- * Minutes meter for the sidebar — "Trial Minutes 0.3 / 10" (trial) or
- * "Plan Minutes 12 / 200" (paid), with a colored bar. Shows "Unlimited" for
- * plans with no minute cap. Hidden when the user has no entitlement.
- */
+/** Sidebar minutes meter (trial or plan); "Unlimited" for uncapped plans, hidden without an entitlement. */
 export function TrialMinutesMeter({ className }: { className?: string }) {
   const trial = useTrialStore((s) => s.trial);
   const isAdmin = useAuthStore((s) => isAdminRole(s.user?.role));
@@ -62,11 +58,7 @@ export function TrialMinutesMeter({ className }: { className?: string }) {
   );
 }
 
-/**
- * Top-right status "bulb". During the trial it's a pulsing days-remaining
- * countdown that recolors and reads "Trial Expired" when it ends. On a paid
- * plan it shows a calm "Renews in Nd" pill. Hidden otherwise.
- */
+/** Header status pill: pulsing days-left countdown on trial, calm "Renews in Nd" on a paid plan, hidden otherwise. */
 export function TrialDaysIndicator({ className }: { className?: string }) {
   const trial = useTrialStore((s) => s.trial);
   const isAdmin = useAuthStore((s) => isAdminRole(s.user?.role));

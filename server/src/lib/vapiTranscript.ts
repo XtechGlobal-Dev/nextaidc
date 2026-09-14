@@ -1,13 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Vapi phone-call transcript → timed turns.
- *
- *  A phone call's end-of-call report gives the transcript as a plain string
- *  ("AI: …\nUser: …") with no per-turn timing, so the call detail showed every
- *  line at 0:00. Vapi ALSO sends a structured `artifact.messages` array where
- *  each spoken message carries `secondsFromStart` (and an epoch `time`). Building
- *  the transcript from that gives the same "Agent · 0:05 / Caller · 0:12"
- *  timeline the web widget already produces.
- * ------------------------------------------------------------------ */
+// Vapi transcript → timed turns. The plain-string transcript has no timing (every line showed 0:00);
+// `artifact.messages` carries `secondsFromStart` per spoken message.
 
 export interface TimedTurn {
   /** Normalised to "agent" | "caller" to match the web-call transcript shape. */
@@ -22,13 +14,8 @@ export interface TimedTurn {
 const SPOKEN_ROLE = /^(bot|assistant|ai|user|customer|human|caller)$/i;
 const AGENT_ROLE = /^(bot|assistant|ai)$/i;
 
-/**
- * Build timed transcript turns from Vapi's structured `artifact.messages`.
- * Returns `null` when the input isn't a usable messages array (so the caller can
- * fall back to the plain-string transcript). `at` comes from `secondsFromStart`
- * when present, else it's derived from each message's epoch `time` relative to
- * the earliest message; failing both, it defaults to 0.
- */
+/** Timed turns from `artifact.messages`; null when unusable so the caller falls back to the string.
+ *  `at` = secondsFromStart, else epoch `time` relative to the earliest, else 0. */
 export function turnsFromVapiMessages(messages: unknown): TimedTurn[] | null {
   if (!Array.isArray(messages)) return null;
 

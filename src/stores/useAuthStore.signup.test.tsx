@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  sign_up analytics event. The unique `sign_up` GTM event must fire only when
- *  a NEW account is actually created — not on a failed OTP, and never on a
- *  returning-user login. Runs under jsdom (.test.tsx) so window.dataLayer exists.
- * ------------------------------------------------------------------ */
+// `sign_up` must fire only when a NEW account is created — not on a failed OTP or a
+// returning login. Named .test.tsx so it runs under jsdom and window.dataLayer exists.
 
 const h = vi.hoisted(() => ({
   registerVerify: vi.fn(),

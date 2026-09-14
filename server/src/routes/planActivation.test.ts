@@ -2,14 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-/* The confirm-card handler is the money path: it decides whether a card is
- * merely stored or actually billed, and whether the plan goes live. It's a long
- * Express route wired to Stripe, so rather than mock the whole world these pin
- * the decisions that were wrong — each one maps to a reported bug.
- *
- *  1. "Your trial has started" after deliberately buying a plan.
- *  2. No charge attempted at all on that path.
- *  3. A declined card left the user stranded and duplicated the subscription. */
+// /confirm-card decides whether a card is stored or billed and whether the plan goes
+// live. Source-pinned rather than mocked; each test maps to a reported billing bug.
 
 const src = readFileSync(
   resolve(import.meta.dirname, "billing.routes.ts"),
@@ -43,30 +37,22 @@ describe("buying a plan charges and activates it", () => {
   });
 
   it("does NOT charge a card-required signup's first card — the free trial still runs", () => {
-    // A card-required account is `blocked` by design until a card lands, because
-    // it has no entitlement yet. That block means "no card", not "trial spent" —
-    // reading it as the latter billed the full plan price on day one, which is
-    // the opposite of the $0-auth-then-free-trial policy they signed up under.
+    // A card-required account is `blocked` until a card lands — that means "no card",
+    // not "trial spent". Reading it as the latter billed full price on day one.
     expect(confirmCard).toMatch(
       /const firstCardForCardRequired =\s*\n?\s*profile\.cardRequiredAtSignup && !profile\.cardConfirmedAt;/,
     );
   });
 
   it("decides 'first card' from cardConfirmedAt, not the subscription status", () => {
-    // An abandoned card-required signup has its unpaid trial subscription
-    // cancelled by Stripe (missing_payment_method: "cancel"), landing the profile
-    // on "canceled". Keying on `subscriptionStatus === "none"` would then charge
-    // that returning user full price for a trial they never actually received.
+    // Stripe cancels an abandoned card-required signup's unpaid sub, so the profile
+    // reads "canceled"; keying on "none" would charge that returning user full price.
     expect(confirmCard).not.toMatch(/cardRequiredAtSignup && profile\.subscriptionStatus === "none"/);
   });
 
   it("always enters the activation block for a first card, whatever the status says", () => {
-    // This block is the ONLY writer of cardConfirmedAt, and that column is the
-    // card wall's signal. A walled account can reach "trialing" without ever
-    // having a card (admin suspend → reactivate restores it from trialEndsAt,
-    // which /subscribe sets before any card exists). If the status gate kept the
-    // first card out, we would accept the customer's card, leave the flag null,
-    // and bounce them to /subscribe forever while Stripe charged them at trial end.
+    // Only writer of cardConfirmedAt (the card wall's signal). A walled account can be
+    // "trialing" with no card, so a status gate would leave it null and wall them forever.
     expect(confirmCard).toMatch(
       /if \(\s*\n?\s*activateNow \|\|\s*\n?\s*firstCardForCardRequired \|\|/,
     );
@@ -86,18 +72,15 @@ describe("buying a plan charges and activates it", () => {
   });
 
   it("starts the trial clock for that first card instead of leaving it unset", () => {
-    // Their trial genuinely begins here, so the allowance is snapshotted now —
-    // otherwise a later admin change to the global trial minutes would shrink a
-    // trial that is already running.
+    // Snapshot the allowance now, or a later admin change to trial minutes shrinks a running trial.
     expect(confirmCard).toMatch(/firstCardForCardRequired \? await buildTrialStartData\(\) : null/);
     // Usage is never reset here: a grandfathered user must not be handed minutes.
     expect(confirmCard).not.toMatch(/trialSecondsUsed:/);
   });
 });
 
-/* Bypasses found by an adversarial review: several places OTHER than
- * /confirm-card write subscriptionStatus, so anything that keys the card wall on
- * that string can be lifted without a card ever being entered. */
+// Other places write subscriptionStatus, so a card wall keyed on that string can be
+// lifted without a card ever being entered.
 describe("nothing but /confirm-card can lift the card wall", () => {
   it("the Stripe webhook does not promote an account awaiting its first card", () => {
     const start = src.indexOf('"customer.subscription.');
@@ -116,19 +99,16 @@ describe("nothing but /confirm-card can lift the card wall", () => {
     expect(start, "/renew route not found").toBeGreaterThan(-1);
     const handler = src.slice(start, src.indexOf("router.post(", start + 10));
     expect(handler).toMatch(/profile\.cardRequiredAtSignup && !profile\.cardConfirmedAt/);
-    // Reaching endTrialNow with no payment method threw, and the catch persisted
-    // "past_due" — which moved the account off the status the wall keyed on. The
-    // guard must therefore sit above the Stripe work, not merely exist.
+    // endTrialNow with no payment method threw and the catch wrote "past_due", moving the
+    // account off the walled status — so the guard must sit above the Stripe work.
     expect(handler.indexOf("!profile.cardConfirmedAt")).toBeLessThan(
       handler.indexOf("await endTrialNow("),
     );
   });
 
   it("runs the charge even when the profile is already trialing", () => {
-    // Buying mid-trial is exactly the reported case; the handler used to skip
-    // the whole block for a "trialing" profile. `activateNow` must therefore be
-    // its own disjunct, ahead of the status test. (A third disjunct now sits
-    // between them for the first-card case — see the card-wall test below.)
+    // The handler used to skip the whole block for a "trialing" profile, so `activateNow`
+    // must be its own disjunct ahead of the status test.
     expect(confirmCard).toMatch(
       /activateNow \|\|[\s\S]{0,200}?\(profile\.subscriptionStatus !== "trialing"/,
     );
@@ -145,9 +125,8 @@ describe("a declined card leaves the user able to retry", () => {
   });
 
   it("does not strand the user in past_due on the purchase path", () => {
-    // Previously both failure branches WROTE subscriptionStatus: "past_due",
-    // which pushed the retry down the "create" path and duplicated the sub.
-    // (A comment may still mention it — only an actual write matters.)
+    // Writing "past_due" on failure pushed the retry down the "create" path and
+    // duplicated the sub. Only an actual write matters, not a mention in a comment.
     expect(confirmCard).not.toMatch(/subscriptionStatus:\s*"past_due"/);
   });
 

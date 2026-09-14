@@ -1,10 +1,7 @@
 import { LayoutDashboard, Phone, PhoneCall, Settings } from "lucide-react";
 import { env } from "@/lib/env";
 
-/**
- * A lightweight mock of the live dashboard, shown in the onboarding Launch
- * step. Pure CSS/SVG (no image asset) so it stays crisp at any size.
- */
+/** Mock dashboard for the onboarding Launch step. Pure CSS/SVG so it stays crisp at any size. */
 export function DashboardPreview() {
   return (
     <div className="overflow-hidden rounded-[var(--radius-card)] border border-border bg-card shadow-[var(--shadow-soft)]">

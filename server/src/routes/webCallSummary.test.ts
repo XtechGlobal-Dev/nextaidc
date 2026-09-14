@@ -2,19 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  Web (browser test) calls must send the owner's post-call summary.
- *
- *  A browser call runs on an INLINE Vapi assistant with no assistantId, so
- *  Vapi never fires an end-of-call report for it — the webhook path that
- *  emails phone-call summaries never runs. For months that meant a web call
- *  produced an inbox row and nothing else: no email, no SMS, no WhatsApp,
- *  while the "Test" button in Notifications kept working (it calls the mailer
- *  directly), which made it look like an SMTP problem it never was.
- *
- *  These tests boot the real router over a stubbed Prisma and assert the
- *  summary actually leaves the building.
- * ------------------------------------------------------------------ */
+// Browser calls use an inline Vapi assistant, so no end-of-call webhook fires — for
+// months that meant no summary at all. These assert it leaves via POST /api/calls.
 
 const h = vi.hoisted(() => ({
   conversionFindUnique: vi.fn(),
@@ -215,9 +204,8 @@ describe("POST /api/calls — owner summary for web (test) calls", () => {
     expect(sent.callerName).toBe("Browser Test");
     expect(sent.summary).toBe(WEB_CALL_BODY.summary);
     expect(sent.transcript).toContain("What time do you open on Sunday?");
-    // No stored recording URL, but the Vapi call id means the proxy can stream
-    // it on demand — so the email still carries a playable link on our domain.
-    // The path is a SIGNED token, not the raw call id.
+    // No stored URL, but the Vapi call id lets the proxy stream it — the link is on
+    // our domain and carries a signed token, not the raw call id.
     expect(sent.recordingUrl).toMatch(
       /^https:\/\/api\.test\/api\/calls\/recording-file\/eyJ[\w.-]+$/,
     );

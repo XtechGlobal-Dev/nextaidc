@@ -1,19 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Which front door a signed-in account belongs on.
- *
- *  A brand can be reached two ways, and the fix for being on the wrong
- *  door is different for each:
- *
- *    path — example.com/acme/…  The slug is a prefix on the platform's
- *           host. A wrong door is fixed by rewriting the path, in place,
- *           on the same origin — so the session survives the move.
- *    host — acme.example.com, or the brand's own domain. The host IS the
- *           door. Nothing in the path can change it; the only way off a
- *           wrong host is to leave for the account's own origin.
- *
- *  Pure, so the rule can be tested without a browser. The guard that
- *  applies it is components/auth/RequireBrandFrontDoor.tsx.
- * ------------------------------------------------------------------ */
+// Which front door a signed-in account belongs on. A wrong path door is fixed by rewriting the path on the
+// same origin (session survives); a wrong host door can only be left for the account's own origin. Pure, for tests.
 
 export interface FrontDoorInput {
   /** Brand slug the account belongs to; null for a platform-level account. */
@@ -66,16 +52,12 @@ export function frontDoorTarget(opts: FrontDoorInput): string | null {
     // Another brand's account. Only its own origin will do, and only when we
     // actually know it: guessing at a hostname would be worse than staying.
     if (!accountOrigin) return null;
-    // A brand's origin is always a real https host, so on a developer's machine
-    // this would throw them out of the environment they are working in and onto
-    // production. Stay put and let the page render where it is.
+    // A brand origin is a real https host; on a dev machine this would bounce them to production.
     if (isLoopbackOrigin(pageOrigin)) return null;
     return `${accountOrigin.replace(/\/+$/, "")}${pathname}${search}${hash}`;
   }
 
-  // Path routing. The prefix only counts as a whole segment: "/acmecorp" starts
-  // with "/acme" as a string but is a different brand, and slicing blindly
-  // would hand the browser "corp/dashboard".
+  // Prefix must match a whole segment: "/acmecorp" starts with "/acme" but slicing blindly gives "corp/dashboard".
   const prefix = pageSlug ? `/${pageSlug}` : "";
   const isPrefixed = !!prefix && (pathname === prefix || pathname.startsWith(`${prefix}/`));
   const bare = isPrefixed ? pathname.slice(prefix.length) || "/" : pathname;

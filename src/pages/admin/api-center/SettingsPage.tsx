@@ -13,18 +13,8 @@ import { AlertRulesPanel } from "@/components/admin/api-center/AlertRulesPanel";
 import { ApiCenterEmpty, SectionHeading, Segmented } from "@/components/admin/api-center/shared";
 import type { ProviderSettingRow } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  Settings — the per-provider knobs the rest of the API Center reads,
- *  plus the alert rules that measure against them.
- *
- *  Nothing here is required: a provider with no row uses the defaults shipped in
- *  the code, which is why adding a vendor never needs a seed step. Filling a row
- *  in is how an operator teaches this dashboard what "too much" means for that
- *  particular vendor — and the alert rules beside it are what act on that.
- *
- *  Rows save individually rather than behind one page-level Save, so a mistake
- *  in one provider can't discard edits to another.
- * ------------------------------------------------------------------ */
+// Per-provider thresholds + alert rules. No row = code defaults, so new vendors need no seed step.
+// Rows save individually so one bad provider edit can't discard another's.
 
 type Tab = "providers" | "alerts";
 

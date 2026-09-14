@@ -44,20 +44,8 @@ import {
   rejectionReason,
 } from "@/lib/ticketFiles";
 
-/* ------------------------------------------------------------------ *
- *  The message box.
- *
- *  Files upload the moment they are added — dropped, pasted or picked —
- *  and sit above the text as removable tiles with their own progress,
- *  so writing and uploading happen at the same time instead of one
- *  after the other. Send only goes live once every attachment has
- *  landed, which is why a slow upload never produces a message whose
- *  files quietly went missing.
- *
- *  Shared by every ticket surface: a requester's reply box, a handler's
- *  reply box (which adds the internal-note switch and saved replies),
- *  and the description field on a "new request" form.
- * ------------------------------------------------------------------ */
+// Ticket message box shared by every ticket surface. Files upload as soon as they're added, and Send
+// only enables once every attachment has landed, so a slow upload can't produce a message with missing files.
 
 type PendingStatus = "uploading" | "done" | "error";
 
@@ -101,12 +89,7 @@ const FILE_LIMITS = `up to ${MAX_ATTACHMENTS_PER_MESSAGE} files, ${formatBytes(M
 export interface ChatComposerProps {
   /** Send the message. Resolving clears the box; throwing keeps the draft. */
   onSend: (body: string, attachments: AttachmentDescriptor[]) => Promise<void>;
-  /**
-   * Chat mode: the box empties the instant Send is pressed, before
-   * {@link onSend} has come back. Use it where the page shows the message as a
-   * pending bubble and handles a failed send there (the outbox does). A form
-   * leaves this off so its text survives a failed submit.
-   */
+  /** Empty the box on Send before onSend resolves; only where a pending bubble handles failure (the outbox). */
   optimistic?: boolean;
   /** Stage one file and return its signed descriptor. */
   upload: (
@@ -118,18 +101,11 @@ export interface ChatComposerProps {
   disabledReason?: string;
   placeholder?: string;
   autoFocus?: boolean;
-  /**
-   * How tall the box starts, in px. A reply box wants one line (the default);
-   * the description on a NEW request is the main input of the form, so it opens
-   * at a size that invites a paragraph instead of a sentence.
-   */
+  /** Starting height in px. Default is one line; a new-request description opens taller to invite a paragraph. */
   minHeight?: number;
   /** Where growing stops and the box starts scrolling instead. */
   maxHeight?: number;
-  /**
-   * Enter sends (chat) vs Enter starts a new line (a description field, where
-   * submitting mid-thought on a stray Enter loses what you were writing).
-   */
+  /** Enter sends (chat) vs Enter newlines (description field, where a stray Enter mustn't submit). */
   submitOnEnter?: boolean;
   /** Give the send button a visible label — worth it when it submits a form. */
   sendLabel?: string;
@@ -142,21 +118,11 @@ export interface ChatComposerProps {
   /** The message being replied to. Shown as a quote above the box. */
   replyTo?: TicketMessage | null;
   onCancelReply?: () => void;
-  /**
-   * The message being edited: its text fills the box under an "Editing" banner,
-   * Enter hands the new text to {@link onSaveEdit}, and Esc cancels. Whatever
-   * was being typed before is parked and comes back when the edit ends. Files
-   * can't change on an edit, so the tray steps aside while one is open.
-   */
+  /** Message being edited. The in-progress draft is parked and restored when the edit ends; files can't change on an edit. */
   editing?: TicketMessage | null;
   onSaveEdit?: (message: TicketMessage, body: string) => Promise<void>;
   onCancelEdit?: () => void;
-  /**
-   * Canned answers offered from a "Saved reply" menu. Bodies arrive ready to
-   * insert — the page has already filled the blanks — and go in at the caret,
-   * so one can be dropped into a half-written reply. Passing the list (even
-   * empty) is what shows the menu.
-   */
+  /** Saved replies (blanks already filled), inserted at the caret. Passing the list (even empty) shows the menu. */
   savedReplies?: { id: string; title: string; body: string }[];
   onManageSavedReplies?: () => void;
   /** Called while someone is actually typing, at most once every few seconds. */
@@ -217,9 +183,7 @@ export function ChatComposer({
   // text. A reply box keeps them alongside.
   const stacked = Boolean(minHeight);
 
-  // Entering edit mode swaps the draft for the message's text (the draft is
-  // parked and comes back when the edit ends, saved or cancelled) and puts the
-  // caret at the end, so a one-word fix is a couple of keystrokes.
+  // Edit mode swaps in the message text (draft parked until the edit ends) with the caret at the end.
   const editingId = editing?.id ?? null;
   useEffect(() => {
     if (editing) {
@@ -248,11 +212,8 @@ export function ChatComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
 
-  // Grow the box with its content, between the opening height and the ceiling.
-  //
-  // `height: auto` first is what makes it SHRINK again: scrollHeight can only
-  // report content taller than the current box, so measuring without resetting
-  // would let the textarea ratchet up and never come back down after a delete.
+  // Auto-grow. `height: auto` first is what lets it shrink: scrollHeight never reports less than the
+  // current box, so without the reset the textarea ratchets up and never comes back down.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -450,9 +411,7 @@ export function ChatComposer({
       setPending([]);
       textareaRef.current?.focus();
     };
-    // Chat: the box is empty before the request has even left. The message is
-    // already on screen as a pending bubble, and that bubble — not this box —
-    // is where a failure shows up. A form keeps its text until the send succeeds.
+    // Chat clears before the request leaves; failure shows on the pending bubble. A form keeps its text until success.
     if (optimistic) clearBox();
     try {
       await onSend(body, attachments);
@@ -764,10 +723,7 @@ export function ChatComposer({
             <div
               className={cn(
                 "rounded-xl border border-border bg-card transition-colors focus-within:border-primary/60",
-                // A one-line reply reads best with the controls flanking it. A tall
-                // description must not be flanked: a full-height button column
-                // beside it leaves a dead gutter and squeezes the text into a
-                // narrow ribbon, so those controls move underneath instead.
+                // Controls flank a one-line reply but sit under a tall description, or they squeeze the text into a ribbon.
                 stacked
                   ? "px-3 py-2.5"
                   : "flex min-h-12 min-w-0 flex-1 items-end gap-1 px-2 py-1.5",

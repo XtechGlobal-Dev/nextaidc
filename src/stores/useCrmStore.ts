@@ -45,10 +45,8 @@ export const useCrmStore = create<CrmState>()(
         persistCrm({ customWebhookUrl: url }, "Failed to save webhook");
       },
       setNexleon: (url, formKey) => {
-        // Saving real own-values also marks the user's provider as Nexleon so the
-        // backend delivers to their CRM instead of the company default. Clearing
-        // the values (revert to default) leaves the provider untouched — empty
-        // own-values make delivery fall back to the global default automatically.
+        // Real own-values also select Nexleon so delivery goes to their CRM. Clearing them
+        // leaves the provider alone — empty values already fall back to the global default.
         const selectNexleon = url.trim().length > 0 && formKey.trim().length > 0;
         set((s) => ({
           crm: {

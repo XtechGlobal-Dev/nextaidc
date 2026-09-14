@@ -9,9 +9,8 @@ export type Country = {
   name: string;
   /** International dialing code without the leading "+". */
   dial: string;
-  /** Accepted national-number digit length(s), excluding the dial code.
-   *  Used only to cap input length in the UI — authoritative validation is
-   *  delegated to libphonenumber (see `isValidPhone`). */
+  /** National-number digit range, excluding the dial code. Only caps UI input length —
+   *  real validation is libphonenumber (`isValidPhone`). */
   len: [min: number, max: number];
 };
 
@@ -85,10 +84,8 @@ export type NumberPrefix = {
   type: NumberType;
 };
 
-/** Per-country dialing prefixes for narrowing a Twilio number search (ISO → options).
- *  Used by the customer number picker, the admin purchase dialog, and the admin
- *  per-country prefix config. NANP countries (US/CA) use area-code search instead,
- *  so their "prefix" is a 3-digit area code (all priced as local). */
+/** Per-country prefixes for narrowing a Twilio number search. NANP (US/CA) searches by area code,
+ *  so their "prefix" is a 3-digit area code, all priced as local. */
 export const NUMBER_PREFIXES: Record<string, NumberPrefix[]> = {
   au: [
     { value: "02", label: "02 — Sydney (NSW/ACT)", type: "local" },
@@ -149,10 +146,7 @@ export function formatNumberPrice(currency: string, amount: number): string {
 /** Flag image URL for a country code (SVG, served by flagcdn). */
 export const flagUrl = (code: string) => `https://flagcdn.com/${code}.svg`;
 
-/**
- * Pick the best country for a stored E.164-ish value (e.g. "+15551234567")
- * by matching the longest dial-code prefix. Falls back to the default.
- */
+/** Country for a stored E.164-ish value, by longest dial-code prefix; falls back to the default. */
 export function countryFromValue(value: string): Country {
   if (!value.startsWith("+")) return DEFAULT_COUNTRY;
   const digits = value.slice(1);
@@ -170,9 +164,8 @@ export function countryFromValue(value: string): Country {
 const byCode = (code: string): Country | undefined =>
   COUNTRIES.find((c) => c.code === code.toLowerCase());
 
-// Curated IANA timezone → ISO for markets where the browser *language* often
-// disagrees with the *physical region* (e.g. an "en-US" locale used from India or
-// the Gulf). Checked before the locale so timezone (a location signal) wins.
+// Timezone → ISO for markets where browser language often disagrees with physical region
+// (an "en-US" locale used from India or the Gulf). Checked before the locale so location wins.
 const TZ_TO_ISO: Record<string, string> = {
   "Asia/Kolkata": "in", "Asia/Calcutta": "in",
   "Asia/Karachi": "pk", "Asia/Dhaka": "bd",
@@ -188,10 +181,8 @@ const TZ_TO_ISO: Record<string, string> = {
   "America/Winnipeg": "ca", "America/Halifax": "ca",
 };
 
-/** Best-effort guess of the visitor's country, to pre-select a phone dial code.
- *  Prefers the device timezone (a physical-location signal) for the markets we
- *  curate, then the browser locale's region subtag (e.g. "en-IN" → IN), and finally
- *  the default. Only ever returns a country we actually list. */
+/** Guess the visitor's country for the dial-code default: timezone first, then the locale's region
+ *  subtag, then DEFAULT_COUNTRY. Only returns a country we list. */
 export function guessCountry(): Country {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -226,50 +217,28 @@ export function nationalNumber(value: string, country: Country): string {
   return rest.replace(/\D/g, "");
 }
 
-/**
- * Sanitize a typed national number into the digits we store/display — WITHOUT
- * silently rewriting the user's input. We only drop non-digit characters (spaces,
- * dashes, parentheses) and cap the length. Crucially we do NOT strip a leading "0"
- * trunk code from the *display*: a "0" the user typed stays put so the cursor never
- * jumps and digits never vanish mid-typing. Instead we allow ONE extra digit when
- * the number leads with "0", so users who write their number with the domestic
- * trunk prefix (common in India/AU/UK) can still type the full national number
- * after it. The "0" is dropped only when the value is turned into E.164 (`toE164`).
- */
+/** Digits-only + length cap, WITHOUT stripping a typed leading "0" (stripping made the cursor jump and
+ *  digits vanish mid-typing). A leading "0" gets one extra digit of room; `toE164` drops it later. */
 export function nationalDigits(country: Country, raw: string): string {
   const digits = raw.replace(/\D/g, "");
   const cap = digits.startsWith("0") ? country.len[1] + 1 : country.len[1];
   return digits.slice(0, cap);
 }
 
-/**
- * Validate a full phone value (E.164, e.g. "+15551234567") using libphonenumber's
- * per-country rules — number length, valid prefixes, and leading-digit patterns.
- * This correctly rejects numbers a naive length check would accept, such as an
- * Indian number with a leading "0" or one not starting 6–9.
- */
+/** Validate an E.164 value with libphonenumber's per-country rules — rejects what a length check
+ *  accepts, e.g. an Indian number with a leading "0" or not starting 6–9. */
 export function isValidPhone(value: string): boolean {
   if (!value?.trim()) return false;
   const e164 = value.startsWith("+") ? value : `+${value}`;
   if (!isValidPhoneNumber(e164)) return false;
-  // `isValidPhoneNumber` is lenient: it will silently strip a leading "0" trunk
-  // code and still report the number as valid (e.g. "+9109876543210"). We want a
-  // strict check so such a number is flagged, not quietly accepted — so we also
-  // require the value to already be in canonical E.164 form. Italy's legitimate
-  // leading "0" is preserved by libphonenumber, so it still passes.
+  // `isValidPhoneNumber` silently strips a trunk "0" and passes "+9109876543210" — so also
+  // require canonical E.164. Italy's legitimate leading "0" survives parsing and still passes.
   const parsed = parsePhoneNumberFromString(e164);
   return parsed?.number === e164;
 }
 
-/**
- * Human-facing validation message for a full phone value, or `null` when the
- * number is valid (or blank — callers handle "required" separately).
- *
- * When the number is invalid only because of a leading "0" trunk code — i.e.
- * removing it would make the number valid (the India / UK case) — we return a
- * targeted hint instead of the generic message, so the user understands *why*
- * their number is being rejected rather than guessing.
- */
+/** Validation message, or null when valid or blank (callers handle "required"). A number that's
+ *  only wrong because of a trunk "0" (India/UK) gets a targeted hint instead of the generic one. */
 export function phoneError(value: string): string | null {
   if (!value?.trim()) return null;
   if (isValidPhone(value)) return null;
@@ -281,14 +250,8 @@ export function phoneError(value: string): string | null {
   return "Enter a valid phone number for the selected country.";
 }
 
-/**
- * Like `phoneError`, but additionally requires a MOBILE-capable number — for SMS /
- * WhatsApp destinations, which can't be delivered to a landline. libphonenumber is
- * permissive (e.g. it accepts many 10-digit Indian numbers as valid FIXED_LINE), so
- * for these channels we also reject a number it classifies as a definite landline
- * or other non-mobile type. Numbers of ambiguous ("mobile or fixed") or unknown
- * type are accepted, to avoid false negatives.
- */
+/** `phoneError` plus a mobile requirement for SMS/WhatsApp. Rejects a definite landline/non-mobile
+ *  type; ambiguous or unknown types pass to avoid false negatives. */
 export function mobileError(value: string): string | null {
   const generic = phoneError(value);
   if (generic) return generic;
@@ -301,14 +264,8 @@ export function mobileError(value: string): string | null {
   return null;
 }
 
-/**
- * Build a canonical E.164 value from a country + the digits the user typed. Drops a
- * leading "0" trunk code when that's what makes the number valid (India, UK,
- * Australia…), while preserving a legitimately-leading "0" that's part of the
- * national number (e.g. Italian landlines). Returns "" for empty input. While the
- * number is still incomplete (neither form valid yet) it keeps the digits as typed,
- * so the user isn't blocked mid-entry and `phoneError` can surface the right hint.
- */
+/** Canonical E.164 from country + typed digits. Drops a trunk "0" only when that makes the number
+ *  valid (keeps Italy's real leading 0); incomplete input stays as typed so `phoneError` can hint. */
 export function toE164(country: Country, digits: string): string {
   const d = digits.replace(/\D/g, "");
   if (!d) return "";

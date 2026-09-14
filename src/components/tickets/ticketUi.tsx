@@ -18,15 +18,8 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { Ticket, TicketPriority, TicketStatus } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Shared vocabulary for ticket state.
- *
- *  Both lanes and both sides read from these, so a status means the
- *  same thing wherever it appears — with one deliberate split: what
- *  "pending" means depends on which end of the conversation you are.
- *  To a requester it is "we're waiting on you"; to a handler it is
- *  "waiting on them". Same row, opposite reading.
- * ------------------------------------------------------------------ */
+// Shared ticket-state vocabulary. One deliberate split: "pending" reads as "waiting on you" to a
+// requester and "waiting on them" to a handler.
 
 /** Status as the REQUESTER reads it. */
 export const STATUS_LABEL: Record<TicketStatus, string> = {
@@ -65,9 +58,7 @@ const PRIORITY_DOT: Record<TicketPriority, string> = {
   urgent: "bg-danger",
 };
 
-/* Picker menus: each choice gets a tone (dot + tile) and a one-line hint, so
- * the menu explains itself instead of assuming everyone knows what "pending"
- * means to a support team. */
+// Picker menus: each choice gets a tone and a one-line hint so the menu explains itself.
 
 export const STATUS_TONE: Record<TicketStatus, { dot: string; tile: string }> = {
   open: { dot: "bg-primary", tile: "bg-primary-tint text-primary" },
@@ -121,11 +112,7 @@ export function ToneDot({ className }: { className: string }) {
   return <span className={cn("size-2.5 rounded-full", className)} />;
 }
 
-/**
- * One choice in a picker menu: a tinted tile with an icon (or a coloured dot),
- * the label, an optional one-line hint, and a check when it is the current
- * value. Shared by every ticket menu so they all read the same way.
- */
+/** One picker-menu choice: tinted tile, label, optional hint, check when current. Shared by every ticket menu. */
 export function MenuOption({
   icon,
   tone,
@@ -177,12 +164,7 @@ export function MenuOption({
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  The icon square at the front of a ticket row. Picked from what the
- *  ticket is about — subject first, then department — so a glance down
- *  a list separates money questions from login trouble without reading.
- *  One definition, so every inbox and every requester list agree.
- * ------------------------------------------------------------------ */
+// Ticket row icon, picked from subject then department, so a glance separates money from login trouble.
 
 const TILE_TONE = {
   blue: "border-primary/25 bg-primary-tint-soft text-primary",
@@ -266,11 +248,7 @@ const STATUS_DOT: Record<TicketStatus, { dot: string; text: string }> = {
   closed: { dot: "bg-muted-foreground", text: "text-muted-foreground" },
 };
 
-/**
- * The status as a dot and a word, no pill. For places that already draw a border
- * around it — a picker button, a table cell — where a filled badge inside a
- * bordered box reads as a shape within a shape.
- */
+/** Status as dot + word, no pill, for bordered spots where a filled badge reads as a shape within a shape. */
 export function TicketStatusDot({
   status,
   staff = false,
@@ -312,14 +290,7 @@ export function TicketPriorityBadge({
   );
 }
 
-/**
- * Which tenant a request came from.
- *
- * Renders only when there is a brand to name — so it is invisible on a brand
- * admin's own inbox, where every ticket is from the same tenant and the badge
- * would be noise, and present on the platform owner's, where it is the first
- * thing they need.
- */
+/** Tenant badge. Renders only when there's a brand to name, so it's absent on a brand admin's own inbox. */
 export function TicketBrandBadge({
   brand,
   className,
@@ -394,11 +365,7 @@ export function TicketAvatar({
   );
 }
 
-/**
- * "245 / 1,000 characters" — the live count under a message box. Turns amber as
- * the ceiling comes into view and red once it is reached, so nobody finds out
- * the limit by having their typing stop.
- */
+/** Live "245 / 1,000 characters" count; amber near the ceiling, red at it, so the limit isn't discovered by typing stopping. */
 export function CharacterCount({
   value,
   max,
@@ -424,12 +391,7 @@ export function CharacterCount({
   );
 }
 
-/**
- * Red "new message" marker for a thread with a reply the viewer hasn't opened.
- *
- * The pulse halo is what makes it findable in a long list; it is hidden for
- * people who prefer reduced motion.
- */
+/** Red unread marker. The pulse halo makes it findable in a long list; hidden under reduced motion. */
 export function NewMessageDot({ inline = false, className }: { inline?: boolean; className?: string }) {
   return (
     <span

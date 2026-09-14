@@ -1,16 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Tenant routing. Getting this wrong has two failure modes and they
- *  are not equally bad:
- *
- *    - refusing a ready tenant → an error, loud, fixed in a minute;
- *    - serving a brand from the WRONG database, or from the control
- *      plane when its own database exists → its customers' rows in
- *      shared storage, or in another brand's, silently. That is the
- *      contract this module exists to keep, so the tests below are
- *      mostly about that direction.
- * ------------------------------------------------------------------ */
+// Tenant routing. Refusing a ready tenant is a loud error; serving a brand from the wrong DB
+// (or the control plane) is a silent cross-tenant leak — so most tests pin the second direction.
 
 const h = vi.hoisted(() => ({
   findMany: vi.fn(),
@@ -93,9 +84,8 @@ describe("tenantFor — a brand's own database", () => {
     await expect(tenantFor(null)).rejects.toThrow(TenantUnavailableError);
   });
 
-  // Anything but `active` means the database is not ready to be trusted with
-  // traffic. It is NEVER the control plane instead — that would put the
-  // brand's rows in the wrong database.
+  // Anything but `active` refuses — never the control plane instead, or the
+  // brand's rows land in the wrong database.
   it.each(["provisioning", "migrating", "failed", "disabled"])(
     "refuses a brand whose database is %s, and never falls back",
     async (status) => {
@@ -141,9 +131,8 @@ describe("callDb — where a brand's calls live", () => {
     expect(await callDb("b_acme")).toBe(await tenantFor("b_acme"));
   });
 
-  // This used to fall back to the control plane. That is exactly the write
-  // that must never happen now: a call has one home, and if that home is not
-  // ready the caller gets an error, not a different database.
+  // Used to fall back to the control plane; a call has one home, and an unready
+  // home is an error, not a different database.
   it("refuses a brand with no ready database rather than using the control plane", async () => {
     await expect(callDb("b_normal")).rejects.toThrow(TenantUnavailableError);
     await expect(callDb(null)).rejects.toThrow(TenantUnavailableError);
@@ -216,9 +205,8 @@ describe("allCallDbs", () => {
 });
 
 describe("assertRoutable", () => {
-  // `where: { conversion: { userId } }` is a join into a table that, for a
-  // tenant, is in a different database. There is no query that answers it —
-  // so this must throw rather than quietly return other rows.
+  // A relation filter into the control plane has no answer in a tenant DB; it
+  // must throw rather than quietly return other rows.
   it("rejects a filter that joins through a control-plane relation", () => {
     expect(() => assertRoutable({ conversion: { userId: "u1" } }, "callLog.updateMany")).toThrow(
       CrossDatabaseQueryError,

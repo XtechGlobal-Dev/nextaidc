@@ -28,17 +28,7 @@ const GROUP_COPY: Record<BrandFontOption["group"], { label: string; blurb: strin
   },
 };
 
-/**
- * Colour + typeface for one brand.
- *
- * Ten ready-made palettes, either of which can still be overridden by hand
- * (which flips the brand to a "custom" palette), and a font catalog split into
- * the two families a customer actually distinguishes: Business and Classic.
- *
- * The preview is a real chunk of app chrome painted with the draft values —
- * a swatch row tells you the hue, but only a button next to a badge next to
- * body text tells you whether the brand is legible.
- */
+/** Colour + typeface for one brand. Hand-editing a preset flips it to "custom"; the preview is real app chrome so legibility can be judged. */
 export function BrandThemeSection({
   catalog,
   value,
@@ -50,10 +40,7 @@ export function BrandThemeSection({
   onChange: (patch: Partial<ThemeDraft>) => void;
   disabled?: boolean;
 }) {
-  // Load every catalog face while this screen is open, so each option is set in
-  // the typeface it actually is. Without this the picker would show ten
-  // identically-rendered names — the one thing it exists to let you compare.
-  // One stylesheet for all of them, removed when the editor closes.
+  // Load every catalog face so each option renders in its own typeface; one stylesheet, removed on close.
   useEffect(() => {
     if (!catalog) return;
     const families = catalog.fonts

@@ -12,12 +12,7 @@ const GREEN_CHECK =
 const BLUE_CHECK =
   "data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground";
 
-/**
- * The permission matrix used to define a role: one row per admin section with
- * a checkbox per capability (View/Create/Edit/Delete). Sections that render a
- * data table expand to reveal column-level (`section.field.*`) sub-permissions
- * — allow-list semantics, so a role sees only the columns ticked here.
- */
+/** Role permission matrix. Table sections expand to column (`section.field.*`) perms; allow-list, so only ticked columns show. */
 export function PermissionSelector({
   sections,
   capabilities,
@@ -50,9 +45,7 @@ export function PermissionSelector({
   }
 
   function toggleSection(section: SectionDef) {
-    // Checking the section selects EVERYTHING it owns (capabilities + columns);
-    // clicking again while anything is on clears it. Unchecking an individual
-    // point only removes that one — the section stays checked while any remain.
+    // Section checkbox selects everything it owns; clicking while anything is on clears all of it.
     const keys = sectionAllKeys(section);
     const anyOn = keys.some((k) => value.has(k));
     mutate((next) => keys.forEach((k) => (anyOn ? next.delete(k) : next.add(k))));

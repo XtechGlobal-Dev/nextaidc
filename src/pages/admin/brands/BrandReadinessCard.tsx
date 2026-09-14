@@ -3,11 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { BrandReadiness } from "@/lib/api";
 
-/**
- * What still stands between this brand and "finished", with a jump to the tab
- * that fixes each gap. Computed on the server (see brandReadiness in
- * brands.routes.ts) so the list is the same one the API acts on.
- */
+/** Remaining setup gaps with a jump to each fix. Server-computed (brandReadiness) so it matches what the API acts on. */
 export function BrandReadinessCard({
   readiness,
   onGo,

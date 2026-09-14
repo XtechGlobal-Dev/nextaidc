@@ -1,17 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  A tiny in-process cache with a time-to-live.
- *
- *  For the handful of lookups every authenticated request repeats —
- *  which departments this staff member holds, say — where the answer
- *  changes rarely and a few seconds of staleness is acceptable, but a
- *  database round trip per request is not. On a remote database each of
- *  those costs 100-300ms, and one screen load makes five or six at once.
- *
- *  Single-process by design: nothing here is shared between instances.
- *  That is fine because entries expire on their own within seconds, and
- *  the writers that matter call `clear()` explicitly so their own change
- *  is visible at once.
- * ------------------------------------------------------------------ */
+// Tiny in-process TTL cache for per-request lookups that rarely change.
+// Single-process on purpose — entries expire in seconds and writers call clear().
 export class TtlCache<V> {
   private readonly entries = new Map<string, { value: V; expiresAt: number }>();
 

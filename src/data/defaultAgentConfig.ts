@@ -49,9 +49,8 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
     humanHandover: { enabled: false, transferNumber: "" },
   },
   automations: {
-    // Email + WhatsApp owner summaries on by default; SMS OFF by default (per-message
-    // cost — owner opts in). They deliver to the account's signup email / mobile
-    // until the user overrides the source below.
+    // Email + WhatsApp summaries on by default; SMS off (per-message cost, owner opts in).
+    // Deliver to the signup email/mobile until overridden below.
     ownerEmailSummary: true,
     ownerSmsSummary: false,
     // Master switch for "Text Info to Callers". OFF by default — it costs per
@@ -78,10 +77,8 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
     voiceStability: 0.45,
     voiceSpeed: 1.05,
     allowHangUp: true,
-    // Office ambience is the one we want every new agent to start with — it makes
-    // the line sound staffed rather than dead. "default" defers to Vapi, which is
-    // not the same thing and can change under us. Only the SEED changes: an agent
-    // that already exists keeps whatever its owner has set (or left unset).
+    // Office ambience makes the line sound staffed; "default" defers to Vapi and can change
+    // under us. Seed only — existing agents keep whatever the owner set.
     backgroundSound: "office",
   },
 };

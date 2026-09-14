@@ -1,11 +1,6 @@
 import type { Ticket } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Saved replies carry blanks — {{requester_name}}, {{ticket_number}} —
- *  filled from the ticket the moment one is dropped into the composer.
- *  The list here is the whole vocabulary: it drives the chips in the
- *  editor AND the substitution, so the two can never disagree.
- * ------------------------------------------------------------------ */
+// Saved-reply blanks ({{requester_name}} etc). This list drives both the editor chips and the substitution so they can't disagree.
 
 export const SAVED_REPLY_VARIABLES = [
   { token: "{{requester_name}}", hint: "who raised it, in full" },

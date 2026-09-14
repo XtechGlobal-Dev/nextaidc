@@ -1,19 +1,8 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 
-/* ------------------------------------------------------------------ *
- *  One-shot: seed smsToCallerEnabled from smsEnabled.
- *
- *  "SMS to Caller" used to ride on the smsEnabled flag. Splitting it into
- *  its own column defaults every existing plan to false, which would
- *  silently take the feature away from plans that already had it. Copying
- *  the old flag across keeps every plan exactly as it was; from then on the
- *  two are edited independently in Admin → Plans.
- *
- *  Safe to re-run: only touches plans where the two still disagree AND the
- *  new flag is still at its default false, so it never undoes an admin's
- *  later deliberate change.
- * ------------------------------------------------------------------ */
+// One-shot: seed smsToCallerEnabled from smsEnabled so splitting the column doesn't silently remove the
+// feature from plans that had it. Only touches rows still at the default false, so re-runs never undo an admin change.
 
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes("--apply");

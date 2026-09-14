@@ -2,21 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-/* ------------------------------------------------------------------ *
- *  A structural guard, not a behaviour test.
- *
- *  A brand's customer data lives in the brand's own database, and since
- *  phase 6 so do its accounts: the control plane holds only the
- *  platform's own things. A `prisma.profile.update(...)` added in six
- *  months would not even compile any more (the model is gone from the
- *  control-plane client) — but a `prisma.ticket` or `prisma.user` would,
- *  because the platform keeps its own tickets and its own people in
- *  tables of the same shape. So no file under src/ may name a shared-
- *  shape model on the control-plane client except the ones listed, each
- *  with a reason. Everything else goes through `tenantFor` /
- *  `tenantForUser` / `requestTenant` / `planeOf` (services/tenantDb.ts)
- *  or, for calls, createCall/updateCall (services/callWrite.ts).
- * ------------------------------------------------------------------ */
+// Structural guard: customer data lives in each brand's DB, but shared-shape models like
+// `prisma.ticket` still compile on the control plane — so no src/ file may name one there unless ALLOWED.
 
 const SRC = join(import.meta.dirname, "..");
 
@@ -30,9 +17,8 @@ const ALLOWED = new Map<string, string>([
   ["services/voices.ts", "the platform's own people have no brand; their role is read from Main"],
 ]);
 
-// A word boundary spelled out ([^A-Za-z0-9_$] / a negative lookahead) rather
-// than with backslash escapes, which do not survive the shell this file is
-// maintained through.
+// Word boundary spelled out instead of \b — backslashes don't survive the shell
+// this file is maintained through.
 const CONTROL_PLANE_USE =
   /(?:^|[^A-Za-z0-9_$])(?:prisma|tx)[.](?:user|callLog|verificationCode|webhookDelivery|appointment|chatConversation|chatMessage|humanTransferSettings|transferDepartment|crmIntegration|planEvent|profile|conversion|couponRedemption|commission|brandMember|ticket|ticketMessage|ticketMerge|ticketMessageReaction|ticketAttachment|ticketDepartment|ticketSavedReply|staffRole|notification)(?![A-Za-z0-9_$])/;
 

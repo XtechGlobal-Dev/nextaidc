@@ -24,14 +24,7 @@ type TemplateVersion = {
   replacedBy: string;
 };
 
-/**
- * Admin editor for the global master-prompt scaffold. The text here wraps every
- * customer's assistant prompt; two placeholders are filled per customer at
- * compile time: {{businessName}} and {{sections}} (the customer's identity,
- * services, FAQs and rules). Saving affects each customer's live assistant the
- * next time their AI Brain is saved/synced (prompts they've manually edited are
- * left untouched).
- */
+/** Global master-prompt scaffold wrapping every assistant prompt. Applies on the customer's next AI Brain sync; manually edited prompts are left alone. */
 export function MasterPromptSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -88,9 +81,7 @@ export function MasterPromptSettings() {
     };
   }, []);
 
-  // All three placeholders are mandatory in a custom template — without them a
-  // customer's assistant name / business name / knowledge would vanish from every
-  // prompt. The server rejects a save missing any; we mirror that here to block early.
+  // All three placeholders are mandatory or customer data vanishes from prompts; mirrors the server check.
   const missing = useMemo(() => {
     const m: string[] = [];
     if (!/\{\{\s*assistantName\s*\}\}/i.test(draft)) m.push("{{assistantName}}");

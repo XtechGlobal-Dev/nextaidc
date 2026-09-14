@@ -28,10 +28,8 @@ describe("stripDontHangUpFirst", () => {
 });
 
 describe("the scripted sign-off must actually hang up", () => {
-  /* The prompt names one exact sign-off sentence. If that wording isn't in
-   * END_CALL_PHRASES it leaves the line open, and the agent falls back to a
-   * bare "Goodbye." — the phrase here that does end the call. Keep the three
-   * in step: WIRE_BEHAVIOUR_RULES, endCallPromptSection, END_CALL_PHRASES. */
+  // If the scripted sign-off isn't in END_CALL_PHRASES the line stays open.
+  // Keep WIRE_BEHAVIOUR_RULES, endCallPromptSection and END_CALL_PHRASES in step.
   const scripted = "no worries at all — thanks for calling, have a great day!";
 
   it("ends the call on the sign-off the behaviour rules script", () => {
@@ -45,10 +43,8 @@ describe("the scripted sign-off must actually hang up", () => {
     expect(section).toMatch(/never shorten it to a single word/i);
   });
 
-  /* Described sign-offs ("a warm sentence ending in X, e.g. …") got paraphrased
-   * down to "Goodbye." on live calls, while the scripted "anything else I can
-   * help you with?" line came back verbatim every time. Both places must give
-   * the sentence as an exact script, not an example. */
+  // "e.g." sign-offs got paraphrased to "Goodbye." on live calls; exact scripts
+  // came back verbatim. So both places must script it, not exemplify it.
   it("gives the sign-off as an exact script rather than an example", () => {
     for (const text of [endCallPromptSection(), WIRE_BEHAVIOUR_RULES]) {
       expect(text).toMatch(/EXACTLY this, word for word/);

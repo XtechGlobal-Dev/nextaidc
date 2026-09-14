@@ -2,15 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  Call-recording access control.
- *
- *  The public recording proxy used to key off the raw call-log id — a value
- *  that shows up in API responses, logs and browser history, so anyone who saw
- *  it could stream the audio forever. It now requires a SIGNED, expiring token
- *  in the path. These tests prove the raw id no longer works, only a valid
- *  token does, and that the owner's authenticated endpoint mints one.
- * ------------------------------------------------------------------ */
+// Recording access. The proxy used to key off the raw call-log id (visible in logs
+// and history, streamable forever); now only a signed, expiring token works.
 
 const h = vi.hoisted(() => ({
   // Both recording routes read with `findFirst`: `call_logs` is partitioned,
@@ -153,9 +146,8 @@ describe("GET /recording-file/:token — token required", () => {
         id: true,
         createdAt: true,
         recordingUrl: true,
-        // The promoted column is what keeps playback working after the call's
-        // analysis blob is archived off to S3; `analysis` stays selected only as
-        // the fallback for rows the backfill hasn't reached.
+        // vapiCallId keeps playback working after the analysis blob is archived to S3;
+        // `analysis` is only the fallback for rows the backfill hasn't reached.
         vapiCallId: true,
         analysis: true,
         // callerName is read so a download gets a readable filename.
@@ -196,10 +188,8 @@ describe("GET /:id/recording-url — owner mints a playback link", () => {
   });
 });
 
-/* Sharing a recording deliberately — the owner copies a link to send to a
- * client or colleague. That link leaves the dashboard, so it can't inherit the
- * dashboard's own short token (which is re-minted on every open and would
- * strand a pasted copy within hours). */
+// A shared link leaves the dashboard, so it can't use the dashboard's short token
+// (re-minted on every open — a pasted copy would die within hours).
 describe("GET /:id/recording-url?share=1 — a link meant to be sent to someone", () => {
   /** Seconds of life left on the signed token inside a proxy URL. */
   const ttlSecondsOf = (url: string) => {
@@ -253,9 +243,7 @@ describe("GET /:id/recording-url?share=1 — a link meant to be sent to someone"
   });
 });
 
-/* Downloads used to be named after the URL's last segment — the signed JWT — so
- * they landed on disk as a 200-character blob with no extension, and you
- * couldn't tell what kind of file it was. */
+// Downloads used to be named after the JWT path segment: a 200-char blob with no extension.
 describe("GET /recording-file/:token?download=1 — filename", () => {
   /** Serve a tiny fake recording so the response reaches the header stage. */
   const serveAudio = (callerName: string, createdAt: string, contentType = "audio/wav") => {

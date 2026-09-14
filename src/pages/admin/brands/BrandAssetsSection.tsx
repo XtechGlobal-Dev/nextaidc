@@ -32,11 +32,7 @@ const ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml,image/gif,image/x-
 const urlFor = (brand: Brand, slot: Slot) =>
   slot === "logoLight" ? brand.logoLightUrl : slot === "logoDark" ? brand.logoDarkUrl : brand.faviconUrl;
 
-/**
- * The brand's marks. Uploaded straight to the same object storage the platform's
- * own branding uses; the URL is what every client renders, so a replacement is
- * live everywhere the moment it finishes.
- */
+/** Brand logos/favicon. Same object storage as platform branding; a replacement is live everywhere as soon as the upload finishes. */
 export function BrandAssetsSection({
   brand,
   onChange,

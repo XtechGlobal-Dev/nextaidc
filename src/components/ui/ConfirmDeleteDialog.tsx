@@ -21,11 +21,7 @@ export interface ConfirmDeleteDialogProps {
   resourceType: string;
   /** The specific resource's name — e.g. "Ops", "AgentLabs-AI-Dev-1". */
   resourceName: string;
-  /**
-   * Performs the actual deletion. Throw (or reject) to surface an error and keep
-   * the dialog open; a clean resolve closes it. Success toasts / list updates
-   * belong here, matching the existing per-page delete handlers.
-   */
+  /** Performs the deletion. Throw to show an error and stay open; a clean resolve closes. Success toasts belong here. */
   onConfirm: () => Promise<void> | void;
   /** Overrides the "Delete {resourceType}" title. */
   title?: string;
@@ -35,12 +31,7 @@ export interface ConfirmDeleteDialogProps {
   confirmLabel?: string;
 }
 
-/**
- * A destructive-delete confirmation that requires typing an exact phrase
- * (`delete <resourceType> <resourceName>`) before the Delete button enables —
- * the same double-confirmation cloud consoles use for irreversible actions.
- * Owns the input, loading and error state; the caller supplies `onConfirm`.
- */
+/** Type-the-phrase (`delete <type> <name>`) delete confirmation, cloud-console style. Caller supplies `onConfirm`. */
 export function ConfirmDeleteDialog({
   open,
   onOpenChange,

@@ -22,9 +22,7 @@ router.get(
   }),
 );
 
-/** A customer proposes a custom industry when none in the list fits. It's usable
- *  on their own profile immediately (the client sets it); this only queues it for
- *  admin review so it can later join the shared list. Re-validated server-side. */
+/** Propose a custom industry. Usable on the customer's own profile right away; this only queues it for admin review. */
 router.post(
   "/suggest",
   requireAuth,

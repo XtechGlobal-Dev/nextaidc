@@ -9,9 +9,8 @@ import { isAdminRole, isAdminTeamRole, isSuperAdminRole } from "@/lib/roles";
 interface AuthState {
   user: AuthUser | null;
   status: "idle" | "loading" | "authed" | "anon";
-  /** Set when the session ended because the account was suspended by an admin, so
-   *  the login page can show a clear "your account is suspended" notice. Cleared
-   *  on any successful login or a normal (user-initiated) logout. */
+  /** Set when an admin suspension ended the session so the login page can say so. Cleared
+   *  on a successful login or a normal logout. */
   suspendedNotice: boolean;
   /** Set while an admin is viewing a customer's panel — holds the admin session to restore on exit. */
   impersonator: { token: string; user: AuthUser } | null;
@@ -76,9 +75,8 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (email, password) => {
         const { token, user } = await api.auth.login({ email, password });
-        // Clear the previous account's cached stores before the new user
-        // hydrates, so one user never sees another's profile/agent/etc. on a
-        // shared browser. (This also re-surfaces the quick-setup wizard.)
+        // Wipe the previous account's stores before the new user hydrates — shared
+        // browsers must never leak one user's data to another. Also re-surfaces quick setup.
         resetUserStores();
         setToken(token);
         set({ user, status: "authed", suspendedNotice: false });
@@ -100,19 +98,9 @@ export const useAuthStore = create<AuthState>()(
         clearReferralCode();
         setToken(token);
         set({ user, status: "authed" });
-        // Marketing conversion — a NEW account was just created. This OTP-verify
-        // step is where every signup actually completes (onboarding + the
-        // login-page signup both land here). Unique `sign_up` event (not GTM's
-        // generic gtm.formSubmit) so registrations track on their own in GA4 /
-        // Google Ads. Fires only on success — never on a wrong/expired OTP, a
-        // returning-user login, or a password reset.
-        //
-        // The signup details ride along under `user_data` so GTM can feed
-        // Enhanced Conversions. IMPORTANT (GTM-side): email/phone are PII — they
-        // must be sent to Google via Enhanced Conversions, which HASHES them; do
-        // NOT map these into plain GA4 event parameters. Password is deliberately
-        // never included.
-        // Best-effort — analytics must never break signup, so guard the whole push.
+        // `sign_up` conversion fires only here (every signup path lands on OTP verify) and only
+        // on success — never for a bad OTP, a login, or a password reset. `user_data` is PII for
+        // GTM Enhanced Conversions (hashed on Google's side) — never map it to plain GA4 params; no password.
         try {
           const userData = {
             name: user.fullName || "",
@@ -121,9 +109,7 @@ export const useAuthStore = create<AuthState>()(
             business_number: user.profile?.businessNumber || "",
             address: user.profile?.address || "",
           };
-          // Pre-hashed copy for Enhanced Conversions (raw PII never leaves the
-          // browser in the clear); `user_data` stays as-is for anything that
-          // needs the plain values.
+          // Pre-hashed copy so raw PII never leaves the browser in the clear.
           const userDataHashed = await hashUserData(userData);
           trackEvent("sign_up", {
             method: "email_otp",
@@ -225,10 +211,8 @@ export const useAuthStore = create<AuthState>()(
 markSessionActive(useAuthStore.getState().status === "authed");
 useAuthStore.subscribe((s) => markSessionActive(s.status === "authed"));
 
-// Cross-tab logout: when the shared auth token is removed in another tab (the user
-// signed out there), deauth this tab too. Without this, other open tabs keep
-// showing a logged-in dashboard while their API calls silently 401 in the
-// background — RequireAuth only redirects once status flips to "anon".
+// Cross-tab logout: without this, other tabs keep showing the dashboard while their API
+// calls silently 401 — RequireAuth only redirects once status flips to "anon".
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (e) => {
     if (e.key === TOKEN_KEY && e.newValue === null) {

@@ -14,9 +14,7 @@ interface BottomNavItem {
   end?: boolean;
 }
 
-// The four primary customer modules. Everything else (Plans & Billing and the
-// whole Admin section) stays in the slide-out side drawer, opened from the
-// profile item on the far right of this bar.
+// The four primary customer tabs; everything else lives in the side drawer opened from the profile item.
 const ITEMS: BottomNavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/dashboard/calls", label: "Call Inbox", icon: Inbox },
@@ -31,13 +29,7 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/**
- * Fixed bottom app bar for phones & tablets (hidden from md up). Shows the four
- * customer tabs plus a trailing profile item that opens the side drawer. STAFF
- * and the SUPER_ADMIN have no customer modules, so they get no bottom bar at
- * all — their drawer is opened from the profile button in the mobile top header
- * instead.
- */
+/** Mobile bottom app bar. STAFF and SUPER_ADMIN have no customer tabs, so they get no bar; their drawer opens from the top header. */
 export function BottomNav() {
   const user = useAuthStore((s) => s.user);
   const role = user?.role;

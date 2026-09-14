@@ -2,32 +2,11 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "../prisma.js";
 import { env } from "../env.js";
 
-/** Any database holding call logs — the control plane while its old table
- *  empties out, and every brand's own database. Structural, so the tenant
- *  client fits too: a brand's partitions need maintaining exactly as much as
- *  this one's, and a sweep hardwired to `prisma` would quietly stop doing it. */
+// Structural so the tenant client fits: a sweep hardwired to `prisma` would quietly skip every brand's partitions.
 type CallDb = Pick<PrismaClient, "$queryRaw" | "$queryRawUnsafe" | "$executeRaw" | "$executeRawUnsafe">;
 
-/* ------------------------------------------------------------------ *
- *  Monthly partition maintenance for `call_logs`.
- *
- *  A range-partitioned table is only as good as the partitions that exist.
- *  Nothing creates next month automatically, so this runs daily and keeps a
- *  buffer of future months provisioned. Miss that and every new call lands in
- *  `call_logs_default` — which still works, but quietly undoes the point of
- *  partitioning, so `defaultRows` is reported and warned about.
- *
- *  Retention is the other half. Dropping a partition returns its disk in one
- *  catalogue update, where the equivalent DELETE would rewrite pages and leave
- *  autovacuum grinding for hours. That only applies to whole months that are
- *  entirely past the window — a partition straddling the cutoff is left to the
- *  row-by-row prune in callArchive.ts, because dropping it would take calls the
- *  operator still wanted.
- *
- *  Every identifier here is built from a computed year/month, never from user
- *  input — Postgres has no bind parameters for table names, so these have to be
- *  interpolated and the only safe interpolation is one that can't be influenced.
- * ------------------------------------------------------------------ */
+// Monthly call_logs partitions: provision ahead (else calls land in call_logs_default) and drop whole months past retention;
+// straddling months go to callArchive's row prune. Interpolated identifiers come only from a computed year/month — Postgres can't bind table names.
 
 /** Months of empty partitions to keep ahead of today. Two is enough that a
  *  sweep can fail for a month before anything reaches the default partition. */
@@ -66,13 +45,7 @@ export interface PartitionSweepResult {
   defaultRows: number;
 }
 
-/**
- * Create any missing partition for the current month and the next
- * MONTHS_AHEAD, then drop whole months that are entirely past retention.
- *
- * Idempotent: `IF NOT EXISTS` means two instances racing both succeed, and a
- * month that already exists costs one catalogue lookup.
- */
+/** Creates missing partitions through MONTHS_AHEAD, then drops whole months past retention. Idempotent — racing instances both succeed. */
 export async function sweepCallPartitions(
   retentionDays = env.CALL_RETENTION_DAYS,
   now = new Date(),
@@ -108,9 +81,7 @@ export async function sweepCallPartitions(
         addMonths(bounds.year, bounds.month, 1).year,
         addMonths(bounds.year, bounds.month, 1).month,
       );
-      // Strictly past the cutoff: the newest row this partition could hold is
-      // still older than the window. A partition straddling the cutoff holds
-      // calls the operator asked to keep, so it is left to the row-wise prune.
+      // Only when the whole month is past the cutoff; a straddling partition holds calls the operator asked to keep.
       if (end.getTime() > cutoff.getTime()) continue;
       await dropPartition(db, table, name);
       result.dropped.push(name);
@@ -123,13 +94,8 @@ export async function sweepCallPartitions(
 
 /* ---------------------------- Primitives --------------------------- */
 
-/* Every catalogue lookup below is scoped to `current_schema()`. A tenant on
- * the `local-schema` provider is a schema on the SAME cluster as the control
- * plane, whose own `call_logs_2026_09` sits in `public` — an unscoped lookup
- * by name would find that one, decide the tenant's month already exists, and
- * quietly leave every call of the tenant's in its catch-all partition. The
- * tenant's connection string sets search_path, so current_schema() is the
- * tenant's schema there and `public` everywhere else. */
+// Every catalogue lookup is scoped to current_schema(): a local-schema tenant shares the cluster with
+// the control plane, so an unscoped lookup would find public.call_logs_2026_09 and leave the tenant's calls in its catch-all.
 
 /** True when call_logs is actually partitioned — so this is a no-op on a
  *  deployment that hasn't run migration 0055 yet. */
@@ -165,9 +131,7 @@ async function createPartition(
 }
 
 async function dropPartition(db: CallDb, table: PartitionedTable, name: string): Promise<void> {
-  // DETACH first so the drop never blocks behind a query still reading the
-  // parent, and so a mistake leaves the data recoverable for a moment rather
-  // than gone the instant the statement lands.
+  // DETACH first so the drop doesn't block behind readers of the parent, and a mistake is briefly recoverable.
   await db.$executeRawUnsafe(`ALTER TABLE "${table}" DETACH PARTITION "${name}"`);
   await db.$executeRawUnsafe(`DROP TABLE "${name}"`);
 }
@@ -205,13 +169,7 @@ function parsePartitionMonth(
   return { year: Number(m[1]), month: Number(m[2]) };
 }
 
-/**
- * Rows that fell into the catch-all partition.
- *
- * Always zero in a healthy system. Anything else means the sweep stopped
- * running long enough for reality to outrun the provisioned months, and those
- * calls are now sitting in a partition that will never be pruned or dropped.
- */
+/** Rows in the catch-all partition. Always 0 when healthy; anything else means the sweep lapsed and those calls will never be pruned or dropped. */
 export async function countDefaultRows(
   db: CallDb = prisma,
   table: PartitionedTable = "call_logs",
@@ -226,14 +184,7 @@ export async function countDefaultRows(
   }
 }
 
-/**
- * Move rows out of the catch-all partition into their proper months.
- *
- * Needed once after migration 0055 (the copy lands everything in the default,
- * because the monthly partitions don't exist yet), and as the repair when a
- * lapsed sweep let calls accumulate there. Re-inserting is what triggers
- * routing; there is no in-place "re-route" in Postgres.
- */
+/** Moves catch-all rows into their proper months (once after migration 0055, and as repair after a lapsed sweep). Re-inserting is the only way to re-route in Postgres. */
 export async function repartitionDefaultRows(batch = 1000, db: CallDb = prisma): Promise<number> {
   if (!(await isPartitioned(db, "call_logs"))) return 0;
   let moved = 0;

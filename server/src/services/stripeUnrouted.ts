@@ -1,17 +1,8 @@
 import { Prisma, type StripeUnroutedEvent } from "@prisma/client";
 import { prisma } from "../prisma.js";
 
-/* ------------------------------------------------------------------ *
- *  Stripe events that could not find their brand.
- *
- *  The webhook routes every event through the Stripe customer index
- *  (services/stripeCustomers.ts). When nothing holds the customer — an
- *  old Stripe customer, a metadata gap, a customer created outside the
- *  app — the event is parked here rather than processed against nothing
- *  or thrown away. The super admin sees the queue, fixes the cause, and
- *  retries; or dismisses what was never ours. Stripe is told "received"
- *  either way, so it does not retry a payment we have already kept.
- * ------------------------------------------------------------------ */
+// Stripe events whose customer no brand holds get parked here for the super admin to
+// retry or dismiss. Stripe is always told "received" so it doesn't retry a kept payment.
 
 /** The Stripe customer id an event is about, whatever object it carries. */
 export function customerIdOf(object: unknown): string | null {

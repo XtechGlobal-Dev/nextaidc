@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Thin dispatch-layer test: confirms scheduleRecurring wires the right
- *  handler to the right cron/queue name via pg-boss, without needing a
- *  live Postgres instance. The migrated jobs' own business logic (e.g.
- *  pruneApiRequestLogs, evaluateAlertRules) is covered by their own tests
- *  and is untouched by this workstream.
- * ------------------------------------------------------------------ */
+// Dispatch-layer test only: pg-boss is mocked, so no live Postgres needed.
 
 const h = vi.hoisted(() => {
   const createQueue = vi.fn().mockResolvedValue(undefined);

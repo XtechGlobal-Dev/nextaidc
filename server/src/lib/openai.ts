@@ -1,18 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  OpenAI Chat Completions request builder.
- *
- *  Reasoning models (GPT-5 family, o-series) speak a slightly different
- *  dialect of the chat-completions API than the classic GPT-4o/4.1 models:
- *   - they REJECT `max_tokens` — you must send `max_completion_tokens`;
- *   - they REJECT a custom `temperature` — only the default (1) is allowed;
- *   - they accept `reasoning_effort`, and reasoning tokens are billed WITHIN
- *     `max_completion_tokens`, so the cap needs headroom or the visible answer
- *     gets starved to an empty string.
- *  Classic models reject `max_completion_tokens`/`reasoning_effort` instead.
- *  buildChatBody() emits the right shape for whichever model is configured, so
- *  an admin can switch the OpenAI model (Settings → OpenAI → Model) without any
- *  code change breaking every LLM call.
- * ------------------------------------------------------------------ */
+// Reasoning models (GPT-5, o-series) reject `max_tokens`/custom `temperature` and need `max_completion_tokens`
+// with headroom (reasoning tokens count against it, or the answer starves to ""); classic models reject the reverse.
 
 /** Reasoning models need max_completion_tokens + no custom temperature.
  *  `gpt-5-chat*` is the NON-reasoning ChatGPT variant, so it's excluded. */
@@ -55,15 +42,8 @@ export function buildChatBody(opts: ChatBodyOpts): Record<string, unknown> {
   return body;
 }
 
-/**
- * Billable units for one chat completion, in thousands of tokens — the unit
- * OpenAI prices on (see BillingUnit `1k_tokens` in services/apiProviders.ts).
- *
- * Pass to `traceFetch`'s `unitsFromResponse` so the API Center costs OpenAI on
- * tokens actually consumed rather than on a flat per-call guess. Reasoning
- * tokens are included in `total_tokens`, so they're billed here too — which is
- * correct, because OpenAI bills for them.
- */
+/** Billable units (thousands of tokens) for traceFetch's `unitsFromResponse`. Reasoning tokens are in
+ *  `total_tokens` and OpenAI bills for them, so they count here too. */
 export function openAiTokenUnits(body: unknown): number {
   const total = (body as { usage?: { total_tokens?: number } })?.usage?.total_tokens;
   return typeof total === "number" && total > 0 ? total / 1000 : 0;

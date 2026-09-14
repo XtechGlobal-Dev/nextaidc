@@ -8,20 +8,8 @@ import { tenantFor, type TenantClient } from "../services/tenantDb.js";
 import { platformOverview, rollupBrandStats, utcDay, ACTIVE_SUB_STATUSES } from "../services/brandStats.js";
 import { searchDirectory } from "../services/customerDirectory.js";
 
-/* ------------------------------------------------------------------ *
- *  Platform views (phase 5 of docs/tenant-db-expansion-plan.md).
- *
- *  Two kinds of screen, two kinds of query:
- *
- *  - The platform as a whole (overview, "find this customer anywhere") is
- *    answered from Main ALONE: the nightly rollup, the ledger, the thin
- *    directory. No tenant is opened to draw these.
- *  - One brand's inside (its customers, subscriptions, support queue) is
- *    answered from THAT brand's database and nothing else. Opening a brand
- *    queries only that tenant.
- *
- *  Super admin only, like everything under /api/super.
- * ------------------------------------------------------------------ */
+// Super-admin platform views. Platform-wide screens read Main only (rollup, ledger,
+// directory); one brand's inside reads that brand's tenant DB and nothing else.
 
 const router = express.Router();
 router.use(requireAuth, requireSuperAdmin);
@@ -36,16 +24,14 @@ function paging(req: express.Request, defaultSize = 25): { page: number; pageSiz
   return { page, pageSize, skip: (page - 1) * pageSize };
 }
 
-/** The brand, and the ONE database its screens read. Anything not active
- *  (provisioning, migrating, failed) surfaces as the tenant error the auth
- *  layer already knows how to explain. */
+/** The brand plus the one tenant DB its screens read; a non-active tenant surfaces as the usual tenant error. */
 async function openBrand(id: string): Promise<{ brand: { id: string; name: string; slug: string }; db: TenantClient }> {
   const brand = await prisma.brand.findUnique({ where: { id }, select: { id: true, name: true, slug: true } });
   if (!brand) throw notFound("Brand not found");
   return { brand, db: await tenantFor(brand.id) };
 }
 
-/* ------------------------------ Platform ------------------------------ */
+// Platform-wide (Main only).
 
 /** Everything on the super admin's overview — from Main, as of the last rollup. */
 router.get(
@@ -82,7 +68,7 @@ router.get(
   }),
 );
 
-/* ------------------------- One brand's inside ------------------------- */
+// One brand's inside (that tenant's DB only).
 
 /** The brand's customers, from the brand's database. */
 router.get(

@@ -9,28 +9,14 @@ interface BrandLogoProps {
   imgClassName?: string;
 }
 
-/**
- * Renders the admin-configured brand logo (light/dark variants toggled by the
- * `.dark` class) — or the supplied default mark when none is set, or when the
- * configured asset fails to load (e.g. a stale URL after a re-upload) so we never
- * show a broken-image icon.
- *
- * Failure is tracked PER variant and reset whenever the source changes, so a
- * broken light logo can't hide a valid dark one, and replacing a logo recovers
- * without a full page reload.
- *
- * If only a light-mode logo is uploaded, the dark-mode render falls back to it
- * but is forced to a light silhouette (`brightness-0 invert`) so it stays
- * visible on dark backgrounds. Upload a dedicated dark-mode logo for full colour.
- */
+/** Brand logo with light/dark variants, falling back to `children` when unset or the asset fails to load.
+ *  Failure is tracked per variant. A light-only logo is inverted to a silhouette in dark mode. */
 export function BrandLogo({ children, imgClassName }: BrandLogoProps) {
   const platformLight = useBrandingStore((s) => s.assets.logoLight);
   const platformDark = useBrandingStore((s) => s.assets.logoDark);
   const brand = useBrandingStore((s) => s.brand);
 
-  // On a white-label host the tenant's own mark wins outright; the platform's
-  // logo is only the fallback for the platform's own domain (or a brand that
-  // hasn't uploaded one yet).
+  // Tenant's own mark wins; the platform logo is only the fallback.
   const logoLight = brand?.logoLightUrl || platformLight;
   const logoDark = brand?.logoDarkUrl || (brand?.logoLightUrl ? "" : platformDark);
 

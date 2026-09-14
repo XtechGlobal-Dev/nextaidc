@@ -10,12 +10,8 @@ export const NotificationTypeSchema = z.enum([
 ]);
 export type NotificationType = z.infer<typeof NotificationTypeSchema>;
 
-// Response validation runs on the pre-serialization object (see
-// server/src/lib/respond.ts), where Prisma's `createdAt` is still a Date
-// instance, not yet the ISO string the frontend actually receives over the
-// wire — this transform makes the schema describe the WIRE shape (what
-// api.ts/src/types get as their inferred type) while still accepting the
-// real in-memory value passed to sendValidated().
+// Validation runs pre-serialization, where `createdAt` is still a Date; this transform keeps the schema
+// describing the WIRE shape (ISO string) while accepting the in-memory value.
 const DateAsIsoString = z.union([z.date(), z.string()]).transform((d) => (d instanceof Date ? d.toISOString() : d));
 
 export const NotificationSchema = z.object({
