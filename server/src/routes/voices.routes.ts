@@ -8,6 +8,8 @@ import {
   resolveVoices,
   DEFAULT_AGENT_VOICE_ID,
 } from "../services/voices.js";
+import { sendValidated } from "../lib/respond.js";
+import { AllVoicesResponseSchema, VoiceCatalogResponseSchema } from "hello22/shared/contracts/voices.js";
 
 const router = express.Router();
 
@@ -23,7 +25,7 @@ router.get(
       getVoiceCatalogFor("deepgram"),
       getVoiceCatalogFor("elevenlabs"),
     ]);
-    res.json({ deepgram, elevenlabs });
+    sendValidated(res, AllVoicesResponseSchema, { deepgram, elevenlabs });
   }),
 );
 
@@ -52,7 +54,7 @@ router.get(
       resolveVoices([currentVoiceId]),
     ]);
     const voices = await resolveVoices(access.voiceIds);
-    res.json({
+    sendValidated(res, VoiceCatalogResponseSchema, {
       voices: voices.map((v) => ({ ...v, entitled: true, plans: [] })),
       // The voice the agent is currently on (always resolvable, even when locked) so
       // the UI can label it without the selectable list.

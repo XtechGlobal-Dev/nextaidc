@@ -1,8 +1,7 @@
 import { prisma } from "../prisma.js";
-import { endTrialNow } from "./stripe.js";
 import { cachedBrand } from "./brands.js";
 import { currentBrandId } from "../lib/brandContext.js";
-import { tenantForUser } from "./tenantDb.js";
+import { createBillingDeps, type BillingDeps } from "./billing/deps.js";
 
 /* Global free-trial length (days). Stored in PlatformSetting, admin-editable. */
 export const TRIAL_DAYS_KEY = "trial.days";
@@ -134,9 +133,15 @@ export async function getGraceConfig(): Promise<{ enabled: boolean; days: number
  * the user is actively trialing with a Stripe subscription AND has auto-renew on
  * — with auto-renew off we never auto-charge; the trial simply lapses (calls
  * frozen) and Stripe cancels it at period end.
+ *
+ * `deps` defaults to the real tenantDb/stripe singletons (see billing/deps.ts)
+ * so every existing caller is unchanged; a test passes a plain object instead.
  */
-export async function enforceTrialMinutes(userId: string): Promise<void> {
-  const db = await tenantForUser(userId);
+export async function enforceTrialMinutes(
+  userId: string,
+  deps: BillingDeps = createBillingDeps(),
+): Promise<void> {
+  const db = await deps.tenantForUser(userId);
   const profile = await db.profile.findUnique({
     where: { userId },
     select: { subscriptionStatus: true, stripeSubscriptionId: true, autoRenew: true },
@@ -162,7 +167,7 @@ export async function enforceTrialMinutes(userId: string): Promise<void> {
   if (minutesUsed < quota) return;
 
   try {
-    await endTrialNow(profile.stripeSubscriptionId);
+    await deps.endTrialNow(profile.stripeSubscriptionId);
     await db.profile.update({
       where: { userId },
       data: { subscriptionStatus: "active", trialEndsAt: null },

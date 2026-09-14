@@ -1,4 +1,19 @@
 import { env } from "@/lib/env";
+import type { IndustriesListResponse, IndustrySuggestResponse } from "@shared/contracts/industries";
+import type {
+  AllVoicesResponse as SharedAllVoicesResponse,
+  ProviderVoice as SharedProviderVoice,
+  VoiceCatalogItem as SharedVoiceCatalogItem,
+  VoiceCatalogResponse as SharedVoiceCatalogResponse,
+} from "@shared/contracts/voices";
+import type {
+  Notification as SharedNotification,
+  NotificationChannelsResponse,
+  NotificationsListResponse,
+  NotificationType as SharedNotificationType,
+  TestSummaryResponse,
+} from "@shared/contracts/notifications";
+import type { OkResponse } from "@shared/contracts/common";
 import type {
   AgentConfig,
   Appointment,
@@ -353,30 +368,17 @@ export interface IndustryAdminView {
   pending: PendingIndustry[];
 }
 
-export type NotificationType =
-  | "missed_call"
-  | "new_lead"
-  | "billing"
-  | "agent"
-  // Support tickets, on both lanes. Which inbox a ticket notification links to
-  // is baked into its `link` by the server, so the bell needs no extra field
-  // to tell a customer's reply from a brand's request.
-  | "ticket"
-  | "system";
+// NotificationType/ApiNotification are the inferred types of the shared
+// response schema (server/src/routes/notifications.routes.ts validates
+// against it via sendValidated) — see @shared/contracts/notifications.
+// Re-exported under their original names so existing importers are unchanged.
+export type NotificationType = SharedNotificationType;
 
 /** Where typed digits must sit in a phone number — mirrors Twilio's "Match to".
  *  Keep in step with NumberMatch in server/src/services/sms.ts. */
 export type NumberMatch = "start" | "anywhere" | "end";
 
-export interface ApiNotification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  message: string;
-  link?: string | null;
-  read: boolean;
-  createdAt: string;
-}
+export type ApiNotification = SharedNotification;
 
 /** The visitor's IANA timezone (e.g. "Asia/Kolkata"), best-effort. Sent at signup
  *  so admin notifications can show times in the customer's own region. */
@@ -1125,13 +1127,10 @@ export const api = {
   },
   industries: {
     /** The AI-Brain industry options: built-ins + admin-approved customs. */
-    list: () => get<{ industries: string[] }>("/api/industries"),
+    list: () => get<IndustriesListResponse>("/api/industries"),
     /** Propose a custom industry — queued for admin review before it joins the list. */
     suggest: (value: string) =>
-      post<{ status: "submitted" | "exists" | "pending"; value: string }>(
-        "/api/industries/suggest",
-        { value },
-      ),
+      post<IndustrySuggestResponse>("/api/industries/suggest", { value }),
   },
   calls: {
     list: (params: Record<string, string | number | undefined> = {}) => {
@@ -1199,25 +1198,15 @@ export const api = {
       ),
   },
   notifications: {
-    list: () => get<{ notifications: ApiNotification[]; unreadCount: number }>("/api/notifications"),
-    markRead: (id: string) => post<{ ok: true }>(`/api/notifications/${id}/read`),
-    markAllRead: () => post<{ ok: true }>("/api/notifications/read-all"),
-    clear: () => del<{ ok: true }>("/api/notifications"),
+    list: () => get<NotificationsListResponse>("/api/notifications"),
+    markRead: (id: string) => post<OkResponse>(`/api/notifications/${id}/read`),
+    markAllRead: () => post<OkResponse>("/api/notifications/read-all"),
+    clear: () => del<OkResponse>("/api/notifications"),
     /** Which plan features the user has (email always true; customCrm gates webhook CRM). */
-    channels: () =>
-      get<{
-        email: boolean;
-        sms: boolean;
-        smsToCaller: boolean;
-        whatsapp: boolean;
-        customCrm: boolean;
-        multilingual: boolean;
-        /** Transfer departments the plan allows; 0 = Call Transfer not included. */
-        callTransferDepartments: number;
-      }>("/api/notifications/channels"),
+    channels: () => get<NotificationChannelsResponse>("/api/notifications/channels"),
     /** Send a dummy call-summary to the given destination to verify the channel works. */
     testSummary: (channel: "email" | "sms" | "whatsapp", to: string) =>
-      post<{ ok: true; to: string }>("/api/notifications/test-summary", { channel, to }),
+      post<TestSummaryResponse>("/api/notifications/test-summary", { channel, to }),
   },
   /**
    * "My requests" — the requester's own side of whichever lane they are on.
@@ -2337,58 +2326,15 @@ export interface ResellerCustomerDetail {
 
 export type BillingInterval = "week" | "month" | "year";
 
-/** A single voice in the AI-Brain picker (from the Deepgram voice catalog). */
-export interface VoiceCatalogItem {
-  id: string;
-  name: string;
-  descriptor: string;
-  region: string;
-  previewUrl: string | null;
-  /** Male/Female label — from the catalog (Deepgram) or ElevenLabs voice labels;
-   *  null/absent when the provider doesn't say. */
-  gender?: "male" | "female" | null;
-  /** ISO 639-1 code for the curated single-language voices (Chinese "zh", Punjabi
-   *  "pa"). Absent on the premade/Deepgram voices, which aren't language-specific. */
-  language?: string;
-  /** Whether the current user's plan lets them select (not just preview) it. */
-  entitled: boolean;
-  /** Plan(s) that unlock this voice — shown as an upsell hint when locked. */
-  plans: string[];
-}
-
-export interface VoiceCatalogItemWithProvider extends VoiceCatalogItem {
-  provider?: "deepgram" | "elevenlabs";
-}
-
-export interface VoiceCatalogResponse {
-  voices: VoiceCatalogItemWithProvider[];
-  /** The voice the agent is currently on (for display even when locked). */
-  current?: VoiceCatalogItemWithProvider | null;
-  /** True when the user can't change voice yet (trial / no active plan / plan without
-   *  a Voice Bank category) — they stay on the default voice. */
-  locked?: boolean;
-  /** The Voice Bank category title the user's plan unlocks (when unlocked). */
-  category?: string | null;
-  currentPlanName: string | null;
-}
-
-/** A voice option in a specific provider's catalog (admin Voice Bank / plan editor). */
-export interface ProviderVoice {
-  id: string;
-  name: string;
-  descriptor: string;
-  region: string;
-  previewUrl: string | null;
-  /** Male/Female label (see VoiceCatalogItem). */
-  gender?: "male" | "female" | null;
-  /** ISO 639-1 code for the curated single-language voices (see VoiceCatalogItem). */
-  language?: string;
-}
-
-export interface AllVoicesResponse {
-  deepgram: ProviderVoice[];
-  elevenlabs: ProviderVoice[];
-}
+// Voice types are the inferred types of the shared response schemas
+// (server/src/routes/voices.routes.ts validates against the same schemas via
+// sendValidated before sending) — see @shared/contracts/voices. Re-exported
+// under their original names here so existing importers need no changes.
+export type VoiceCatalogItem = SharedVoiceCatalogItem;
+export type VoiceCatalogItemWithProvider = SharedVoiceCatalogItem;
+export type VoiceCatalogResponse = SharedVoiceCatalogResponse;
+export type ProviderVoice = SharedProviderVoice;
+export type AllVoicesResponse = SharedAllVoicesResponse;
 
 /** A Voice Bank category (admin-curated named set of voices, both providers). */
 export interface VoiceCategory {

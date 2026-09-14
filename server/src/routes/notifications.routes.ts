@@ -16,6 +16,13 @@ import { isTwilioConfigured, callSummarySms, describeSmsError } from "../service
 import { isWhatsAppConfigured, callSummaryWhatsApp } from "../services/whatsapp.js";
 import { isAdminRole } from "../lib/roles.js";
 import { brandDisplayName } from "../lib/brandUrls.js";
+import { sendValidated } from "../lib/respond.js";
+import { OkResponseSchema } from "hello22/shared/contracts/common.js";
+import {
+  NotificationChannelsResponseSchema,
+  NotificationsListResponseSchema,
+  TestSummaryResponseSchema,
+} from "hello22/shared/contracts/notifications.js";
 
 const router = express.Router();
 
@@ -40,7 +47,7 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const features = await getPlanFeatures(req.user!.sub);
-    res.json({
+    sendValidated(res, NotificationChannelsResponseSchema, {
       email: true,
       sms: features.sms,
       smsToCaller: features.smsToCaller,
@@ -131,7 +138,7 @@ router.post(
         }
         await callSummaryWhatsApp({ to, callerName: "Test Caller", callerNumber: TEST_CALLER_NUMBER, summary: testSummaryText(), businessName });
       }
-      res.json({ ok: true, to });
+      sendValidated(res, TestSummaryResponseSchema, { ok: true, to });
     } catch (err) {
       console.error("[test-summary] failed:", err);
       const error =
@@ -155,7 +162,7 @@ router.get(
       listNotifications(db, userId),
       db.notification.count({ where: { userId, read: false } }),
     ]);
-    res.json({ notifications, unreadCount });
+    sendValidated(res, NotificationsListResponseSchema, { notifications, unreadCount });
   }),
 );
 
@@ -164,7 +171,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     await markNotificationRead(await planeOf(req.user!.brandId), req.user!.sub, req.params.id);
-    res.json({ ok: true });
+    sendValidated(res, OkResponseSchema, { ok: true });
   }),
 );
 
@@ -173,7 +180,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     await markAllNotificationsRead(await planeOf(req.user!.brandId), req.user!.sub);
-    res.json({ ok: true });
+    sendValidated(res, OkResponseSchema, { ok: true });
   }),
 );
 
@@ -182,7 +189,7 @@ router.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     await clearNotifications(await planeOf(req.user!.brandId), req.user!.sub);
-    res.json({ ok: true });
+    sendValidated(res, OkResponseSchema, { ok: true });
   }),
 );
 

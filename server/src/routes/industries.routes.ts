@@ -4,6 +4,11 @@ import { requireAuth } from "../middleware/auth.js";
 import { sanitizeIndustry } from "../lib/industries.js";
 import { getPublicIndustries, suggestIndustry } from "../services/settings.js";
 import { publishToAdmins } from "../services/events.js";
+import { sendValidated } from "../lib/respond.js";
+import {
+  IndustriesListResponseSchema,
+  IndustrySuggestResponseSchema,
+} from "hello22/shared/contracts/industries.js";
 
 const router = express.Router();
 
@@ -13,7 +18,7 @@ router.get(
   "/",
   requireAuth,
   asyncHandler(async (_req, res) => {
-    res.json({ industries: getPublicIndustries() });
+    sendValidated(res, IndustriesListResponseSchema, { industries: getPublicIndustries() });
   }),
 );
 
@@ -33,7 +38,7 @@ router.post(
     // A genuinely new proposal → nudge admin tabs so the review queue updates
     // live (via useLiveData → useLiveTick) instead of only on a page reload.
     if (outcome === "submitted") publishToAdmins({ type: "industry.suggested" });
-    res.json({ status: outcome, value: result.value });
+    sendValidated(res, IndustrySuggestResponseSchema, { status: outcome, value: result.value });
   }),
 );
 

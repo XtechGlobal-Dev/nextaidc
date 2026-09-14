@@ -22,6 +22,7 @@ import { runWithBrand } from "../lib/brandContext.js";
 import { runTenantRetirementSweep } from "./tenantProvisioning.js";
 import { rollupBrandStats, catchUpBrandStats, msUntilNextUtc } from "./brandStats.js";
 import { env } from "../env.js";
+import { scheduleRecurring } from "../lib/jobQueue.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -398,11 +399,32 @@ export function startScheduler(): void {
   // daily because api_request_logs takes a write on every outbound call and would
   // otherwise grow without limit.
   installTraceShutdownHook();
-  setTimeout(() => void evaluateAlertRules(), 90_000);
-  setInterval(() => void evaluateAlertRules(), 5 * 60 * 1000);
-  setTimeout(() => void runApiLogSweep(), 5 * 60 * 1000);
-  setInterval(() => void runApiLogSweep(), DAY_MS);
-  console.log(`🔌 API Center schedulers started (alerts every 5 min, log sweep daily)`);
+
+  // These two are the job-queue pilot (see lib/jobQueue.ts): each is
+  // independently switchable onto pg-boss via its own env flag, with the
+  // original setInterval kept as the instant, redeploy-free rollback path
+  // until the queue path is proven stable.
+  if (env.JOBS_VIA_QUEUE_ALERT_RULES === "true") {
+    void scheduleRecurring("alert-rules", "*/5 * * * *", async () => {
+      await evaluateAlertRules();
+    }).catch((e) => console.error("[scheduler] failed to schedule alert-rules via queue:", e));
+    console.log("🔌 API Center alerts scheduled via job queue (every 5 min)");
+  } else {
+    setTimeout(() => void evaluateAlertRules(), 90_000);
+    setInterval(() => void evaluateAlertRules(), 5 * 60 * 1000);
+    console.log("🔌 API Center alerts scheduler started (every 5 min)");
+  }
+
+  if (env.JOBS_VIA_QUEUE_API_LOG_SWEEP === "true") {
+    void scheduleRecurring("api-log-sweep", "0 0 * * *", runApiLogSweep).catch((e) =>
+      console.error("[scheduler] failed to schedule api-log-sweep via queue:", e),
+    );
+    console.log("🔌 API Center log sweep scheduled via job queue (daily)");
+  } else {
+    setTimeout(() => void runApiLogSweep(), 5 * 60 * 1000);
+    setInterval(() => void runApiLogSweep(), DAY_MS);
+    console.log("🔌 API Center log sweep scheduler started (daily)");
+  }
 
   // Call log tiering. Daily, and offset ten minutes past boot so a deploy never
   // has a restart storm racing S3 while the app is still warming up.
