@@ -179,7 +179,7 @@ export default function AdminBrandsPage() {
                       onClick={() => navigate(`/dashboard/admin/brands/${b.id}`)}
                       className="cursor-pointer border-b border-border/60 transition-colors last:border-0 hover:bg-primary-tint-soft"
                     >
-                      <td className="px-4 py-3">
+                      <td className="max-w-[320px] px-4 py-3">
                         <div className="flex items-center gap-3">
                           <BrandSwatch brand={b} />
                           <div className="min-w-0">
