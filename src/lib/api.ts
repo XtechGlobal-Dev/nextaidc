@@ -722,8 +722,9 @@ export interface UnroutedStripeEvent {
   receivedAt: string;
 }
 
-/** Brand lifecycle. Only `active` resolves a front door; `failed` means provisioning broke and Retry re-runs it. */
-export type BrandStatus = "active" | "suspended" | "provisioning" | "failed";
+/** Brand lifecycle. Only `active` resolves a front door; `failed` means provisioning broke and Retry re-runs it;
+ *  `deactivated` is off with a 30-day countdown to deletion (see `deletesAt`). */
+export type BrandStatus = "active" | "suspended" | "provisioning" | "failed" | "deactivated";
 
 /** The brand's own database, as its page shows it — never a connection string. */
 export interface BrandTenantDb {
@@ -768,6 +769,10 @@ export interface Brand {
   /** Its always-live subdomain under the platform apex. */
   platformHost: string;
   status: BrandStatus;
+  /** ISO, set while deactivated. */
+  deactivatedAt: string | null;
+  /** ISO, when the sweep deletes a deactivated brand for good; null otherwise. */
+  deletesAt: string | null;
   /** The brand's own database. On the detail and create responses. */
   tenantDb?: BrandTenantDb;
   logoLightUrl: string;
@@ -1390,8 +1395,12 @@ export const api = {
         }>("/api/super/brands", data),
       update: (id: string, data: Partial<BrandInput>) =>
         patch<Brand>(`/api/super/brands/${id}`, data),
+      /** Immediate and final: the brand's database, and every account in it, goes with the row. */
       remove: (id: string) =>
-        del<{ ok: true; membersDetached: number }>(`/api/super/brands/${id}`),
+        del<{ ok: true; accountsRemoved: number }>(`/api/super/brands/${id}`),
+      /** Off now, deleted (database included) 30 days on unless reactivated. Returns the detail payload. */
+      deactivate: (id: string) => post<Brand>(`/api/super/brands/${id}/deactivate`, {}),
+      reactivate: (id: string) => post<Brand>(`/api/super/brands/${id}/reactivate`, {}),
       /** The brand's own database: state, and a Retry for a failed setup. */
       tenantDb: {
         get: (id: string) => get<BrandTenantDb>(`/api/super/brands/${id}/tenant-db`),

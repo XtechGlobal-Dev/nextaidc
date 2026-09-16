@@ -37,6 +37,15 @@ import {
 // Brands (white-label tenants): subdomain, look, optional senders. Paint data is public; sending
 // credentials live encrypted in brand_settings. Host -> brand runs on every request, so it reads an in-memory cache refreshed on each mutation.
 
+/** Days a deactivated brand waits before the sweep deletes it for good (brandDeactivation.ts). */
+export const BRAND_DEACTIVATION_DAYS = 30;
+
+/** When the sweep will delete a deactivated brand; null unless it is deactivated. */
+export function brandDeletesAt(brand: Pick<Brand, "status" | "deactivatedAt">): Date | null {
+  if (brand.status !== "deactivated" || !brand.deactivatedAt) return null;
+  return new Date(brand.deactivatedAt.getTime() + BRAND_DEACTIVATION_DAYS * 24 * 60 * 60 * 1000);
+}
+
 let bySlug = new Map<string, Brand>();
 let byDomain = new Map<string, Brand>();
 let byId = new Map<string, Brand>();
@@ -188,8 +197,12 @@ export interface BrandView {
   origin: string;
   /** The subdomain the wildcard record already covers — always live. */
   platformHost: string;
-  /** See BrandStatus in the schema: provisioning → active | failed; suspended. */
-  status: "active" | "suspended" | "provisioning" | "failed";
+  /** See BrandStatus in the schema: provisioning → active | failed; suspended; deactivated (deleted 30 days on). */
+  status: "active" | "suspended" | "provisioning" | "failed" | "deactivated";
+  /** ISO, set while deactivated. */
+  deactivatedAt: string | null;
+  /** ISO, when the sweep will delete a deactivated brand; null otherwise. */
+  deletesAt: string | null;
   logoLightUrl: string;
   logoDarkUrl: string;
   faviconUrl: string;
@@ -242,6 +255,8 @@ export function serializeBrand(b: Brand, counts?: BrandView["counts"]): BrandVie
     origin: brandOrigin(b) ?? "",
     platformHost: platformSubdomainHost(b.slug),
     status: b.status,
+    deactivatedAt: b.deactivatedAt?.toISOString() ?? null,
+    deletesAt: brandDeletesAt(b)?.toISOString() ?? null,
     logoLightUrl: b.logoLightUrl,
     logoDarkUrl: b.logoDarkUrl,
     faviconUrl: b.faviconUrl,
@@ -553,6 +568,10 @@ export async function updateBrand(id: string, input: Partial<BrandInput>): Promi
     if (existing.status === "provisioning" || existing.status === "failed") {
       throw badRequest("This brand's database isn't ready yet — finish setup (Retry) first.");
     }
+    // Deactivation has its own door (brandDeactivation.ts): the countdown must be cleared, not just the status.
+    if (existing.status === "deactivated") {
+      throw badRequest("This brand is deactivated — reactivate it first.");
+    }
     data.status = input.status;
   }
   for (const key of [
@@ -598,10 +617,11 @@ export async function updateBrand(id: string, input: Partial<BrandInput>): Promi
   return brand;
 }
 
-/** Deletes a brand. Members survive as platform-level accounts (users.brandId is ON DELETE SET NULL); the database is kept 30 days so a mistake is recoverable. */
+/** Deletes a brand for good: its database (and every account in it) goes first, then the row.
+ *  If the database can't be dropped the brand stays, so the operator can retry. For a grace period use deactivation instead (brandDeactivation.ts). */
 export async function deleteBrand(id: string): Promise<void> {
-  const { retireBrandDatabase } = await import("./tenantProvisioning.js");
-  await retireBrandDatabase(id);
+  const { destroyBrandDatabase } = await import("./tenantProvisioning.js");
+  await destroyBrandDatabase(id);
   await prisma.brand.delete({ where: { id } });
   await Promise.all([loadBrands(), loadBrandSettings()]);
 }

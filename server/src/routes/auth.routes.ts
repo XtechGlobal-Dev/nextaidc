@@ -76,6 +76,14 @@ async function signupTenant(): Promise<{ brandId: string; db: TenantClient }> {
   }
 }
 
+/** Why a switched-off brand's people can't sign in. Suspended = off for now; deactivated = a super
+ *  admin retired it, and it is deleted 30 days on unless they change their mind. */
+function brandOfflineMessage(status: "suspended" | "deactivated"): string {
+  return status === "deactivated"
+    ? "This brand has been deactivated. Please contact support if you think this is a mistake."
+    : "This brand is currently suspended. Please contact support if you think this is a mistake.";
+}
+
 const router = express.Router();
 
 /** Finds the account for an email ON THIS DOOR: the brand's DB first, then the control plane (platform people only —
@@ -111,12 +119,8 @@ async function findAccountOnThisDoor(
   });
   if (!elsewhere) return null;
   const home = cachedBrand(elsewhere.brandId);
-  if (home?.status === "suspended") {
-    throw new HttpError(
-      403,
-      "This brand is currently suspended. Please contact support if you think this is a mistake.",
-      "account_suspended",
-    );
+  if (home?.status === "suspended" || home?.status === "deactivated") {
+    throw new HttpError(403, brandOfflineMessage(home.status), "account_suspended");
   }
   if (home && home.status !== "active") {
     throw new HttpError(403, "This brand is still being set up. Try again shortly.", "brand_not_ready");
@@ -652,13 +656,9 @@ router.post(
     const user = await loadAccount(account.id, account.brandId);
     if (!user) throw unauthorized("Invalid email or password");
 
-    // A suspended brand's people can't sign in anywhere — otherwise they'd keep working via the platform domain.
-    if (user.brand?.status === "suspended") {
-      throw new HttpError(
-        403,
-        "This brand is currently suspended. Please contact support if you think this is a mistake.",
-        "account_suspended",
-      );
+    // A switched-off brand's people can't sign in anywhere — otherwise they'd keep working via the platform domain.
+    if (user.brand?.status === "suspended" || user.brand?.status === "deactivated") {
+      throw new HttpError(403, brandOfflineMessage(user.brand.status), "account_suspended");
     }
     // A brand still being set up has no database to serve its people from yet.
     if (user.brand && user.brand.status !== "active") {
@@ -699,9 +699,9 @@ router.get(
     if (user.profile?.suspendedAt) {
       throw new HttpError(403, "Your account has been suspended.", "account_suspended");
     }
-    // Same, one level up: the whole brand was suspended while they were working.
-    if (user.brand?.status === "suspended") {
-      throw new HttpError(403, "This brand is currently suspended.", "account_suspended");
+    // Same, one level up: the whole brand was switched off while they were working.
+    if (user.brand?.status === "suspended" || user.brand?.status === "deactivated") {
+      throw new HttpError(403, brandOfflineMessage(user.brand.status), "account_suspended");
     }
     if (user.brand && user.brand.status !== "active") {
       throw new HttpError(403, "This brand is still being set up.", "brand_not_ready");

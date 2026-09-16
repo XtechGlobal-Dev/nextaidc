@@ -10,6 +10,7 @@ const h = vi.hoisted(() => {
     upsert: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
+    deleteMany: vi.fn(),
   };
   const retirement = { create: vi.fn(), findMany: vi.fn(), delete: vi.fn() };
   const executed: string[] = [];
@@ -99,10 +100,9 @@ const {
   provisionBrandDatabase,
   withSchema,
   localSchemaName,
-  retireBrandDatabase,
+  destroyBrandDatabase,
   runTenantRetirementSweep,
   markStaleTenants,
-  TENANT_RETIREMENT_DAYS,
 } = mod;
 
 const BRAND = { id: "b_acme", slug: "acme-voice" };
@@ -280,29 +280,69 @@ describe("keeping tenants current", () => {
   });
 });
 
-describe("retirement", () => {
-  it("records the database for removal 30 days out, rather than deleting it with the brand", async () => {
+describe("destroying a brand's database", () => {
+  it("deletes a Neon tenant's project right away and forgets the row", async () => {
     h.brandDatabase.findUnique.mockResolvedValue({
+      brandId: "b_acme",
       provider: "neon",
       neonProjectId: "np_1",
       schemaName: "",
-      region: "aws-ap-southeast-2",
-      brand: { slug: "acme-voice", name: "Acme Voice" },
     });
-    const before = Date.now();
-    await retireBrandDatabase("b_acme");
-    const data = h.retirement.create.mock.calls[0][0].data;
-    expect(data).toMatchObject({ brandSlug: "acme-voice", provider: "neon", neonProjectId: "np_1" });
-    const days = (data.retireAfter.getTime() - before) / (24 * 60 * 60 * 1000);
-    expect(Math.round(days)).toBe(TENANT_RETIREMENT_DAYS);
+    await destroyBrandDatabase("b_acme");
+    expect(h.deleteProject).toHaveBeenCalledWith("np_1");
+    expect(h.brandDatabase.deleteMany).toHaveBeenCalledWith({ where: { brandId: "b_acme" } });
+    expect(h.retirement.create).not.toHaveBeenCalled();
+    expect(h.invalidate).toHaveBeenCalled();
+  });
+
+  it("drops a local-schema tenant's schema", async () => {
+    h.brandDatabase.findUnique.mockResolvedValue({
+      brandId: "b_globex",
+      provider: "local-schema",
+      neonProjectId: "",
+      schemaName: "tenant_globex",
+    });
+    await destroyBrandDatabase("b_globex");
+    expect(h.executed.some((s) => s.includes('DROP SCHEMA IF EXISTS "tenant_globex" CASCADE'))).toBe(true);
     expect(h.deleteProject).not.toHaveBeenCalled();
+    expect(h.brandDatabase.deleteMany).toHaveBeenCalled();
+  });
+
+  it("treats a project Neon no longer has as already done", async () => {
+    h.brandDatabase.findUnique.mockResolvedValue({
+      brandId: "b_acme",
+      provider: "neon",
+      neonProjectId: "np_gone",
+      schemaName: "",
+    });
+    h.deleteProject.mockRejectedValueOnce(
+      new Error("Neon API DELETE /projects/np_gone failed (404): project not found"),
+    );
+    await expect(destroyBrandDatabase("b_acme")).resolves.toBeUndefined();
+    expect(h.brandDatabase.deleteMany).toHaveBeenCalled();
+  });
+
+  it("keeps the row when Neon is down, so the delete can be retried", async () => {
+    h.brandDatabase.findUnique.mockResolvedValue({
+      brandId: "b_acme",
+      provider: "neon",
+      neonProjectId: "np_1",
+      schemaName: "",
+    });
+    h.deleteProject.mockRejectedValueOnce(new Error("Neon API DELETE /projects/np_1 failed (503): try later"));
+    await expect(destroyBrandDatabase("b_acme")).rejects.toThrow(/503/);
+    expect(h.brandDatabase.deleteMany).not.toHaveBeenCalled();
   });
 
   it("is a no-op for a brand that never got a database", async () => {
     h.brandDatabase.findUnique.mockResolvedValue(null);
-    await retireBrandDatabase("b_nothing");
-    expect(h.retirement.create).not.toHaveBeenCalled();
+    await destroyBrandDatabase("b_nothing");
+    expect(h.deleteProject).not.toHaveBeenCalled();
+    expect(h.brandDatabase.deleteMany).not.toHaveBeenCalled();
   });
+});
+
+describe("retirement sweep (databases queued before brand deletes became immediate)", () => {
 
   it("removes only the databases whose time is up, each independently", async () => {
     h.retirement.findMany.mockResolvedValue([

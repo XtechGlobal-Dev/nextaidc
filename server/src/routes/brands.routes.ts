@@ -31,7 +31,7 @@ import {
   provisionBrand,
   brandOrigin,
   createBrand,
-  deleteBrand,
+  brandDeletesAt,
   loadBrands,
   serializeBrand,
   themeCatalog,
@@ -40,11 +40,11 @@ import {
 } from "../services/brands.js";
 import {
   attachDomainToEdge,
-  detachDomainFromEdge,
   isDomainProviderConfigured,
   pendingDomainCheck,
   verifyBrandDomain,
 } from "../services/brandDomains.js";
+import { deactivateBrand, destroyBrand, reactivateBrand } from "../services/brandDeactivation.js";
 import { platformApiOrigin } from "../lib/brandUrls.js";
 import { isNeonConfigured, listRegions } from "../services/neonProjects.js";
 import { checkBrandDatabase } from "../services/tenantProvisioning.js";
@@ -447,19 +447,61 @@ router.post(
   }),
 );
 
+/** The detail-page payload: the brand plus its links, readiness checklist and database state. */
+async function brandDetail(brand: Brand) {
+  const counts = await brandCounts([brand.id]);
+  return {
+    ...serializeBrand(brand, counts.get(brand.id)),
+    loginUrl: brandLoginUrl(brand),
+    pathUrl: brandPathUrl(brand.slug),
+    readiness: brandReadiness(brand, counts.get(brand.id)),
+    tenantDb: await tenantDbSummary(brand.id),
+  };
+}
+
 router.get(
   "/brands/:id",
   asyncHandler(async (req, res) => {
     const brand = await prisma.brand.findUnique({ where: { id: req.params.id } });
     if (!brand) throw notFound("Brand not found");
-    const counts = await brandCounts([brand.id]);
-    res.json({
-      ...serializeBrand(brand, counts.get(brand.id)),
-      loginUrl: brandLoginUrl(brand),
-      pathUrl: brandPathUrl(brand.slug),
-      readiness: brandReadiness(brand, counts.get(brand.id)),
-      tenantDb: await tenantDbSummary(brand.id),
+    res.json(await brandDetail(brand));
+  }),
+);
+
+/** Off now, deleted (database included) 30 days on unless reactivated. The grace period a hard delete doesn't give. */
+router.post(
+  "/brands/:id/deactivate",
+  asyncHandler(async (req, res) => {
+    const brand = await deactivateBrand(req.params.id);
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: req.user!.brandId ?? null,
+      actorEmail: req.user!.email,
+      action: "brand.deactivate",
+      targetType: "brand",
+      targetId: brand.id,
+      metadata: { slug: brand.slug, name: brand.name, deletesAt: brandDeletesAt(brand) },
+      ip: req.ip,
     });
+    res.json(await brandDetail(brand));
+  }),
+);
+
+router.post(
+  "/brands/:id/reactivate",
+  asyncHandler(async (req, res) => {
+    const brand = await reactivateBrand(req.params.id);
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: req.user!.brandId ?? null,
+      actorEmail: req.user!.email,
+      action: "brand.reactivate",
+      targetType: "brand",
+      targetId: brand.id,
+      metadata: { slug: brand.slug, name: brand.name },
+      ip: req.ip,
+    });
+    res.json(await brandDetail(brand));
   }),
 );
 
@@ -495,10 +537,8 @@ router.delete(
     const brand = await prisma.brand.findUnique({ where: { id: req.params.id } });
     if (!brand) throw notFound("Brand not found");
     const members = await prisma.customerDirectory.count({ where: { brandId: brand.id } });
-    // Hand the hostname back before the row goes, or it keeps resolving to this
-    // deployment with no tenant behind it — and stays unclaimable by anyone else.
-    if (brand.customDomain) await detachDomainFromEdge(brand.customDomain);
-    await deleteBrand(brand.id);
+    // Immediate and final: the database (with every account in it) goes with the row.
+    await destroyBrand(brand);
     void audit({
       actorId: req.user!.sub,
       actorBrandId: req.user!.brandId ?? null,
@@ -506,11 +546,10 @@ router.delete(
       action: "brand.delete",
       targetType: "brand",
       targetId: brand.id,
-      // Worth recording: those accounts are still live, just no longer in a tenant.
-      metadata: { slug: brand.slug, name: brand.name, membersDetached: members },
+      metadata: { slug: brand.slug, name: brand.name, accountsRemoved: members },
       ip: req.ip,
     });
-    res.json({ ok: true, membersDetached: members });
+    res.json({ ok: true, accountsRemoved: members });
   }),
 );
 
@@ -1109,7 +1148,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const existing = await prisma.brand.findUnique({ where: { id: req.params.id } });
     if (!existing) throw notFound("Brand not found");
-    if (existing.status === "active" || existing.status === "suspended") {
+    if (existing.status === "active" || existing.status === "suspended" || existing.status === "deactivated") {
       throw badRequest("This brand's database is already set up.");
     }
     const brand = await provisionBrand(existing.id, "active");
