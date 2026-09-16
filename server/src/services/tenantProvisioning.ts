@@ -9,12 +9,13 @@ import { deployTenantMigrations, latestTenantMigration } from "./tenantMigration
 import { rebuildDirectoryFromTenant } from "./customerDirectory.js";
 import { env } from "../env.js";
 
-// A brand's own DB: create, keep current, retire. neon in prod, local-schema without NEON_API_KEY.
+// A brand's own DB: create, keep current, destroy. neon in prod, local-schema without NEON_API_KEY.
 // Nothing routes until tenant_info names the brand — a half-finished run says "failed", and a retry resumes.
 
 export type TenantProvider = "neon" | "local-schema";
 
-/** How long a deleted brand's database is kept before the sweep removes it. */
+/** Deleting a brand drops its database at once now. This only paces the sweep that drains
+ *  tenant_database_retirements rows queued before that change. */
 export const TENANT_RETIREMENT_DAYS = 30;
 
 /** Rows copied per batch. Transcripts make these rows large, so the batch is
@@ -293,25 +294,33 @@ export async function markStaleTenants(): Promise<string[]> {
 
 /* ------------------------------ Retirement -------------------------------- */
 
-/** Queues a brand's DB for removal in 30 days. Call before deleting the brand row (it cascades brand_databases); until then the DB is untouched and restorable. */
-export async function retireBrandDatabase(brandId: string): Promise<void> {
-  const row = await prisma.brandDatabase.findUnique({
-    where: { brandId },
-    include: { brand: { select: { slug: true, name: true } } },
-  });
+/** Removes a brand's database right away — the Neon project or the local schema — and forgets its
+ *  brand_databases row. Call before deleting the brand row. A database that is already gone (a delete
+ *  retried after a half-finished one) is not an error; anything else throws so the brand stays put. */
+export async function destroyBrandDatabase(brandId: string): Promise<void> {
+  const row = await prisma.brandDatabase.findUnique({ where: { brandId } });
   if (!row) return;
-  await prisma.tenantDatabaseRetirement.create({
-    data: {
-      brandSlug: row.brand.slug,
-      brandName: row.brand.name,
-      provider: row.provider,
-      neonProjectId: row.neonProjectId,
-      schemaName: row.schemaName,
-      region: row.region,
-      retireAfter: new Date(Date.now() + TENANT_RETIREMENT_DAYS * 24 * 60 * 60 * 1000),
-    },
-  });
+  if (row.provider === "neon") {
+    if (row.neonProjectId) {
+      try {
+        await deleteTenantProject(row.neonProjectId);
+      } catch (err) {
+        if (!isAlreadyGone(err)) throw err;
+      }
+    }
+  } else if (row.schemaName) {
+    await withDirect(localBaseUrls().directUrl, (db) =>
+      db.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${row.schemaName}" CASCADE`),
+    );
+  }
+  await prisma.brandDatabase.deleteMany({ where: { brandId } });
   invalidateTenantRegistry();
+}
+
+/** Neon answers 404 for a project that was already deleted (neonProjects.ts puts the status in the message). */
+function isAlreadyGone(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\(404\)|not found/i.test(msg);
 }
 
 /** Remove every retired database whose 30 days are up. Daily. Each one is

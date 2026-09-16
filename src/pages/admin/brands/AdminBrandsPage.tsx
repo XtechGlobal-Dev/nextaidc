@@ -19,6 +19,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { usePagination } from "@/hooks/usePagination";
 import { api, ApiError, type Brand } from "@/lib/api";
 import { StripeUnroutedCard } from "./StripeUnroutedCard";
+import { brandStatusLabel, brandStatusVariant } from "./brandStatus";
 
 /** Stable stand-in for the pre-load `null`, so paging doesn't re-slice each render. */
 const EMPTY: Brand[] = [];
@@ -67,10 +68,10 @@ export default function AdminBrandsPage() {
     const res = await api.super.brands.remove(toDelete.id);
     setRows((prev) => (prev ?? []).filter((b) => b.id !== toDelete.id));
     toast.success(
-      res.membersDetached > 0
-        ? `"${toDelete.name}" deleted — ${res.membersDetached} account${
-            res.membersDetached === 1 ? "" : "s"
-          } kept and moved to the platform.`
+      res.accountsRemoved > 0
+        ? `"${toDelete.name}" deleted, along with its database and ${res.accountsRemoved} account${
+            res.accountsRemoved === 1 ? "" : "s"
+          }.`
         : `"${toDelete.name}" deleted`,
     );
   }
@@ -111,25 +112,7 @@ export default function AdminBrandsPage() {
   );
 
   const renderStatus = (b: Brand) => (
-    <Badge
-      variant={
-        b.status === "active"
-          ? "success"
-          : b.status === "provisioning"
-            ? "warning"
-            : b.status === "failed"
-              ? "danger"
-              : "neutral"
-      }
-    >
-      {b.status === "active"
-        ? "Active"
-        : b.status === "provisioning"
-          ? "Setting up"
-          : b.status === "failed"
-            ? "Setup failed"
-            : "Suspended"}
-    </Badge>
+    <Badge variant={brandStatusVariant(b)}>{brandStatusLabel(b)}</Badge>
   );
 
   return (
@@ -279,11 +262,12 @@ export default function AdminBrandsPage() {
         onConfirm={confirmDelete}
         description={
           <>
-            Its subdomain stops resolving immediately. The{" "}
+            This is immediate and permanent. Its database is dropped, and the{" "}
             <strong>{toDelete?.counts?.total ?? 0}</strong> account
-            {(toDelete?.counts?.total ?? 0) === 1 ? "" : "s"} inside it are{" "}
-            <strong>not</strong> deleted — they keep working as platform-level accounts. To take a
-            brand offline without losing its address, set its status to Suspended instead.
+            {(toDelete?.counts?.total ?? 0) === 1 ? "" : "s"} inside it{" "}
+            {(toDelete?.counts?.total ?? 0) === 1 ? "is" : "are"} deleted with it. For a way back,
+            deactivate the brand from its page instead: it goes offline now and is deleted after 30
+            days unless you reactivate it.
           </>
         }
       />

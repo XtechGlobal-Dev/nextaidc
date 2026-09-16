@@ -43,6 +43,8 @@ enum BrandStatus {
   suspended
   provisioning
   failed
+  /// Switched off by a super admin with a countdown: the daily sweep deletes the brand (row and database) 30 days after `deactivatedAt`. Reactivating clears it.
+  deactivated
 }
 
 enum Plan {
@@ -646,6 +648,8 @@ model Brand {
   domainError      String    @default("")
 
   status BrandStatus @default(active)
+  /// When the brand was deactivated (see BrandStatus.deactivated); null otherwise.
+  deactivatedAt DateTime?
 
   // Whitelabel: UI assets (public S3 URLs; blank = platform default).
   logoLightUrl String @default("")

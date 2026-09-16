@@ -160,7 +160,7 @@ vi.mock("../services/tenantProvisioning.js", () => ({
     schemaVersion: "0001_tenant_init",
     callsMigrated: 0,
   })),
-  retireBrandDatabase: vi.fn(async () => undefined),
+  destroyBrandDatabase: vi.fn(async () => undefined),
   markStaleTenants: vi.fn(async () => []),
   migrateTenant: vi.fn(),
   runTenantRetirementSweep: vi.fn(async () => ({ removed: 0 })),

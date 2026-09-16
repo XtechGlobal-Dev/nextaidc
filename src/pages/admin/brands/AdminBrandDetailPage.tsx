@@ -9,8 +9,11 @@ import {
   Loader2,
   Mail,
   Palette,
+  Power,
+  RotateCcw,
   Save,
   ShieldCheck,
+  Trash2,
   UserCog,
   Users,
   Wallet,
@@ -38,6 +41,8 @@ import { BrandPricingTab } from "./BrandPricingTab";
 import { BLANK_SETUP, setupFrom, setupPayload, type SetupDraft } from "./brandSetupDraft";
 import { BrandDomainSection } from "./BrandDomainSection";
 import { BrandInsideTab } from "./BrandInsideTab";
+import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
+import { brandStatusLabel, brandStatusVariant, formatDeletesAt } from "./brandStatus";
 
 interface Draft extends ThemeDraft, SetupDraft {
   name: string;
@@ -95,6 +100,10 @@ export default function AdminBrandDetailPage() {
   const [draft, setDraft] = useState<Draft>(BLANK);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Lifecycle: deactivate (off now, deleted in 30 days), reactivate, or delete now.
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [confirmingDeactivate, setConfirmingDeactivate] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   // A link may open a particular tab (the platform overview and the directory
   // send people straight to what is inside the brand).
   const [searchParams] = useSearchParams();
@@ -336,14 +345,19 @@ export default function AdminBrandDetailPage() {
           </Label>
           <p className="text-xs text-muted-foreground">
             Suspending keeps every record but stops the subdomain resolving, so nobody can reach or
-            sign into the brand.
+            sign into the brand. To retire it, use Deactivate below.
           </p>
         </div>
         <Switch
           id="b-status"
           checked={draft.status === "active"}
-          // Nothing to switch until the database is ready — see the Database card.
-          disabled={draft.status === "provisioning" || draft.status === "failed"}
+          // Nothing to switch until the database is ready — see the Database card. A deactivated
+          // brand is on a countdown; Reactivate (below) is its way back, not this switch.
+          disabled={
+            draft.status === "provisioning" ||
+            draft.status === "failed" ||
+            draft.status === "deactivated"
+          }
           onCheckedChange={(checked) => patch({ status: checked ? "active" : "suspended" })}
         />
       </div>
@@ -355,6 +369,111 @@ export default function AdminBrandDetailPage() {
       {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
       Save changes
     </Button>
+  );
+
+  // Only the status moves: unsaved edits in the form survive a lifecycle change.
+  function applyLifecycle(next: Brand) {
+    setBrand(next);
+    setDraft((d) => ({ ...d, status: next.status }));
+  }
+
+  // Throws on failure so ConfirmDeleteDialog surfaces the error and stays open.
+  async function deactivate() {
+    const next = await api.super.brands.deactivate(id!);
+    applyLifecycle(next);
+    toast.success(
+      next.deletesAt
+        ? `"${next.name}" deactivated — deleted for good on ${formatDeletesAt(next.deletesAt)} unless you reactivate it.`
+        : `"${next.name}" deactivated`,
+    );
+  }
+
+  async function reactivate() {
+    setLifecycleBusy(true);
+    try {
+      const next = await api.super.brands.reactivate(id!);
+      applyLifecycle(next);
+      toast.success(`"${next.name}" is back online.`);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Failed to reactivate brand");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  }
+
+  // Throws on failure so ConfirmDeleteDialog surfaces the error and stays open.
+  async function destroy() {
+    const res = await api.super.brands.remove(id!);
+    toast.success(
+      res.accountsRemoved > 0
+        ? `"${brand?.name}" deleted, along with its database and ${res.accountsRemoved} account${
+            res.accountsRemoved === 1 ? "" : "s"
+          }.`
+        : `"${brand?.name}" deleted`,
+    );
+    navigate("/dashboard/admin/brands");
+  }
+
+  const deactivated = brand?.status === "deactivated";
+  const inSetup = brand?.status === "provisioning" || brand?.status === "failed";
+  const lifecycleCard = brand && (
+    <Card className="space-y-4 border-danger/40 p-5">
+      <h3 className="text-sm font-semibold">Deactivate or delete</h3>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="text-sm">
+          {deactivated ? (
+            <>
+              <p className="font-medium">
+                Deactivated{brand.deactivatedAt ? ` on ${formatDeletesAt(brand.deactivatedAt)}` : ""}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Offline now. Deleted for good, database and accounts included, on{" "}
+                <strong>{brand.deletesAt ? formatDeletesAt(brand.deletesAt) : "its due date"}</strong>{" "}
+                unless you reactivate it before then.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-medium">Deactivate</p>
+              <p className="text-xs text-muted-foreground">
+                Takes the brand offline now and deletes it, database and accounts included, after 30
+                days. You can reactivate it any time before then.
+              </p>
+            </>
+          )}
+        </div>
+        {deactivated ? (
+          <Button variant="outline" disabled={lifecycleBusy} onClick={() => void reactivate()}>
+            {lifecycleBusy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RotateCcw className="size-4" />
+            )}
+            Reactivate
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            // In setup there is nothing to switch off: Retry finishes it, Delete removes it.
+            disabled={inSetup}
+            onClick={() => setConfirmingDeactivate(true)}
+          >
+            <Power className="size-4" /> Deactivate
+          </Button>
+        )}
+      </div>
+      <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="text-sm">
+          <p className="font-medium">Delete now</p>
+          <p className="text-xs text-muted-foreground">
+            Immediate and permanent: the database and every account in it go with the brand.
+          </p>
+        </div>
+        <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+          <Trash2 className="size-4" /> Delete brand
+        </Button>
+      </div>
+    </Card>
   );
 
   return (
@@ -372,25 +491,7 @@ export default function AdminBrandDetailPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {brand && (
-              <Badge
-                variant={
-                  brand.status === "active"
-                    ? "success"
-                    : brand.status === "provisioning"
-                      ? "warning"
-                      : brand.status === "failed"
-                        ? "danger"
-                        : "neutral"
-                }
-              >
-                {brand.status === "active"
-                  ? "Active"
-                  : brand.status === "provisioning"
-                    ? "Setting up"
-                    : brand.status === "failed"
-                      ? "Setup failed"
-                      : "Suspended"}
-              </Badge>
+              <Badge variant={brandStatusVariant(brand)}>{brandStatusLabel(brand)}</Badge>
             )}
             {brand?.loginUrl && (
               <a
@@ -457,6 +558,7 @@ export default function AdminBrandDetailPage() {
           <TabsContent value="brand" className="space-y-5">
             {identityCard}
             <div className="flex justify-end">{saveButton}</div>
+            {lifecycleCard}
           </TabsContent>
 
           <TabsContent value="domain" className="space-y-5">
@@ -503,6 +605,38 @@ export default function AdminBrandDetailPage() {
             {brand && <BrandInsideTab brand={brand} />}
           </TabsContent>
         </Tabs>
+
+        <ConfirmDeleteDialog
+          open={confirmingDeactivate}
+          onOpenChange={(open) => !open && setConfirmingDeactivate(false)}
+          resourceType="brand"
+          resourceName={brand?.name ?? ""}
+          title="Deactivate brand"
+          confirmLabel="Deactivate"
+          onConfirm={deactivate}
+          description={
+            <>
+              It goes offline now: nobody can reach or sign into it. In 30 days it is deleted for
+              good, database and accounts included, unless you reactivate it first.
+            </>
+          }
+        />
+        <ConfirmDeleteDialog
+          open={confirmingDelete}
+          onOpenChange={(open) => !open && setConfirmingDelete(false)}
+          resourceType="brand"
+          resourceName={brand?.name ?? ""}
+          onConfirm={destroy}
+          description={
+            <>
+              This is immediate and permanent. Its database is dropped, and the{" "}
+              <strong>{brand?.counts?.total ?? 0}</strong> account
+              {(brand?.counts?.total ?? 0) === 1 ? "" : "s"} inside it{" "}
+              {(brand?.counts?.total ?? 0) === 1 ? "is" : "are"} deleted with it. For a way back,
+              deactivate instead.
+            </>
+          }
+        />
       </>
     </div>
   );

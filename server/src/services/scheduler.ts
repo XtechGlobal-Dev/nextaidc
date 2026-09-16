@@ -20,6 +20,7 @@ import { sweepCallPartitions } from "./callPartitions.js";
 import { allCallDbs, allTenants, type TenantClient } from "./tenantDb.js";
 import { runWithBrand } from "../lib/brandContext.js";
 import { runTenantRetirementSweep } from "./tenantProvisioning.js";
+import { runBrandDeactivationSweep } from "./brandDeactivation.js";
 import { rollupBrandStats, catchUpBrandStats, msUntilNextUtc } from "./brandStats.js";
 import { env } from "../env.js";
 import { scheduleRecurring } from "../lib/jobQueue.js";
@@ -380,10 +381,14 @@ export function startScheduler(): void {
       `, delete after ${env.CALL_RETENTION_DAYS || "never"}${env.CALL_RETENTION_DAYS ? "d" : ""})`,
   );
 
-  // A deleted brand's database is kept 30 days, then removed. Daily, offset so
-  // it never coincides with the call sweep above.
+  // Databases queued for retirement before brand deletes became immediate are removed once their
+  // 30 days are up. Daily, offset so it never coincides with the call sweep above.
   setTimeout(() => void runTenantRetirementSweep().catch(logSweepError("tenant retirement")), 20 * 60 * 1000);
   setInterval(() => void runTenantRetirementSweep().catch(logSweepError("tenant retirement")), DAY_MS);
+
+  // A deactivated brand is deleted for good (row and database) 30 days on. Daily, just after the above.
+  setTimeout(() => void runBrandDeactivationSweep().catch(logSweepError("brand deactivation")), 25 * 60 * 1000);
+  setInterval(() => void runBrandDeactivationSweep().catch(logSweepError("brand deactivation")), DAY_MS);
 
   // Nightly brand stats rollup into Main. Fixed at 00:15 UTC because the row is a
   // calendar day; a night the process slept through is caught up at boot.
