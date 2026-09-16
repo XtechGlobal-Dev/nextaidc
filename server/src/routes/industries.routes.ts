@@ -8,7 +8,7 @@ import { sendValidated } from "../lib/respond.js";
 import {
   IndustriesListResponseSchema,
   IndustrySuggestResponseSchema,
-} from "hello22/shared/contracts/industries.js";
+} from "../../../shared/contracts/industries.js";
 
 const router = express.Router();
 

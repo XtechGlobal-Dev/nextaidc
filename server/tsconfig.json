@@ -5,7 +5,13 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
     "outDir": "dist",
-    "rootDir": "src",
+    // The build also emits ../shared/contracts, so the emit root is the repo root and the
+    // entry point lands at dist/server/src/index.js (see the "start" script).
+    "rootDir": "..",
+    "baseUrl": ".",
+    // ../shared/contracts imports zod. Resolve it from this package's node_modules so the build
+    // does not depend on the repo-root install, which Render's service (rooted at server/) never runs.
+    "paths": { "zod": ["./node_modules/zod"] },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -16,6 +22,6 @@
     "verbatimModuleSyntax": false,
     "types": ["node"]
   },
-  "include": ["src"],
+  "include": ["src", "../shared/contracts"],
   "exclude": ["node_modules", "dist", "prisma"]
 }

@@ -17,12 +17,12 @@ import { isWhatsAppConfigured, callSummaryWhatsApp } from "../services/whatsapp.
 import { isAdminRole } from "../lib/roles.js";
 import { brandDisplayName } from "../lib/brandUrls.js";
 import { sendValidated } from "../lib/respond.js";
-import { OkResponseSchema } from "hello22/shared/contracts/common.js";
+import { OkResponseSchema } from "../../../shared/contracts/common.js";
 import {
   NotificationChannelsResponseSchema,
   NotificationsListResponseSchema,
   TestSummaryResponseSchema,
-} from "hello22/shared/contracts/notifications.js";
+} from "../../../shared/contracts/notifications.js";
 
 const router = express.Router();
 
