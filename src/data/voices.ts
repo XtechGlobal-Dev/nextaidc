@@ -1,13 +1,7 @@
 import type { VoiceOption } from "@/types";
 
-/**
- * Voice catalog (Deepgram Aura-2). `id` is the Deepgram voice short name — sent to
- * Vapi's "deepgram" provider (model "aura-2") and to /api/tts. Mirrors the server
- * catalog (server/src/services/voices.ts CATALOG); keep both in sync. The live
- * AI-Brain picker uses the server catalog (with plan entitlement) — this local copy
- * backs onboarding labels + the prompt compiler. Premium gating is plan-driven
- * server-side, so `premium` here is informational only.
- */
+/** Deepgram Aura-2 catalog — mirrors CATALOG in server/src/services/voices.ts, keep in sync. Backs
+ *  onboarding labels + the prompt compiler; the live picker uses the server. `premium` is informational only. */
 export const VOICES: VoiceOption[] = [
   // Australian (brand default leads)
   { id: "theia", name: "Theia", region: "Australian", descriptor: "Warm & Friendly", premium: false },
@@ -71,26 +65,18 @@ export function getVoice(id: string): VoiceOption | undefined {
 /** Valid Deepgram voice ids (the catalog). */
 const DEEPGRAM_VOICE_IDS = new Set(VOICES.map((v) => v.id));
 
-/** The voice every account starts on — Deepgram's Australian female (aura-2-theia-en).
- *  Mirrors the server's `DEFAULT_VOICE_ID` (services/voices.ts). This is the single
- *  default used by onboarding, the default agent config, and the empty-voice
- *  fallback — keep all three in sync. */
+/** Default Deepgram voice. Mirrors DEFAULT_VOICE_ID in server/src/services/voices.ts; onboarding,
+ *  the default agent config and the empty-voice fallback all use it — keep in sync. */
 export const DEFAULT_VOICE_ID = "theia"; // Emma — Deepgram aura-2-theia-en (Australian female)
 
-/** Resolve a stored voiceId to a valid Deepgram voice short name: pass current
- *  catalog ids through, else fall back to the default (guards empty/unknown ids).
- *  The result is sent to Vapi's "deepgram" provider. Mirrors the server's resolver. */
+/** Stored voiceId → valid Deepgram short name, default for empty/unknown. Mirrors the server's resolver. */
 export function deepgramVoiceFor(voiceId: string | undefined | null): string {
   if (voiceId && DEEPGRAM_VOICE_IDS.has(voiceId)) return voiceId;
   return DEFAULT_VOICE_ID;
 }
 
-/* ------------------------------ ElevenLabs voices ------------------------- *
- *  In ElevenLabs mode the picker is driven by the live ElevenLabs library (from
- *  the server /api/voices), so a selected voiceId is a real ElevenLabs voice_id.
- *  This resolver (mirrors server services/voices.ts) handles web test calls:
- *  a real ElevenLabs id passes through; a legacy Deepgram catalog name is mapped
- *  to a close premade; empty/unknown → the default premade. */
+// ElevenLabs resolver for web test calls (mirrors server/src/services/voices.ts): a real voice_id
+// passes through, a legacy Deepgram name maps to a close premade, empty → the default premade.
 const LEGACY_DEEPGRAM_TO_ELEVEN: Record<string, string> = {
   theia: "EXAVITQu4vr4xnSDxMaL", // Sarah
   hyperion: "JBFqnCBsd6RMkjVDRZzb", // George
@@ -111,10 +97,8 @@ export function elevenLabsVoiceFor(voiceId: string | undefined | null): string {
   return v;
 }
 
-/** Which provider a stored voiceId belongs to (mirrors the server). A Deepgram
- *  catalog name → "deepgram"; any other non-empty id is an ElevenLabs voice_id →
- *  "elevenlabs"; empty → the passed fallback (the global default). Keeps an existing
- *  ElevenLabs agent on ElevenLabs even if the global toggle later flips. */
+/** Provider for a stored voiceId (mirrors the server): catalog name → deepgram, other id → elevenlabs,
+ *  empty → fallback. Keeps an existing ElevenLabs agent there even if the global toggle flips. */
 export function providerForVoiceId(
   voiceId: string | undefined | null,
   fallback: "deepgram" | "elevenlabs" = "deepgram",
@@ -124,20 +108,14 @@ export function providerForVoiceId(
   return DEEPGRAM_VOICE_IDS.has(v) ? "deepgram" : "elevenlabs";
 }
 
-/* ------------------------- Eleven v3 model routing ------------------------- *
- *  Mirrors the server (server/src/services/voices.ts). Turbo v2.5 doesn't carry
- *  every language convincingly, so a call switches TTS model only when the agent
- *  is on one of the pinned voices below AND has that voice's language enabled.
- *  Everything else stays on eleven_turbo_v2_5.
- * -------------------------------------------------------------------------- */
+// Eleven v3 routing (mirrors server/src/services/voices.ts): switch model only when the agent is on
+// a pinned voice AND has that voice's language enabled; everything else stays on turbo v2.5.
 
 export const ELEVEN_DEFAULT_MODEL = "eleven_turbo_v2_5";
 export const ELEVEN_V3_MODEL = "eleven_v3";
 
-/** Pinned ElevenLabs voices that need Eleven v3, keyed by the agent-language name
- *  (as stored in identity.languages) that triggers it. Mirrors the server's
- *  CURATED_VOICE_SPECS + V3_VOICE_LANGUAGES (server/src/services/voices.ts) — keep
- *  both in sync, the same way this file already mirrors the Deepgram catalog. */
+/** Voices needing Eleven v3, keyed by the identity.languages name that triggers it. Mirrors
+ *  CURATED_VOICE_SPECS + V3_VOICE_LANGUAGES in server/src/services/voices.ts — keep in sync. */
 const V3_VOICE_IDS_BY_LANGUAGE: Record<string, readonly string[]> = {
   Punjabi: ["fBXc7vfuym7wUXyB57Eo", "RxnH5jCRKb1ez2lcmQC1"],
   Nepali: ["qEvUQh8PxrzNFap49hNm"],
@@ -161,38 +139,27 @@ export function elevenLabsModelFor(
   return needsV3 ? ELEVEN_V3_MODEL : ELEVEN_DEFAULT_MODEL;
 }
 
-/** The headline voices shown on the landing page "Choose your voice". Ids are
- *  ElevenLabs premade voice_ids (resolve the provider with providerForVoiceId —
- *  NOT deepgramVoiceFor, which would collapse them all to the default Deepgram
- *  voice) so the exact voice a visitor picks flows unchanged through
- *  onboarding → agent config → test calls → the live agent. */
+/** Landing-page "Choose your voice" tiles. ElevenLabs premade ids — resolve with providerForVoiceId,
+ *  NOT deepgramVoiceFor (which collapses them all to the Deepgram default). */
 export const LANDING_VOICES: { id: string; name: string; flag: string; region: string }[] = [
-  // `name` is just the friendly display label shown on the tile — the id is the
-  // real ElevenLabs premade voice (Matilda / Laura / Charlie / George).
+  // `name` is the tile label; the ids are the real premades (Matilda / Laura / Charlie / George).
   { id: "XrExE9yKIg1WjnnlVkGX", name: "Emma", flag: "🇺🇸", region: "American" },
   { id: "FGY2WhTYpPnrIDTdsKH5", name: "Olivia", flag: "🇺🇸", region: "American" },
   { id: "IKne3meq5aSn9XLyUdCD", name: "Jack", flag: "🇦🇺", region: "Australian" },
   { id: "JBFqnCBsd6RMkjVDRZzb", name: "James", flag: "🇬🇧", region: "British" },
 ];
 
-/** Friendly display name for a stored voiceId, used where the live catalog isn't
- *  loaded (onboarding screens). Resolves the landing/showcase ElevenLabs voices and
- *  Deepgram catalog names; falls back to the default voice's name (Sarah). */
+/** Display name for a voiceId where the live catalog isn't loaded (onboarding); falls back to "Sarah". */
 export function voiceNameFor(voiceId: string): string {
   const landing = LANDING_VOICES.find((v) => v.id === voiceId);
   if (landing) return landing.name;
   return getVoice(voiceId)?.name ?? "Sarah";
 }
 
-/* ------------------------------- Avatars ---------------------------------- *
- *  Onboarding shows a photo avatar for the AI receptionist (the way competitors
- *  give their persona a face). We don't have a portrait per voice, so we pick a
- *  gendered stock headshot from the selected voice. Swap these URLs for branded
- *  photos anytime — EmmaAvatar falls back to its gradient icon if a URL fails. */
+// Onboarding avatar: no portrait per voice, so pick a gendered stock headshot. EmmaAvatar falls
+// back to its gradient icon if a URL fails.
 
-/** Voices that read as masculine — everything else defaults to feminine (the
- *  brand default Theia and the bulk of the Aura-2 catalog are female). Covers the
- *  Deepgram catalog ids plus the landing/showcase ElevenLabs male voices. */
+/** Voices that read as masculine — everything else defaults to feminine (most of the catalog is). */
 const MALE_VOICE_IDS = new Set<string>([
   // Deepgram Aura-2 masculine voices
   "hyperion", "draco", "apollo", "arcas", "aries", "atlas", "hermes", "jupiter",
@@ -215,9 +182,7 @@ export const DEFAULT_AVATAR_BY_GENDER: Record<"male" | "female", string> = {
     "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=facearea&facepad=3&w=256&h=256&q=80",
 };
 
-/** Photo URL for the onboarding receptionist avatar, chosen by the voice's
- *  gender. Prefers the admin-configured branding image (avatarFemale/avatarMale
- *  from the branding store), falling back to the built-in stock headshot. */
+/** Onboarding avatar URL by voice gender — branding override first, then the stock headshot. */
 export function avatarForVoice(
   voiceId: string,
   overrides?: { avatarFemale?: string; avatarMale?: string },
@@ -227,6 +192,4 @@ export function avatarForVoice(
   return override?.trim() || DEFAULT_AVATAR_BY_GENDER[gender];
 }
 
-// TIMEZONES (a 7-entry Australia-only list of display labels) was removed —
-// the agent's timezone is an IANA zone now, picked from every zone the runtime
-// knows. See lib/timezone.ts.
+// TIMEZONES list was removed — the agent's timezone is an IANA zone now, see lib/timezone.ts.

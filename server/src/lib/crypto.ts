@@ -1,12 +1,8 @@
 import crypto from "node:crypto";
 import { env } from "../env.js";
 
-/* ------------------------------------------------------------------ *
- *  AES-256-GCM encryption for stored secrets (integration API keys).
- *  Key is derived (sha256 → 32 bytes) from SETTINGS_ENCRYPTION_KEY,
- *  falling back to JWT_SECRET so it works out of the box. Set a
- *  dedicated SETTINGS_ENCRYPTION_KEY in production.
- * ------------------------------------------------------------------ */
+// AES-256-GCM for stored secrets. Key = sha256(SETTINGS_ENCRYPTION_KEY), falling back to JWT_SECRET —
+// set a dedicated key in production.
 const keyMaterial = process.env.SETTINGS_ENCRYPTION_KEY?.trim() || env.JWT_SECRET;
 const KEY = crypto.createHash("sha256").update(keyMaterial).digest();
 

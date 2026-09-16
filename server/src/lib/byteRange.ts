@@ -1,16 +1,5 @@
-/**
- * Minimal single-range `Range: bytes=…` parsing (RFC 9110 §14.1.2).
- *
- * Used by the recording proxy so an audio player can seek: a media element that
- * jumps mid-file issues a byte-range request, and a server that answers 200 with
- * the whole file from byte 0 makes the browser restart playback from the start.
- *
- * Returns:
- *  - `{ start, end }` — an inclusive, clamped range to serve as 206.
- *  - `"unsatisfiable"` — syntactically valid but outside the resource → 416.
- *  - `null` — not a form we handle (multi-range, other units) → serve the whole
- *    body as a normal 200, which the spec allows.
- */
+/** Single-range `Range: bytes=…` parsing (RFC 9110) so audio seeking works — answering 200 restarts
+ *  playback. `{start,end}` → 206; "unsatisfiable" → 416; null (multi-range/other units) → plain 200. */
 export type ByteRange = { start: number; end: number };
 
 export function parseByteRange(header: string, size: number): ByteRange | "unsatisfiable" | null {

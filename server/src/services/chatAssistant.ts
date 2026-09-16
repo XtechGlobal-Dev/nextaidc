@@ -3,11 +3,7 @@ import { buildChatBody, openAiTokenUnits } from "../lib/openai.js";
 import { traceFetch } from "./apiTrace.js";
 import { brandDisplayName } from "../lib/brandUrls.js";
 
-/* ------------------------------------------------------------------ *
- *  Support-chat assistant. Uses OpenAI when an admin has configured a
- *  key (Admin → Settings, DB → env fallback); otherwise returns a
- *  canned reply so the widget always responds.
- * ------------------------------------------------------------------ */
+// Support-chat assistant. OpenAI when a key is configured (DB, then env); otherwise a canned reply so the widget always responds.
 
 export const CANNED_REPLIES = [
   "Great question! You can configure your AI receptionist's greeting and behaviour from the AI Brain tab in your dashboard.",
@@ -60,9 +56,7 @@ export interface SupportReply {
   handoff: HandoffRequest | null;
 }
 
-/** Pull the machine-read HANDOFF line (if any) out of a raw LLM reply. The
- *  marker always triggers a handoff, even if its JSON is mangled — the emailed
- *  transcript carries the details either way. */
+// The HANDOFF marker always triggers a handoff even with mangled JSON — the emailed transcript carries the details anyway.
 function extractHandoff(raw: string): SupportReply {
   const m = raw.match(/^\s*HANDOFF:\s*(\{.*\})?\s*$/m);
   if (!m) return { reply: raw.trim(), handoff: null };

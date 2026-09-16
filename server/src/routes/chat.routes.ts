@@ -72,9 +72,7 @@ router.post(
       conversation.messages.length,
     );
 
-    // The assistant signalled a handoff — actually deliver it. Only confirm to
-    // the user what really happened: on a failed send, replace the "sent!"
-    // reply with an honest fallback instead of silently dropping the request.
+    // Deliver the handoff. If the send fails, swap the "sent!" reply for an honest fallback.
     if (handoff) {
       try {
         const user = await db.user.findUnique({ where: { id: req.user!.sub } });
@@ -91,9 +89,7 @@ router.post(
           where: { id: conversation.id },
           data: { humanTakeover: true },
         });
-        // Confirmation to the customer at the address they gave the assistant
-        // (fallback: their account email). Best-effort — the handoff itself
-        // already reached the team, so a failed ack only gets logged.
+        // Best-effort ack to the customer (given address, else account email) — the team already has the handoff.
         const customerEmail = (handoff.email || user?.email || "").trim();
         if (customerEmail) {
           void handoffAckEmail({

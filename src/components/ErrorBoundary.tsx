@@ -10,12 +10,7 @@ interface State {
   reloading: boolean;
 }
 
-/**
- * Catches render + lazy-import errors so a thrown route never blanks the whole
- * app. A stale-chunk failure (after a deploy) auto-reloads once to pull the new
- * build — showing a neutral spinner while it does; anything else shows a
- * friendly "Reload" fallback instead of a white screen.
- */
+/** Catches render/lazy-import errors. Stale chunk after a deploy reloads once (spinner); anything else gets a Reload card. */
 export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   state: State = { hasError: false, reloading: false };
 
@@ -24,9 +19,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   }
 
   componentDidCatch(error: unknown, _info: ErrorInfo) {
-    // Stale code-split chunk after a deploy → reload once to fetch the new build.
-    // If the once-per-session guard blocks the reload (truly broken build), fall
-    // through to the error card instead of spinning forever.
+    // If the once-per-session reload guard refuses (truly broken build), show the error card instead of spinning forever.
     if (isChunkLoadError(error) && !reloadForStaleChunk()) {
       this.setState({ reloading: false });
     }

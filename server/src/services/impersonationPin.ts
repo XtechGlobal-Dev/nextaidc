@@ -1,25 +1,9 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "../prisma.js";
 
-/**
- * The PIN that gates "Login as Customer".
- *
- * Impersonation is the most powerful thing an admin can do — it hands over a
- * real session as somebody else — so it is worth a second factor beyond "this
- * browser is logged in as an admin". The obvious case it defends is an admin
- * who walks away from an unlocked machine.
- *
- * WHAT THIS IS NOT: the UI hides the entry point behind an emoji, and that is
- * worth nothing on its own. `POST /customers/:id/impersonate` is still a
- * documented endpoint any admin session can call directly, so hiding a button
- * only stops shoulder-surfing. The PIN check has to live HERE, on the server,
- * inside that endpoint — a dialog that validates in the browser and then calls
- * the API is bypassed by anyone who opens devtools.
- *
- * The PIN is stored as a bcrypt hash and never leaves the server, not even to
- * the admin who set it. Losing it means setting a new one, which is the correct
- * trade for a credential.
- */
+// PIN gating "Login as Customer" — a second factor for the most powerful admin action.
+// Must be checked server-side inside the endpoint; the hidden UI button stops nothing.
+// Stored as a bcrypt hash that never leaves the server; losing it means setting a new one.
 
 /** bcrypt hash of the current PIN. Absent row ⇒ still on the default. */
 export const PIN_HASH_KEY = "admin.impersonationPinHash";
@@ -40,10 +24,7 @@ export function isValidPinFormat(pin: string): boolean {
   return new RegExp(`^\\d{${PIN_LENGTH}}$`).test(pin);
 }
 
-/**
- * "a•••@example.com" — enough for the admin to recognise which inbox to open,
- * not enough for a hijacked session to read the address out of the response.
- */
+/** "a•••@example.com" — recognisable to the admin, unreadable to a hijacked session. */
 export function maskEmail(email: string): string {
   const [local = "", domain = ""] = email.split("@");
   if (!domain) return "•••";
@@ -56,12 +37,7 @@ async function storedHash(): Promise<string | null> {
   return row?.value ?? null;
 }
 
-/**
- * Is `pin` the current one?
- *
- * With no hash stored the platform is still on the default, so that is what a
- * submission is compared against. Deliberately NOT "no hash ⇒ allow anything".
- */
+/** No stored hash means "still on the default" — deliberately NOT "allow anything". */
 export async function verifyPin(pin: string): Promise<boolean> {
   const hash = await storedHash();
   if (!hash) return pin === DEFAULT_PIN;
@@ -91,18 +67,8 @@ interface LockState {
   until: number;
 }
 
-/**
- * Attempt state lives in the DATABASE, not in memory.
- *
- * A six-digit PIN is a million combinations — trivially scriptable without a
- * limit — so the limit has to be one an attacker can't shrug off. In-memory
- * counters (like the IP rate limiter in middleware/rateLimit.ts) reset on every
- * deploy and restart, and are per-process; this is the platform's credential,
- * so it is counted once, centrally, and survives both.
- *
- * Counted per PLATFORM rather than per IP for the same reason: rotating IPs must
- * not hand out fresh budgets of guesses.
- */
+// Attempts live in the DB, counted per platform (not per IP or in memory): a
+// restart or an IP rotation must not hand out fresh guesses at a 6-digit secret.
 async function readLock(): Promise<LockState> {
   const row = await prisma.platformSetting.findUnique({ where: { key: PIN_LOCK_KEY } });
   if (!row) return { fails: 0, until: 0 };

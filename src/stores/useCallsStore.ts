@@ -5,9 +5,8 @@ import { sessionMark, sessionChanged } from "@/lib/sessionEpoch";
 
 const SENTIMENTS: Sentiment[] = ["Positive", "Neutral", "Negative"];
 
-/** Coerce a raw `analysis` blob (real calls carry Vapi's shape, which lacks
- *  intent/sentiment/actionItems) into the app's `CallAnalysis` so consumers can
- *  read `.actionItems.length` etc. without guarding every access. */
+/** Coerce a raw `analysis` blob into `CallAnalysis` — real calls carry Vapi's shape, which
+ *  lacks intent/sentiment/actionItems, so consumers would otherwise guard every access. */
 function normalizeAnalysis(raw: unknown, fallbackSummary: string): CallAnalysis {
   const a = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const sd = (a.structuredData && typeof a.structuredData === "object"
@@ -82,13 +81,8 @@ interface CallsState {
   /** Prepend new call logs (newest first). Used by the Quick Setup test flow. */
   addCalls: (calls: CallLog[]) => void;
   select: (id: string | null) => void;
-  /** Pull an archived call's transcript + analysis back from cold storage.
-   *
-   *  Calls past the archive window ship from the list without their blobs — the
-   *  alternative was one cold-storage read per row for a 500-row page, to fill
-   *  fields the table never renders. So the panel and the copy action fetch the
-   *  single call the owner actually opened. A no-op (and no request) for a call
-   *  that still carries its transcript inline, which is nearly all of them. */
+  /** Fetch an archived call's transcript + analysis from cold storage. The list ships
+   *  archived rows without blobs (one cold read per row was too much); no-op when inline. */
   ensureTranscript: (id: string) => Promise<CallLog | null>;
   /** Owner-corrected category. Applied optimistically, then persisted; on
    *  failure the previous value is restored so the UI never lies. */
@@ -125,9 +119,8 @@ export const useCallsStore = create<CallsState>((set, get) => ({
       };
     }),
   select: (id) => set({ selectedId: id }),
-  // Reads through zustand's own `get`, not `useCallsStore.getState()`: this one
-  // returns a value derived from the state, and referring to the store by name
-  // inside its own initializer makes that return type circular.
+  // Uses `get`, not `useCallsStore.getState()` — naming the store inside its own
+  // initializer makes this return type circular.
   ensureTranscript: async (id) => {
     const current = get().calls.find((c) => c.id === id) ?? null;
     if (!current?.blobArchived) return current;
@@ -136,9 +129,8 @@ export const useCallsStore = create<CallsState>((set, get) => ({
       set((s) => ({ calls: s.calls.map((c) => (c.id === id ? full : c)) }));
       return full;
     } catch {
-      // Cold storage is unreachable or the object is gone. Keep the row we have
-      // — every field the table shows is still correct; only the transcript is
-      // missing, and the panel already renders that case.
+      // Cold storage unreachable or object gone — keep the row; the table's fields are
+      // still right and the panel already handles a missing transcript.
       return current;
     }
   },

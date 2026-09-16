@@ -1,10 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// The minutes-exhausted early renewal must fire EXACTLY ONCE per cycle.
-// reconcileSubscription runs from five places — including validateTrial, on every
-// gated API request — so a dashboard load issuing parallel requests had several of
-// them read "minutes exhausted" simultaneously and each charge the card. The fix is
-// an atomic claim (updateMany with a `gte` predicate) before touching Stripe.
+// Early renewal must charge EXACTLY ONCE. Parallel dashboard requests each read
+// "exhausted" and each charged the card; fix is an atomic updateMany claim before Stripe.
 
 vi.mock("../prisma.js", () => ({
   prisma: { profile: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() } },

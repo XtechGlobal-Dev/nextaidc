@@ -1,9 +1,6 @@
 import type { AppNotification, NotificationType } from "@/stores/useNotificationStore";
 
-/* ------------------------------------------------------------------ *
- *  Notification panel helpers — pure functions, so the grouping, filter
- *  and timestamp rules can be unit-tested without a DOM.
- * ------------------------------------------------------------------ */
+// Pure helpers for the notification panel so grouping/filter/time rules test without a DOM.
 
 /** Filter chips above the list. `calls` has two narrower sub-filters reachable
  *  from its dropdown (Missed / Handled), mirroring how the chip reads in the UI. */
@@ -20,9 +17,7 @@ const FILTER_TYPES: Record<Exclude<NotificationFilter, "all">, readonly Notifica
   calls: ["missed_call", "new_lead"],
   missed: ["missed_call"],
   handled: ["new_lead"],
-  // Support requests on either lane. One chip, because a person only ever
-  // holds one side of one conversation — a customer never sees a brand's
-  // requests, and the platform owner never sees a customer's.
+  // One chip for both support lanes; a person only ever holds one side of one conversation.
   tickets: ["ticket"],
   billing: ["billing"],
   // "System" covers platform notices and the AI-agent lifecycle (welcome,
@@ -96,10 +91,7 @@ export function groupNotifications<T extends Pick<AppNotification, "createdAt">>
   }));
 }
 
-/**
- * Timestamp as the panel shows it: "10:30 AM" for today, "Yesterday, 04:45 PM",
- * then "Aug 29, 11:05 AM" (the year is added once it's no longer this year).
- */
+/** "10:30 AM" today, "Yesterday, 04:45 PM", then "Aug 29, 11:05 AM" (year added once it's not this year). */
 export function formatNotificationTime(iso: string, now: Date = new Date(), locale?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";

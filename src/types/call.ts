@@ -1,6 +1,4 @@
-/* ------------------------------------------------------------------ *
- *  Call logs — every inbound call with transcript + AI analysis.
- * ------------------------------------------------------------------ */
+// Call logs — every inbound call with transcript + AI analysis.
 
 export type CallOutcome =
   | "completed"
@@ -10,9 +8,8 @@ export type CallOutcome =
 
 export type CallType = "Web" | "Phone";
 
-/** What the call was about — the inbox's category badge + filter. Kept in sync
- *  with CALL_INTENTS in server/src/lib/callIntent.ts. "" = unclassified (calls
- *  logged before the feature, or nothing confident enough) → no badge. */
+/** Inbox category badge. Keep in sync with CALL_INTENTS in server/src/lib/callIntent.ts;
+ *  "" = unclassified → no badge. */
 export type CallIntent = "booking" | "lead" | "enquiry" | "support" | "spam";
 
 export type Sentiment = "Positive" | "Neutral" | "Negative";
@@ -57,9 +54,7 @@ export interface CallLog {
   recordingUrl?: string;
   transcript: TranscriptTurn[];
   analysis: CallAnalysis;
-  /** True when this call is old enough that its transcript and analysis were
-   *  moved to cold storage, so the list shipped without them. Everything shown
-   *  in the table is still here; opening the call fetches the rest. See
-   *  `useCallsStore.ensureTranscript`. */
+  /** Transcript + analysis moved to cold storage, so the list shipped without them; opening the call
+   *  fetches the rest (`useCallsStore.ensureTranscript`). */
   blobArchived?: boolean;
 }

@@ -10,14 +10,8 @@ import {
 } from "@/data/voices";
 import { languagesForVoiceProvider, transcriberFor, type TranscriberConfig } from "@/data/languages";
 
-/* ------------------------------------------------------------------ *
- *  Vapi voice client.
- *  - Real browser call via @vapi-ai/web when VITE_VAPI_PUBLIC_KEY is set.
- *  - Falls back to a simulated lifecycle when no key (offline/mock).
- *  Voice is Deepgram Aura-2 by default (Vapi "deepgram"); switches to
- *  ElevenLabs (Vapi "11labs") when the admin flips the global toggle,
- *  passed in as `voiceProvider` so the test call matches the live agent.
- * ------------------------------------------------------------------ */
+// Vapi voice client: a real browser call via @vapi-ai/web when VITE_VAPI_PUBLIC_KEY is set, otherwise a
+// simulated lifecycle. The payload mirrors the server's so a test call matches the live agent.
 
 export type VoiceProvider = "deepgram" | "elevenlabs";
 
@@ -39,15 +33,10 @@ export interface VapiAssistantPayload {
   voice:
     | { provider: "deepgram"; voiceId: string; model: "aura-2" }
     | { provider: "11labs"; voiceId: string; model: string; speed: number; stability: number };
-  /** Speech-to-text, always sent so the test call hears exactly what a real inbound
-   *  call would. Deepgram nova-3 (English, or "multi" for code-switching) where it
-   *  has coverage, Google's multilingual model for Punjabi/Mandarin. Mirrors the
-   *  server payload (server/src/services/vapi.ts). */
+  /** Always sent so the test call hears what a real inbound call would. Mirrors server/src/services/vapi.ts. */
   transcriber?: TranscriberConfig;
   endCallFunctionEnabled: boolean;
-  /** Deterministic hang-up backstop: Vapi ends the call when the assistant speaks
-   *  one of these, even if the LLM forgets the endCall tool. Mirrors the server
-   *  payload — without it a test call never hung up on its own. */
+  /** Hang-up backstop: Vapi ends the call on these phrases even if the LLM forgets the endCall tool. */
   endCallPhrases: string[];
   /** Record the call so it can be replayed in the call detail. */
   recordingEnabled: boolean;
@@ -60,10 +49,8 @@ export interface VapiAssistantPayload {
   backgroundSound?: "off" | "office";
 }
 
-/** Sign-off phrases that hard-end the call when the assistant says them. Keep in
- *  step with END_CALL_PHRASES in server/src/services/vapi.ts. Deliberately
- *  excludes anything in a normal greeting ("thanks for calling") so a call can
- *  never end at hello. */
+/** Sign-offs that hard-end the call. Keep in step with server/src/services/vapi.ts; deliberately excludes
+ *  anything in a normal greeting ("thanks for calling") so a call can never end at hello. */
 export const END_CALL_PHRASES = [
   "goodbye",
   "have a good one",
@@ -91,9 +78,7 @@ function endCallPromptSection(): string {
   ].join("\n");
 }
 
-/** Strip the stock "Don't hang up first — wait for a clear end signal" line: it
- *  contradicts the block above, and given both the agent signs off and waits.
- *  Mirrors stripDontHangUpFirst in server/src/services/vapi.ts. */
+/** Strip the stock "Don't hang up first" line: given both, the agent signs off and then waits. Mirrors the server. */
 const DONT_HANG_UP_FIRST_RE = /\s*Don['’]t hang up first[^.]*\.\s*/gi;
 function stripDontHangUpFirst(prompt: string): string {
   const stripped = prompt.replace(DONT_HANG_UP_FIRST_RE, " ");
@@ -120,20 +105,15 @@ export function buildAssistantPayload(
     opts?.booking?.enabled && opts.booking.promptSection
       ? `${basePrompt.trimEnd()}\n\n${opts.booking.promptSection}`
       : basePrompt;
-  // Teach the AI to hang up after a goodbye — only when the endCall tool exists
-  // (allowHangUp), so we never instruct a tool that isn't there. The test call
-  // used to get the tool with no instruction and no phrase backstop, so it sat on
-  // the line after signing off while a real inbound call ended properly.
+  // Only instruct the endCall tool when it exists (allowHangUp); without the
+  // instruction the test call sat on the line after signing off.
   const systemPrompt = config.advanced.allowHangUp
     ? `${stripDontHangUpFirst(withBooking).trimEnd()}\n\n${endCallPromptSection()}`
     : withBooking;
   const bookingTools = opts?.booking?.enabled ? opts.booking.tools : [];
   const cap = opts?.maxDurationSeconds;
-  // Multilingual test calls mirror the live agent (server/src/services/vapi.ts):
-  // nova-3 "multi" transcription + ElevenLabs voice (Aura-2 speaks English only).
-  // The voice id itself decides the provider (an ElevenLabs voice_id → "11labs",
-  // a Deepgram name → "deepgram"), so the test call uses the SAME engine as real
-  // inbound calls without any toggle.
+  // The voice id decides the provider, so the test call uses the same engine as real
+  // inbound calls with no toggle. Aura-2 speaks English only; multilingual forces ElevenLabs.
   const provider = providerForVoiceId(config.identity.voiceId, "elevenlabs");
   // Provider-aware, mirroring the server's save-time strip: the ElevenLabs-only
   // languages are dropped on a Deepgram voice, which can't speak them.
@@ -151,16 +131,10 @@ export function buildAssistantPayload(
           stability: config.advanced.voiceStability,
         }
       : { provider: "deepgram", voiceId: deepgramVoiceFor(config.identity.voiceId), model: "aura-2" };
-  // Always greet first with a real message. An empty greetingMessage left the
-  // assistant silent on connect (it waited for the caller) — fall back to a
-  // sensible default so the AI always speaks.
+  // An empty greeting left the assistant silent on connect; always fall back to a real one.
   const businessName = config.identity.businessName?.trim();
-  // Same derivation as the live agent (server/src/services/vapi.ts) — NOT a bare
-  // read of greetingMessage. A stored auto-greeting can still carry a previous
-  // business name, and resolveGreeting re-derives exactly those while leaving a
-  // greeting the owner wrote untouched. Without this the test call greeted with
-  // the OLD name while the real agent used the new one, so the test call stopped
-  // being a faithful preview of what callers hear.
+  // Same derivation as the live agent, not a bare read: a stored auto-greeting can
+  // carry a previous business name, and the test call used to greet with the OLD one.
   const greeting = resolveGreeting(config.identity.greetingMessage, businessName);
   return {
     transcriber: transcriberFor(languages),
@@ -183,8 +157,7 @@ export function buildAssistantPayload(
     artifactPlan: { recordingEnabled: true, recordingFormat: "mp3" },
     // Barge-in: stop talking the instant the caller speaks and let them take over.
     stopSpeakingPlan: { numWords: 0, voiceSeconds: 0.2, backoffSeconds: 1 },
-    // Ambient call sound — match the live agent so the test call sounds the same.
-    // "default" → omit (a web call is silent by default, like Vapi's own default).
+    // Match the live agent; "default" is omitted (a web call is silent by default).
     ...(config.advanced.backgroundSound === "off" || config.advanced.backgroundSound === "office"
       ? { backgroundSound: config.advanced.backgroundSound }
       : {}),
@@ -213,43 +186,21 @@ export interface TestCallCallbacks {
 
 export interface VapiCallHandle {
   stop: () => void;
-  /** Cue the assistant (via a live system message) to wrap the call up politely —
-   *  fired ~30s before the minutes cap would cut it off mid-sentence. Best-effort;
-   *  no-op in the simulated fallback. */
+  /** Cue the assistant to wrap up ~30s before the minutes cap cuts it off mid-sentence. Best-effort; no-op when simulated. */
   wrapUp: () => void;
 }
 
 export const isVapiConfigured = Boolean(env.vapiPublicKey);
 
-// The Vapi web SDK wraps a Daily.co call object, and Daily allows only ONE instance
-// per page. Creating a fresh `new Vapi()` per call makes the SECOND call throw a
-// "Duplicate instance" error and end immediately. So we keep ONE instance for the
-// page. Listeners are attached ONCE and delegate to the *current* call's callbacks
-// (`activeCb`) — adding a fresh listener per call duplicated every transcript line.
+// Daily.co allows ONE call object per page, so a fresh `new Vapi()` per call makes the second call die with
+// "Duplicate instance". One shared instance; listeners attached once and delegating to `activeCb` (per-call listeners doubled transcripts).
 let sharedVapi: Vapi | null = null;
 let sharedVapiKey: string | null = null;
 let activeCb: TestCallCallbacks | null = null;
 let callConnected = false;
 
-/**
- * Every start and stop of the shared instance runs through ONE queue.
- *
- * Both SDK operations are async and both mutate the same internal Daily call
- * object, so overlapping them corrupts it:
- *
- *  - `stop()` awaits `daily.destroy()` before releasing the object. Starting the
- *    next call inside that window hits `daily.createCallObject()` mid-destroy →
- *    "Duplicate DailyIframe instances are not allowed", new call dead at 0:00.
- *  - Worse in the other direction: ending a call while it is still CONNECTING
- *    lets `stop()` null the call object underneath the join that is still
- *    running → "Cannot read properties of null (reading
- *    'startRemoteParticipantsAudioLevelObserver')". The half-created Daily
- *    object is then never destroyed and stays registered, so every later call
- *    on that page fails as a duplicate until a reload.
- *
- * Queueing both means a stop requested mid-connect simply waits for the connect
- * to settle and then tears down cleanly, which is also what the user wants.
- */
+// Every start/stop runs through ONE queue: both mutate the same Daily call object, and overlapping them either dies
+// with "Duplicate DailyIframe instances" or nulls it under a running join, leaking an object that wedges every later call until reload.
 let queue: Promise<unknown> = Promise.resolve();
 
 /** Run `op` after everything already queued, whatever the outcome of those. */
@@ -270,10 +221,8 @@ let callSeq = 0;
 // rejection — dedupe so the user gets one clear toast, not two. Reset per call.
 let errorReported = false;
 
-/** A message field that's either a string or, for Vapi's *validation* 400s, an
- *  ARRAY of them (`{"message":["transcriber.model must be one of …"]}`). Returning
- *  "" for the array case is what reduced every rejected config to the useless
- *  "Couldn't start the call" toast. */
+/** A message field is a string or, on Vapi validation 400s, an ARRAY of them; dropping the array case is
+ *  what reduced every rejected config to a useless "Couldn't start the call". */
 function messageText(v: unknown): string {
   if (typeof v === "string") return v.trim();
   if (Array.isArray(v)) {
@@ -285,9 +234,7 @@ function messageText(v: unknown): string {
   return "";
 }
 
-/** Pull a human message out of whatever Vapi throws — an Error, a string, or (most
- *  often for a rejected call-start) a plain object like the 400 body
- *  `{ error, message, statusCode }` or `{ error: { message } }`. */
+/** Human message from whatever Vapi throws: Error, string, or a plain 400 body like `{ error, message }` / `{ error: { message } }`. */
 function errText(e: unknown): string {
   if (!e) return "";
   if (typeof e === "string") return e;
@@ -310,9 +257,7 @@ function errText(e: unknown): string {
   return "";
 }
 
-/** Turn a raw call-start error into something the user can act on. The common
- *  operational one is the voice provider (Vapi) running out of credits, which
- *  blocks every call account-wide until it's topped up. */
+/** Actionable wording for a call-start error; the common one is Vapi out of credits, which blocks every call account-wide. */
 function friendlyStartError(raw: string): string {
   const low = raw.toLowerCase();
   if (/wallet balance|purchase more credits|out of credits|insufficient|upgrade your plan/.test(low)) {
@@ -334,9 +279,8 @@ function reportStartError(e: unknown): void {
   // Benign SDK "errors" on a normal hang-up — not real failures, let call-end handle it.
   if (/ended|ejection|meeting/i.test(raw)) return;
   errorReported = true;
-  // Vapi rejects a bad assistant field with a 400 whose body names the field. The
-  // SDK doesn't always surface it, so log the raw error AND the payload we sent —
-  // without this a config-level rejection is indistinguishable from a network blip.
+  // Log the payload too: Vapi's 400 names the bad field but the SDK doesn't always
+  // surface it, and a config rejection otherwise looks like a network blip.
   console.error("[vapi] call start failed", { error: e, raw, payload: lastPayload });
   activeCb?.onState("ended");
   activeCb?.onError?.(friendlyStartError(raw));
@@ -345,9 +289,7 @@ function reportStartError(e: unknown): void {
 function getVapi(key: string): Vapi {
   if (sharedVapi && sharedVapiKey === key) return sharedVapi;
   if (sharedVapi) {
-    // Queued, not fired-and-forgotten, so the replaced instance's Daily object
-    // is fully gone before a new one is created. (Constructing a Vapi is safe
-    // on its own — the SDK only creates the Daily object inside start().)
+    // Queued so the old Daily object is fully gone before the next start() creates one.
     const old = sharedVapi;
     void enqueue(() => old.stop());
   }
@@ -363,10 +305,8 @@ function getVapi(key: string): Vapi {
   });
   vapi.on("call-end", () => activeCb?.onState("ended"));
   vapi.on("error", (e: unknown) => {
-    // Once a call is live, IGNORE "error" events — the SDK fires benign/transient
-    // ones (transport hiccups, a "meeting ended" notice on normal hang-up); the
-    // real end always arrives via "call-end". Before connect, surface the reason
-    // (e.g. the provider being out of credits) instead of a silent 0:00.
+    // Ignored once live (the SDK fires benign ones; the real end is "call-end").
+    // Before connect, surface the reason instead of a silent 0:00.
     reportStartError(e);
   });
   vapi.on(
@@ -437,14 +377,8 @@ export function startTestCall(
   const isCurrent = () => mySeq === callSeq;
 
   cb.onState("connecting");
-  // Queued, so this never overlaps a teardown still finishing. The extra stop
-  // clears a call that ended by ITSELF (the AI hung up, the room closed) — a
-  // no-op when nothing is live.
-  //
-  // The SDK accepts an inline assistant config; start() resolves with the call
-  // (incl. its id), which we use afterwards to fetch the processed recording. A
-  // rejection here (e.g. the provider's 400 "out of credits") carries the real
-  // reason — surface it instead of swallowing it.
+  // Queued so it never overlaps a teardown. The extra stop clears a call that ended by
+  // itself. start() resolves with the call id (for the recording) and rejects with the real reason.
   void enqueue(async () => {
     await vapi.stop().catch(() => {
       /* nothing left to clean up */
@@ -475,9 +409,8 @@ export function startTestCall(
       cb.onState("ended");
     },
     wrapUp: () => {
-      // Inject a live system message so the assistant winds down instead of being
-      // cut off mid-sentence. Cast defensively — send() exists on the web SDK but
-      // its message union varies across versions; a miss must never break the call.
+      // Cast defensively: send() exists but its message union varies across SDK versions,
+      // and a miss must never break the call.
       try {
         (vapi as unknown as { send?: (msg: unknown) => void }).send?.({
           type: "add-message",

@@ -4,18 +4,8 @@ import { allTenants, activeTenantIds, type TenantClient } from "./tenantDb.js";
 import { ledgerSummary, type LedgerTotals } from "./platformLedger.js";
 import { walletBalancesFor } from "./brandWallet.js";
 
-/* ------------------------------------------------------------------ *
- *  Brand stats rollup (plan §7).
- *
- *  "How many customers, subscriptions, calls and minutes across all
- *  brands?" is a question about every tenant at once, and the super
- *  admin's overview must not open N databases to draw a page. So a job
- *  visits each tenant once a night and writes one row per brand into
- *  Main (`brand_stats_daily`); the overview reads those rows and says
- *  when they were computed. The numbers are "as of last night" — and
- *  the super admin can ask for a fresh run when last night is not
- *  recent enough.
- * ------------------------------------------------------------------ */
+// Brand stats rollup (plan §7). A nightly job writes one row per brand into Main (brand_stats_daily)
+// so the super admin's overview never opens N tenant databases to draw a page. Numbers are "as of last night".
 
 export const DAY_MS = 86_400_000;
 
@@ -94,12 +84,7 @@ export interface RollupResult {
   failed: string[];
 }
 
-/**
- * Visit every active tenant and write its row for `day`. One tenant that
- * cannot be read is reported and skipped — the other brands' numbers must not
- * wait on it — and its previous row stays, so the overview shows it as stale
- * rather than as zero.
- */
+/** Writes each active tenant's row for `day`. An unreadable tenant is skipped and keeps its previous row, so it shows as stale rather than zero. */
 export async function rollupBrandStats(day: Date = previousUtcDay()): Promise<RollupResult> {
   const key = utcDay(day);
   const failed: string[] = [];
@@ -124,10 +109,7 @@ export async function rollupBrandStats(day: Date = previousUtcDay()): Promise<Ro
   return { day: dayKey(key), brands, failed };
 }
 
-/**
- * At boot: if last night's run did not happen (the process was down across
- * midnight), do it now rather than waiting for tonight.
- */
+/** At boot: if last night's run was missed (process down across midnight), run it now. */
 export async function catchUpBrandStats(): Promise<RollupResult | null> {
   const yesterday = previousUtcDay();
   const [have, want] = await Promise.all([
@@ -192,11 +174,7 @@ function statsOf(r: BrandStatsDaily | undefined): BrandDayStats {
   };
 }
 
-/**
- * The super admin's overview, from Main alone: the rollup rows, the platform
- * ledger, the brands' wallet balances and the Stripe events still waiting
- * for a home. No tenant is opened to build it.
- */
+/** The super admin's overview, from Main alone — no tenant is opened to build it. */
 export async function platformOverview(now: Date = new Date()): Promise<PlatformOverview> {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const since = new Date(utcDay(now).getTime() - 13 * DAY_MS);

@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { toCsv, datedCsvName, type CsvColumn } from "./csv";
 
-/* The escaping is the whole job here. A customer list is untrusted text —
- * commas, quotes, newlines and names that Excel would happily execute. */
+// Escaping is the whole job: a customer list is untrusted text Excel would happily execute.
 
 interface Row {
   name: string;

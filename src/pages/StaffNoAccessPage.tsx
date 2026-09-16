@@ -11,13 +11,7 @@ function firstName(name?: string | null): string {
   return first && !first.includes("@") ? first : "there";
 }
 
-/**
- * Shown to a STAFF member whose role grants no sections — or who has no role
- * assigned yet. Their sidebar is empty, so this explains *why* rather than
- * dropping them on a blank page. Thanks to the live permission sync (loadMe on a
- * short interval + on tab focus), the instant an admin assigns them a role this
- * screen redirects them straight to their first section — no manual refresh.
- */
+/** Staff with no role/sections land here instead of a blank sidebar; the live permission sync redirects them the moment a role is granted. */
 export default function StaffNoAccessPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);

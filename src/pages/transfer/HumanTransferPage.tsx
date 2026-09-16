@@ -7,24 +7,11 @@ import { api } from "@/lib/api";
 import { ENTITLEMENTS_CACHE_KEY, cachedCallTransferDepartments } from "@/lib/planFeatures";
 import { HumanTransferCard } from "@/components/transfer/HumanTransferCard";
 
-/**
- * Human Call Transfer — standalone tenant page (sidebar: under Call Forwarding).
- * Callers who ask for a person are routed by department: the AI asks which one
- * they need, then warm-transfers to that department's number.
- *
- * Gated by the plan's transfer allowance, which is a COUNT rather than a plain
- * on/off: 0 locks the page, N caps how many departments can exist, and the same
- * number is enforced server-side on every write. The page stays reachable when
- * the plan excludes it — the same call the plan cards make, where excluded
- * features are struck through rather than hidden — but it says so and offers the
- * upgrade instead of rendering a card that 403s on first touch.
- */
+/** Human Call Transfer page. The plan gate is a department COUNT (0 = locked, N = cap, enforced server-side); an excluded plan still gets the page with an upgrade prompt rather than a card that 403s. */
 export default function HumanTransferPage() {
   const navigate = useNavigate();
 
-  // Seed from the cached entitlement so a revisit doesn't flash locked, then
-  // confirm with the backend. Infinity until we know, so the first paint never
-  // shows a false "not in your plan".
+  // Seed from the cached entitlement (Infinity until known) so a revisit never flashes a false "locked".
   const [maxDepartments, setMaxDepartments] = useState(cachedCallTransferDepartments);
   useEffect(() => {
     let active = true;

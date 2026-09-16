@@ -49,9 +49,7 @@ export const SelectContent = React.forwardRef<
       ref={ref}
       position={position}
       className={cn(
-        // Height caps at the room actually available on the chosen side, so the
-        // menu flips above the trigger near the bottom of the viewport instead
-        // of overflowing past it.
+        // Cap height to the room available on the chosen side so the menu flips up near the viewport bottom.
         "relative z-[60] max-h-[min(20rem,var(--radix-select-content-available-height))] min-w-[10rem] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-background shadow-[var(--shadow-panel)]",
         position === "popper" &&
           "w-full min-w-[var(--radix-select-trigger-width)] data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1",
@@ -68,9 +66,7 @@ SelectContent.displayName = "SelectContent";
 export const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
-    /** Secondary line under the label, shown in the LIST only. It sits outside
-     *  ItemText on purpose, so the trigger mirrors just the label (one line) —
-     *  the hint doesn't bloat the selected value. */
+    /** Secondary line, list only. Kept outside ItemText so the trigger mirrors just the label. */
     hint?: string;
   }
 >(({ className, children, hint, ...props }, ref) => (

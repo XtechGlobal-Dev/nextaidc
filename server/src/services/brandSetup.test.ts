@@ -11,10 +11,7 @@ import {
   resolveSetup,
 } from "./brandSetup.js";
 
-/* ------------------------------------------------------------------ *
- *  The policy half of a brand: how stored values are read (always with
- *  a platform answer for "no brand"), and how admin input is checked.
- * ------------------------------------------------------------------ */
+// Brand policy: readers always answer for "no brand" with the platform's behaviour; admin input is validated.
 
 const brand = (over: Record<string, unknown> = {}) => ({ id: "b", name: "Acme", ...over }) as unknown as Brand;
 

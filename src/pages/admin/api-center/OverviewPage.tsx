@@ -21,28 +21,14 @@ import {
 import { sectionPath } from "@/components/admin/api-center/sections";
 import type { AlertEvent } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  Overview — deliberately the calmest screen in the admin area.
- *
- *  Four blocks, in the order an operator actually needs them:
- *    1. one line saying whether anything is wrong
- *    2. what is wrong, ranked
- *    3. any alert that fired
- *    4. one chart for context
- *
- *  Everything else moved to Providers, Activity and Costs. A dashboard that
- *  opens with a wall of tiles makes people stop reading it, which defeats the
- *  entire point of having one.
- * ------------------------------------------------------------------ */
+// Overview: kept deliberately calm — is anything wrong, what, alerts, one chart. Detail lives in the other sections.
 
 export default function ApiCenterOverviewPage() {
   const { snapshot, view, loading, visibleProviders, setOpenProvider, refresh } = useApiCenter();
   const [alerts, setAlerts] = React.useState<AlertEvent[]>([]);
   const [busy, setBusy] = React.useState<string | null>(null);
 
-  // Alerts are their own small fetch rather than part of the snapshot: they
-  // change on a different clock, and evaluating them on read keeps the board
-  // current the moment someone opens this page.
+  // Alerts are a separate fetch — they change on a different clock and are evaluated on read.
   React.useEffect(() => {
     let active = true;
     (async () => {
@@ -90,10 +76,7 @@ export default function ApiCenterOverviewPage() {
             value: (
               <span className="flex items-center gap-2">
                 {totals.connected}/{totals.wired}
-                {/* Idle is shown alongside the rest so the dots reconcile with
-                    the connected count — a connected provider that simply hasn't
-                    been called in this window is neither healthy-with-traffic
-                    nor a problem, and omitting it made the numbers look wrong. */}
+                {/* Idle is shown too so the dots add up to the connected count. */}
                 <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
                   <HealthDot health="healthy" /> {totals.healthy}
                   {totals.degraded > 0 && (

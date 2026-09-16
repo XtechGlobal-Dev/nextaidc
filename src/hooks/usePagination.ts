@@ -4,15 +4,8 @@ import { clampPage, pageCount, PAGE_SIZE_OPTIONS } from "@/lib/pagination";
 export interface UsePaginationOptions {
   /** Records per page on first render. Defaults to the first size option (10). */
   initialPageSize?: number;
-  /**
-   * Changing this value snaps back to page 1. Pass whatever narrows the list —
-   * a search string, a status filter, an active tab — so a filtered result set
-   * always opens at its start instead of on a page that no longer exists.
-   *
-   * Do NOT key this on the row count: rows arriving from a live refresh would
-   * yank the reader back to page 1 mid-read. Out-of-range pages are clamped
-   * automatically, which covers deletes and shrinking lists.
-   */
+  /** Changing this snaps to page 1 — pass the search/filter/tab. Do NOT key it on row count:
+   *  a live refresh would yank the reader back mid-read; out-of-range pages are clamped anyway. */
   resetKey?: unknown;
 }
 
@@ -30,14 +23,8 @@ export interface Paginated<T> {
   setPageSize: (size: number) => void;
 }
 
-/**
- * Client-side pagination for a list already held in memory.
- *
- * Use this when the whole collection is fetched in one call (most admin lists).
- * For endpoints that page server-side, hold `page`/`pageSize` in local state,
- * send them with the request, and render the same `<Pagination>` control with
- * the server's `total`.
- */
+/** Client-side pagination for an in-memory list. For server-paged endpoints, hold page/pageSize
+ *  locally and render the same `<Pagination>` with the server's total. */
 export function usePagination<T>(
   items: T[],
   { initialPageSize = PAGE_SIZE_OPTIONS[0], resetKey }: UsePaginationOptions = {},

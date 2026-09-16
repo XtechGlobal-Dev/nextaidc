@@ -1,13 +1,7 @@
 import type { BadgeProps } from "@/components/ui/badge";
 import type { CallIntent, CallLog, CallOutcome, Sentiment } from "@/types";
 
-/* ------------------------------------------------------------------ *
- *  Call intent — "what was this call about?"
- *
- *  Outcome answers "did the call work?"; intent answers "is this worth my
- *  time?". They're orthogonal, so both pills show side by side: a call can be
- *  Completed AND a Booking, or Completed AND spam.
- * ------------------------------------------------------------------ */
+// Intent ("what was this about?") is orthogonal to outcome ("did it work?"), so both pills show side by side.
 
 /** Filter order, most valuable to the owner first. */
 export const CALL_INTENTS: CallIntent[] = ["booking", "lead", "enquiry", "support", "spam"];
@@ -76,9 +70,7 @@ export function outcomeVariant(outcome: CallOutcome): NonNullable<BadgeProps["va
   }
 }
 
-/** A pill describing the human-transfer result of a call, or null when no
- *  transfer was involved. "failed" is the one the owner must act on — a caller
- *  wanted a person but couldn't be connected, so call them back. */
+/** Transfer-result pill, or null when no transfer happened. "failed" is the one the owner must act on (call them back). */
 export function transferBadge(
   call: Pick<CallLog, "transferOutcome" | "requestedDepartment">,
 ): { label: string; variant: NonNullable<BadgeProps["variant"]> } | null {
@@ -93,10 +85,7 @@ export function transferBadge(
   return null;
 }
 
-/** Values that mean "the caller never gave a name": the stored default
- *  ("Unknown"), and what the extraction model writes for a missing field.
- *  Mirrors server/src/lib/callerName.ts, which does the same for CRM leads,
- *  owner notifications and the public call page. */
+// Values meaning "no name given" (stored default + what the extraction model writes). Mirrors server/src/lib/callerName.ts.
 const NAME_PLACEHOLDERS = new Set([
   "unknown",
   "unknown caller",

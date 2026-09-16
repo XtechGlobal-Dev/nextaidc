@@ -1,9 +1,7 @@
 import { daysRemaining } from "./trial.js";
 
-/* Post-trial grace period — the pure decision layer. `runGraceSweep` in
- * scheduler.ts owns the side effects (DB writes, emails, number release); this
- * module decides *what* should happen for one customer at one point in time, so
- * the rules can be unit-tested without mocking Stripe/Vapi/SMTP. */
+// Grace period decision layer, kept pure so the rules test without mocking
+// Stripe/Vapi/SMTP. Side effects live in scheduler.ts's runGraceSweep.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -37,9 +35,7 @@ export interface GraceDecisionInput {
   /** Live entitlement: is the user blocked, and is the block a *trial* expiry? */
   blocked: boolean;
   isTrial: boolean;
-  /** The paid plan has actually ENDED (canceled / period expired) — not merely
-   *  run out of minutes mid-period. Lets grace cover paid churn, not just trials.
-   *  Always false for a trial (that case is driven by `isTrial`). */
+  /** Paid plan actually ENDED (not just out of minutes mid-period). Always false for a trial. */
   planLapsed: boolean;
   /** Does the user currently hold a number worth reserving? */
   hasNumber: boolean;
@@ -49,12 +45,7 @@ export interface GraceDecisionInput {
   now: Date;
 }
 
-/**
- * Decide the single action to take for one customer this sweep tick. Pure: same
- * inputs → same action. Mirrors the lifecycle — start → reminder → final →
- * release — and short-circuits to `clear` the moment the user is no longer
- * blocked (e.g. they paid).
- */
+/** Pure: one action per customer per tick. start → reminder → final → release, or `clear` as soon as they're unblocked. */
 export function decideGraceAction(i: GraceDecisionInput): GraceAction {
   if (!i.enabled) return { type: "noop" };
 
@@ -63,10 +54,8 @@ export function decideGraceAction(i: GraceDecisionInput): GraceAction {
     return i.graceStartedAt || i.graceEndsAt ? { type: "clear" } : { type: "noop" };
   }
 
-  // Not yet in grace → open it for any blocked account still holding a number:
-  // a lapsed trial, OR a paid plan that has actually ended (canceled / expired).
-  // A paid plan that only ran out of minutes mid-period is NOT lapsed — the user
-  // still holds the month they paid for — so `planLapsed` guards that case out.
+  // Open grace for a lapsed trial or an ended paid plan. Out-of-minutes mid-period
+  // is NOT lapsed — they still hold the month they paid for.
   if (!i.graceEndsAt) {
     if (!i.hasNumber) return { type: "noop" };
     if (!i.isTrial && !i.planLapsed) return { type: "noop" };

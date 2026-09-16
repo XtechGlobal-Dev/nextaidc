@@ -12,9 +12,7 @@ const COUNTRY_ALIASES: { alias: string; code: string }[] = [
   { alias: "uae", code: "ae" },
 ];
 
-/** Last whole-word index of `needle` in `hay` (-1 if absent). Whole-word so
- *  "India" doesn't match inside "Indiana"; last, because a country sits at the
- *  END of an address. */
+/** Last whole-word index of `needle` (-1 if absent). Whole-word so "India" misses "Indiana"; last because a country sits at the end of an address. */
 function lastWordIndex(hay: string, needle: string): number {
   const re = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
   let idx = -1;
@@ -22,11 +20,8 @@ function lastWordIndex(hay: string, needle: string): number {
   return idx;
 }
 
-/** Best-guess the profile country NAME for a newly-onboarded user. The business
- *  address wins (a country named in it is the strongest signal); when the address
- *  is missing or names no country, fall back to the mobile number's dial country.
- *  Returns "" when neither resolves. The returned name matches the AI Brain's
- *  country picker options (COUNTRIES[].name), so it can be stored on profile.country. */
+/** Best-guess country name: a country named in the address wins, else the mobile's dial country, else "".
+ *  Returns a COUNTRIES[].name so it can be stored straight on profile.country. */
 export function guessProfileCountry(address: string | undefined, mobile: string | undefined): string {
   const addr = (address ?? "").toLowerCase();
   if (addr) {

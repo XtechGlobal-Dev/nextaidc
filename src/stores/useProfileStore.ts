@@ -44,10 +44,8 @@ export const useProfileStore = create<ProfileState>()(
         const mark = sessionMark();
         try {
           const data = await api.profile.get();
-          // Drop a response that belongs to a previous account (switched while this
-          // request was in flight) — otherwise it flashes the old profile.
+          // Account switched mid-flight — drop it or the old profile flashes.
           if (sessionChanged(mark)) return;
-          // Merge with existing defaults for any missing fields.
           set((s) => ({ profile: { ...s.profile, ...data } }));
         } catch {
           /* never throw out of hydrate */

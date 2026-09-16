@@ -15,34 +15,20 @@ import {
   providerForVoiceId,
 } from "../services/voices.js";
 
-/* ------------------------------------------------------------------ *
- *  Text-to-speech proxy — synthesises short snippets with the active
- *  voice provider (Deepgram Aura-2 by default, ElevenLabs when the
- *  admin flips the global toggle) and STREAMS the audio straight back,
- *  so playback can begin as bytes arrive (low time-to-first-sound)
- *  instead of waiting for the whole clip.
- *
- *  Exposed as GET (so the browser can use it directly as an <audio>
- *  src and play progressively + cache it) and POST. Public — runs
- *  before the user has an account. 501 until the provider key is set.
- * ------------------------------------------------------------------ */
+// TTS proxy: streams short snippets from Deepgram/ElevenLabs straight back so playback
+// starts early. GET (usable as an <audio> src) and POST. Public; 501 until a key is set.
 
 const router = express.Router();
 
 const ttsSchema = z.object({
   text: z.string().min(1).max(600),
   voiceId: z.string().optional(),
-  // Explicit provider (the picker knows it) so a preview always uses the right
-  // engine. Omitted → derived: an ElevenLabs voice_id → ElevenLabs; a Deepgram
-  // name / empty (e.g. the public landing preview) → the global default.
+  // Explicit when the picker knows it; otherwise derived from the voice id.
   provider: z.enum(["deepgram", "elevenlabs"]).optional(),
 });
 
-/** Synthesise `text` with the given voice via the active provider, returning the
- *  upstream streaming response. Mirrors the provider used by the live agent so the
- *  preview always matches what a caller will hear. */
-/** Resolve which provider synthesises a preview: the explicit choice if given, else
- *  an ElevenLabs voice_id → ElevenLabs, a Deepgram name / empty → the global default. */
+// Preview provider: explicit choice, else ElevenLabs voice_id → ElevenLabs, Deepgram
+// name / empty → the global default. Mirrors the live agent so previews match calls.
 function ttsProvider(voiceId: string | undefined, explicit?: "deepgram" | "elevenlabs") {
   return explicit ?? providerForVoiceId(voiceId);
 }
@@ -57,9 +43,7 @@ async function synthesize(
     if (!apiKey) throw notImplemented("ElevenLabs is not configured (set the ElevenLabs API key)");
     // Unknown/empty ids → the default ElevenLabs voice, so the preview always speaks.
     const voice = elevenLabsVoiceFor(voiceId);
-    // Mirrors the live agent's model choice (services/voices.ts elevenLabsModelFor).
-    // A preview carries no language selection, but previewing a pinned v3 voice
-    // IS that language's case — so the voice alone decides here.
+    // Same model rule as the live agent; a preview has no language, so the voice alone decides.
     const model = needsElevenV3Voice(voice) ? ELEVEN_V3_MODEL : ELEVEN_DEFAULT_MODEL;
     return traceFetch(
       "elevenlabs",
@@ -109,10 +93,8 @@ const handleTts = asyncHandler(async (req, res) => {
   Readable.fromWeb(resp.body as WebReadableStream<Uint8Array>).pipe(res);
 });
 
-// Public and unauthenticated (it runs before signup), so every request bills a
-// real ElevenLabs/Deepgram synthesis. Rate-limit per IP so it can't be looped to
-// run up the provider bill. Generous enough for a visitor auditioning voices;
-// text is already capped at 600 chars, bounding the cost of each call.
+// Public and unauthenticated, and every request bills a real synthesis — rate-limit
+// per IP so it can't be looped to run up the bill. Text is capped at 600 chars.
 const ttsLimiter = rateLimit({
   windowMs: 60_000,
   max: 40,

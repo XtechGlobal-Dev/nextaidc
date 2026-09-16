@@ -11,12 +11,8 @@ import {
   maxBytesFor,
 } from "../lib/ticketFiles.js";
 
-/* ------------------------------------------------------------------ *
- *  One shared upload path for every ticket surface — both lanes, both
- *  sides. Files are held in memory and streamed straight to S3: the cap
- *  is small enough that no disk staging is warranted, and it keeps the
- *  routers from each inventing their own limits.
- * ------------------------------------------------------------------ */
+// One upload path for every ticket surface. Memory → S3 directly; the cap is small enough that disk
+// staging isn't worth it.
 
 export const ticketUpload = multer({
   storage: multer.memoryStorage(),
@@ -29,11 +25,8 @@ export const ticketUpload = multer({
   },
 });
 
-/**
- * Put the uploaded file in the bucket and hand back a SIGNED descriptor the
- * client replays when it sends the message. Nothing is written to the database
- * yet: the file is only staged, exactly like an unsent draft.
- */
+/** Upload to the bucket and return a SIGNED descriptor the client replays with the message. Nothing
+ *  hits the database yet — the file is staged like an unsent draft. */
 export async function storeTicketUpload(
   req: Request,
   prefix = "tickets",

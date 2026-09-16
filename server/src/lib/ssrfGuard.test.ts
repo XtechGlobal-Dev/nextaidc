@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  SSRF guard. DNS is stubbed so tests are deterministic and offline:
- *  a hostname resolves to whatever address the test sets.
- * ------------------------------------------------------------------ */
+// DNS is stubbed so these run offline and deterministically.
 
 const h = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock("node:dns/promises", () => ({ lookup: h.lookup }));

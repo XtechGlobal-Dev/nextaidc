@@ -2,18 +2,8 @@ import { prisma } from "../prisma.js";
 import { allTenants } from "./tenantDb.js";
 import { isStripeConfigured, stripe } from "./stripe.js";
 
-/* ------------------------------------------------------------------ *
- *  Which brand a Stripe customer belongs to.
- *
- *  Stripe stays one account — the platform's — while every brand's
- *  customers live in that brand's own database. So the moment a Stripe
- *  event arrives, the first question is "whose is this?", and the answer
- *  has to come from somewhere the event can name: the Stripe customer
- *  id. `stripe_customers` maps it to a brand and a customer. It is
- *  written when the Stripe customer is created, stamped on the Stripe
- *  object as metadata for good measure, and — for customers from before
- *  the index existed — rebuilt from the profile that holds the id.
- * ------------------------------------------------------------------ */
+// One Stripe account, many brand DBs: `stripe_customers` maps a Stripe customer id to
+// its brand and user so a webhook knows which DB to open. Also stamped as Stripe metadata.
 
 export interface StripeOwner {
   brandId: string;
@@ -54,14 +44,7 @@ export async function stampStripeCustomer(stripeCustomerId: string, owner: Strip
   }
 }
 
-/**
- * Whose Stripe customer is this?
- *
- * The index first. Failing that, the profile that holds the id (or is in the
- * middle of switching to it) and its owner's brand — and the index is repaired
- * on the way out, so the next event is one lookup. Null means no brand holds
- * this customer: the caller parks the event rather than guessing.
- */
+/** Whose Stripe customer is this? Index first, then a scan of every brand's profiles (repairing the index). Null means nobody holds it — park the event, don't guess. */
 export async function resolveStripeCustomer(stripeCustomerId: string | null | undefined): Promise<StripeOwner | null> {
   if (!stripeCustomerId) return null;
   const indexed = await prisma.stripeCustomer.findUnique({ where: { stripeCustomerId } });
@@ -81,11 +64,7 @@ export async function resolveStripeCustomer(stripeCustomerId: string | null | un
   return null;
 }
 
-/**
- * Index every Stripe customer any brand's database knows about. A one-off after
- * this index was introduced, and the repair tool when it is suspected of
- * gaps. Returns how many were (re)written.
- */
+/** Re-indexes every Stripe customer id any brand's profiles hold. Repair tool for suspected gaps; returns how many rows were written. */
 export async function backfillStripeCustomerIndex(): Promise<number> {
   let written = 0;
   for (const { brandId, db } of await allTenants()) {

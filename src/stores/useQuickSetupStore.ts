@@ -4,9 +4,8 @@ import type { CallLog } from "@/types";
 import { useProfileStore } from "@/stores/useProfileStore";
 import { api, type SubscriptionPlan } from "@/lib/api";
 
-/** Persist "the user has seen the quick-setup modal" server-side so it never
- *  auto-opens again — even after a cache clear or on a new browser. Optimistically
- *  flips the local profile flag so the auto-open effect won't re-fire this session. */
+/** Record "seen quick setup" server-side so it survives a cache clear / new browser; flips
+ *  the local flag first so the auto-open effect can't re-fire this session. */
 function persistQuickSetupSeen() {
   if (useProfileStore.getState().profile.quickSetupSeenAt) return;
   useProfileStore.setState((s) => ({
@@ -17,10 +16,8 @@ function persistQuickSetupSeen() {
   });
 }
 
-// Choose Plan → Payment → Your Number → Go Live.
-// Plan + Payment (steps 1-2) gate number assignment: a customer tries web calls on
-// the trial freely from the dashboard, but must pick a plan + add a card before
-// claiming a number. Already-subscribed users skip 1-2 (see QuickSetupModal).
+// Choose Plan → Payment → Your Number → Go Live. Steps 1-2 gate number assignment (trial
+// web calls are free, claiming a number needs a plan + card); subscribed users skip them.
 export const QUICK_SETUP_STEPS = 4;
 /** The "Your Number" step index — jumped to directly after the Payment step so the
  *  hasBilling "skip" effect can't race a relative next() into Go Live. */
@@ -37,10 +34,8 @@ interface QuickSetupState {
   generated: boolean;
   /** Stripe SetupIntent secret from the Plan step, consumed by the Payment step. */
   billingClientSecret: string | null;
-  /** The plan that secret was minted for. The Payment step renders the shared
-   *  CardForm, which has no idea what was picked two steps earlier — this is how
-   *  its `card_added` analytics event names the plan being paid for. Session-only
-   *  (not persisted), and cleared wherever the secret is. */
+  /** Plan the secret was minted for — the shared CardForm needs it to name the plan in its
+   *  `card_added` event. Session-only, cleared wherever the secret is. */
   billingPlan: SubscriptionPlan | null;
 
   openSetup: () => void;
@@ -123,9 +118,8 @@ export const useQuickSetupStore = create<QuickSetupState>()(
     }),
     {
       name: "hello22_quick_setup",
-      // Persist long-lived flags + the dismissal so a refresh doesn't reopen the
-      // wizard. The dismissal is cleared on each login (see useAuthStore) so it
-      // shows again next time the user signs in until they complete it.
+      // Dismissal is persisted so a refresh doesn't reopen the wizard, but cleared per
+      // login (useAuthStore) so it returns until completed.
       partialize: (s) => ({
         completed: s.completed,
         dismissed: s.dismissed,

@@ -11,19 +11,8 @@ import { ApiCenterEmpty, SectionHeading, SummaryBar } from "@/components/admin/a
 import { sectionPath } from "@/components/admin/api-center/sections";
 import type { CostConfidence } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  Costs — what the integrations are costing, and how much to trust it.
- *
- *  One chart and one table. The earlier version had three charts saying roughly
- *  the same thing; the by-category breakdown is gone because with a dozen
- *  providers the by-provider table already answers it, and a second ranking of
- *  the same money is noise.
- *
- *  Every figure is an ESTIMATE and the screen says so once, prominently, plus a
- *  per-row confidence badge. Providers where the tracer records real units are
- *  arithmetic; the rest are calls x list price. Presenting those as one
- *  unqualified number would be the most harmful thing this screen could do.
- * ------------------------------------------------------------------ */
+// Costs: every figure is an estimate (metered providers are arithmetic, the rest calls x list price),
+// so the screen says so prominently and badges confidence per row.
 
 const CONFIDENCE: Record<CostConfidence, { label: string; variant: "success" | "warning" | "neutral" }> = {
   metered: { label: "Measured", variant: "success" },

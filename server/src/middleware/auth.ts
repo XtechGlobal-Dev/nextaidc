@@ -35,11 +35,7 @@ function extractToken(req: Request): string | null {
   return null;
 }
 
-/**
- * Require a valid JWT AND that the user still exists in the DB.
- * (A stateless token alone stays valid after a user is deleted/disabled;
- * the DB check forces those sessions to fail immediately with 401.)
- */
+/** Valid JWT AND the user still exists — a stateless token alone outlives a deleted/disabled account. */
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   const token = extractToken(req);
   if (!token) return next(unauthorized("Missing bearer token"));
@@ -54,35 +50,23 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   try {
     const user = await loadSessionIdentity(payload);
     if (!user) return next(unauthorized("Account no longer exists"));
-    // Use the live row (role/email stay fresh, not whatever the token baked in).
-    // Sanitize so keys for any removed section can never authorize, even if an
-    // old role/user row still has them stored.
+    // Live row, not the token: role/email stay fresh and orphaned keys for removed sections can't authorize.
     req.user = {
       sub: user.id,
       email: user.email,
       role: user.role,
-      // Then narrowed to the side of the support ladder this account is on: a
-      // brand's staff can't hold the platform inbox's keys, nor the platform's
-      // staff a customer queue's.
+      // Narrowed to this account's side of the ladder — brand staff never hold platform-inbox keys and vice versa.
       permissions: scopePermissionsToTenant(sanitizePermissions(user.permissions), user.brandId),
-      // Tenant the account belongs to (null = the platform's own people: the
-      // SUPER_ADMIN and the staff they employ). Read live rather than from the
-      // token so moving an account between brands takes effect on the next
-      // request, not the next login.
+      // null = platform's own people. Read live so moving an account between brands applies next request.
       brandId: user.brandId ?? null,
     };
-    // Now that we know WHO is calling, their own tenant beats whatever host the
-    // request came in on — an Acme admin working from the platform domain still
-    // sends as Acme. A platform-level account (brandId null) leaves the
-    // host-resolved brand alone, so a super admin helping inside a brand's
-    // subdomain keeps that brand's context.
+    // The caller's own tenant beats the request host. A platform account (null) leaves the host-resolved
+    // brand alone so a super admin inside a brand subdomain keeps that context.
     if (user.brandId) setCurrentBrandId(user.brandId);
     next();
   } catch (err) {
     if (err instanceof TenantUnavailableError) {
-      // The brand's database is mid-migration or paused: nobody in that brand
-      // can be served, and the session is not at fault. Say so, without
-      // logging anyone out.
+      // Brand DB mid-migration or paused — the session isn't at fault, so don't log anyone out.
       return next(
         new HttpError(503, "This brand's database isn't available right now. Try again shortly.", "brand_not_ready"),
       );
@@ -93,15 +77,8 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
 
 const IDENTITY_SELECT = { id: true, email: true, role: true, permissions: true } as const;
 
-/**
- * The live account behind a token, read from the plane the token names.
- *
- * A brand account (`brandId` set) is read from the brand's own database —
- * that is where its people live. A platform account (`brandId` null) is read
- * from the control plane — the only accounts there (phase 6). A token minted
- * before tokens carried `brandId` names no plane, so a brand account holding
- * one is simply signed out and signs in again.
- */
+// Brand accounts live in the brand's DB, platform accounts in the control plane. A pre-brandId
+// token from a brand account just fails and the user signs in again.
 async function loadSessionIdentity(
   payload: JwtPayload,
 ): Promise<{ id: string; email: string; role: JwtPayload["role"]; permissions: string[]; brandId: string | null } | null> {
@@ -122,12 +99,7 @@ export function requireAdmin(req: Request, _res: Response, next: NextFunction) {
   next();
 }
 
-/**
- * Require the platform owner. Gates everything a brand admin must NOT reach:
- * the Brands panel, Platform Settings (integration keys / API accounts) and the
- * API Center. Kept separate from requireAdmin on purpose — a brand ADMIN runs
- * their own tenant but never holds the platform's provider credentials.
- */
+/** Platform owner only. Separate from requireAdmin — a brand ADMIN never holds the platform's provider credentials. */
 export function requireSuperAdmin(req: Request, _res: Response, next: NextFunction) {
   if (!req.user) return next(unauthorized());
   if (!isSuperAdminRole(req.user.role)) {
@@ -145,34 +117,23 @@ export function requireAdminOrStaff(req: Request, _res: Response, next: NextFunc
   next();
 }
 
-/**
- * Require a specific section + capability. ADMINs always pass; STAFF must
- * have the `section.capability` key in their `permissions` array.
- *
- * Usage: requirePermission("customers", "view")
- *        requirePermission("customers", "delete")
- *        requirePermission("settings")  // defaults to "view"
- */
+/** Require `section.capability`. ADMINs pass; STAFF need the key in `permissions`. */
 export function requirePermission(section: string, capability: Capability = "view") {
   const key = `${section}.${capability}`;
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) return next(unauthorized());
-    // The platform owner outranks every permission — except on the sections that
-    // belong to a brand rather than to the platform. Those are the tenant's own
-    // customer base, and running them is the brand admin's job.
+    // Super admin outranks everything except brand-scoped sections — a tenant's customer base is the brand admin's.
     if (isSuperAdminRole(req.user.role)) {
       if (BRAND_SCOPED_SECTIONS.has(section)) {
         return next(forbidden("This section belongs to a brand, not the platform."));
       }
       return next();
     }
-    // The other direction: sections that belong to the platform rather than to
-    // any one brand. The super admin passed above; nobody else gets these.
+    // Platform-only: super admin passed above, nobody else gets these.
     if (PLATFORM_ONLY_SECTIONS.has(section)) {
       return next(forbidden("This section belongs to the platform, not a brand."));
     }
-    // The platform's own team: staff with no brand, holding the key. A brand's
-    // admin or staff is refused outright — it is not their inbox.
+    // Platform team: brand-less staff holding the key. Any brand account is refused — not their inbox.
     if (PLATFORM_TEAM_SECTIONS.has(section)) {
       if (!req.user.brandId && req.user.role === "STAFF" && req.user.permissions.includes(key)) {
         return next();
@@ -187,18 +148,8 @@ export function requirePermission(section: string, capability: Capability = "vie
   };
 }
 
-/**
- * Require an account that actually owns a customer workspace.
- *
- * Gates the customer-facing feature APIs — the AI Brain, call inbox, CRM, human
- * transfer, booking and trial — against the two roles that have no business of
- * their own: STAFF and SUPER_ADMIN. For them these endpoints have nothing to
- * read, and a write would mint customer state (a Profile, a Conversion, a
- * provisioned agent) for an account that should never hold any.
- *
- * The UI hides these areas already; this is the part that refuses them.
- * Must run after `requireAuth`.
- */
+/** Refuse STAFF and SUPER_ADMIN from customer feature APIs — a write there would mint customer state
+ *  (Profile, agent) for an account that should never hold any. Must run after requireAuth. */
 export function requireCustomerAccount(req: Request, _res: Response, next: NextFunction) {
   if (!req.user) return next(unauthorized());
   if (!hasCustomerWorkspace(req.user.role)) {

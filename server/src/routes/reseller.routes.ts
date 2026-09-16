@@ -40,10 +40,7 @@ const router = express.Router();
 
 router.use(requireAuth, requireReseller);
 
-/**
- * Reseller dashboard: their referral code + commission rate, the customers
- * they've referred (no contact PII), and commission totals.
- */
+/** Reseller dashboard: referral code, rate, referred customers (no contact PII), commission totals. */
 router.get(
   "/overview",
   asyncHandler(async (req, res) => {
@@ -105,13 +102,8 @@ router.get(
   }),
 );
 
-/**
- * Full detail for a single referred customer. Scoped strictly to the reseller's
- * OWN referrals (`referredById === resellerId`) — a reseller can never read a
- * customer they didn't refer. Returns contact + subscription + this reseller's
- * commission history for the customer. Deliberately excludes operational data
- * (call logs/recordings, AI config) and payment internals (Stripe IDs).
- */
+// One referred customer. Scoped to the reseller's OWN referrals only; no call logs,
+// AI config or Stripe IDs.
 router.get(
   "/customers/:id",
   asyncHandler(async (req, res) => {

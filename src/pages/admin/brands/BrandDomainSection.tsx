@@ -19,27 +19,8 @@ import { Label } from "@/components/ui/label";
 import { api, ApiError, type Brand, type BrandDnsRecord, type BrandDomain } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-/**
- * The brand's two front doors.
- *
- * The subdomain half is deliberately presented as already finished, because it
- * is: the `*.<platform domain>` wildcard record and its wildcard certificate
- * cover every brand ever created, so there is nothing to configure and nothing
- * that can be got wrong. Showing it as a task would invent work that doesn't
- * exist.
- *
- * The vanity-domain half is the only part with real steps, and every one of
- * them that CAN be ours already is — minting the proof token, registering the
- * hostname with the edge, issuing the certificate. What is left is the one
- * thing only the client can do: publish two records in DNS we don't control.
- *
- * So the panel is written for the person who will actually type those records
- * — usually someone at the client who has never opened a DNS panel — and for
- * the operator who has to hand them over: a numbered checklist, each record
- * laid out the way a registrar's form is, what the record TYPE is in plain
- * words, what is currently there instead when it is wrong, and a ready-to-send
- * message so nothing has to be retyped into an email.
- */
+/** The brand's two front doors. Subdomain shows as done because the wildcard record + cert already cover it;
+ *  the vanity domain is the only real work, and only the client's two DNS records are left — so the panel is written for them. */
 export function BrandDomainSection({ brand }: { brand: Brand }) {
   const [state, setState] = useState<BrandDomain | null>(null);
   // Only reachable for a brand created before the custom domain became
@@ -49,9 +30,7 @@ export function BrandDomainSection({ brand }: { brand: Brand }) {
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
 
-  // Opening the tab on a pending claim asks for a LIVE check: only the verdict
-  // is stored, not which record produced it, so stored state would paint both
-  // records as outstanding even after the client has added one.
+  // Live check on open: only the verdict is stored, not per-record, so stored state would show both records outstanding.
   const load = useCallback(async () => {
     try {
       setState(await api.super.brands.domain(brand.id, { live: true }));
@@ -189,9 +168,7 @@ export function BrandDomainSection({ brand }: { brand: Brand }) {
           </div>
         ) : (
           <>
-            {/* Only a brand created before the custom domain became required
-                lands here — every brand made since has one on file already,
-                and this claim is a one-time, unrepeatable action. */}
+            {/* Only pre-requirement brands land here; the claim is one-time and unrepeatable. */}
             <div className="mt-4 flex flex-wrap items-end gap-2">
               <div className="min-w-[16rem] flex-1">
                 <Label htmlFor="vanity-domain">Domain</Label>
@@ -211,9 +188,7 @@ export function BrandDomainSection({ brand }: { brand: Brand }) {
               </Button>
             </div>
 
-            {/* A root domain is where nearly every setup goes wrong, and the
-                moment to say so is while it is being typed — before the claim
-                locks in for good. */}
+            {/* Warn about root domains while typing — before the claim locks for good. */}
             {draftIsApex ? (
               <Notice tone="warn">
                 <strong className="font-mono">{draftDomain}</strong> is a{" "}
@@ -238,10 +213,7 @@ export function BrandDomainSection({ brand }: { brand: Brand }) {
           </>
         )}
 
-        {/* The split, stated where the operator is looking: the client's domain
-            carries the app and nothing else. Everything a provider calls back
-            into — and the public call pages — stays on the platform's API host,
-            so there is no second record to hand over and nothing to register. */}
+        {/* Only the app moves to the client's domain; webhooks and public pages stay on the platform host. */}
         <Notice tone="info">
           Only the <strong>app</strong> is served from this domain. The API, the call webhooks,
           the public call pages and the Google sign-in callback stay on{" "}
@@ -397,12 +369,7 @@ function nameHint(r: BrandDnsRecord): string {
   return `If the panel wants the full name: ${r.fqdn}`;
 }
 
-/**
- * The message the operator forwards to the client, built from the same records
- * the panel shows so the two can never drift. Plain text on purpose: it is
- * going into an email or a chat, and the person reading it is not looking at
- * this screen.
- */
+// Client handoff message, built from the same records the panel shows so they can't drift. Plain text — it goes into email/chat.
 function handoffText(state: BrandDomain, brandName: string): string {
   const zone = zoneOf(state.domain);
   const lines: string[] = [
@@ -440,10 +407,7 @@ function DomainBadge({ status }: { status: BrandDomain["status"] }) {
   return <Badge variant="neutral">Not set</Badge>;
 }
 
-/**
- * One step of the client's checklist: what it achieves, what the record type
- * is, the four registrar fields, and — after a check — whether DNS agrees.
- */
+// One checklist step: record type, registrar fields, and whether DNS agrees after a check.
 function RecordStep({ record, checked }: { record: BrandDnsRecord; checked: boolean }) {
   const st = recordState(record, checked);
   const done = st === "found";
@@ -493,11 +457,7 @@ function RecordStep({ record, checked }: { record: BrandDnsRecord; checked: bool
   );
 }
 
-/**
- * Step 3 is ours, and says so — the certificate and go-live happen without the
- * client. The one case where it becomes somebody's task is a deployment with no
- * hosting API token, where the operator has to register the hostname by hand.
- */
+// Step 3 is ours (cert + go-live) — only becomes a task when there's no hosting API token and the operator registers by hand.
 function EdgeStep({ state }: { state: BrandDomain }) {
   const dnsDone = state.ownershipOk && state.routingOk;
   const live = state.status === "verified";

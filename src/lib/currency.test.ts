@@ -1,11 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { couponDiscountCents, formatMoney } from "./currency";
 
-/* This number is quoted to the customer on three separate screens — the plan
- * picker, the /subscribe rail, and the go-live confirmation — and the last of
- * those is the one that actually takes the money. They were computing it
- * independently, which is how the confirmation dialog came to promise a charge
- * of $20 while the invoice said $13. One function now, pinned here. */
+// Three screens quote this number and the last one takes the money; computed independently, the
+// confirmation once promised $20 while the invoice said $13.
 
 describe("couponDiscountCents", () => {
   it("takes the percentage off the list price", () => {
@@ -49,9 +46,7 @@ describe("formatMoney", () => {
 
   it("shows cents only when the amount has them", () => {
     expect(formatMoney(2000, "aud")).toBe("$20 AUD");
-    // Trailing zeros are dropped (minimumFractionDigits: 0), so $12.50 renders
-    // as "$12.5". Recorded rather than asserted as ideal — plan prices are whole
-    // numbers today, and changing it would move every price on every screen.
+    // $12.50 renders as "$12.5" (minimumFractionDigits: 0). Recorded, not ideal; changing it moves every price on every screen.
     expect(formatMoney(1250, "aud")).toBe("$12.5 AUD");
   });
 });

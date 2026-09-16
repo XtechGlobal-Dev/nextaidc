@@ -7,11 +7,7 @@ import {
   type SignupMode,
 } from "@/lib/api";
 
-/* ------------------------------------------------------------------ *
- *  The editable "setup" half of a brand — policies, legal identity,
- *  content — as the admin form holds it, and the two conversions the
- *  form needs: brand → draft on load, draft → payload on save.
- * ------------------------------------------------------------------ */
+// Editable "setup" half of a brand as the form holds it, plus brand → draft and draft → payload.
 
 export interface SetupDraft {
   legalName: string;

@@ -14,15 +14,8 @@ import { filterNotifications, type NotificationFilter } from "./notificationGrou
 
 export const NOTIFICATIONS_PATH = "/dashboard/notifications";
 
-/**
- * The notifications slide-over: slides in from the right edge as a floating
- * card (full-height sheet on phones).
- *
- * Mounted ONCE in AppLayout — not inside each bell. The desktop and mobile
- * bells are both always in the DOM (one is CSS-hidden), and a portalled panel
- * per bell would open twice. The bells and the Alt+N shortcut only flip
- * `panelOpen` in the store; this component owns the UI.
- */
+/** Notifications slide-over. Mounted once in AppLayout, not per bell: both bells are always in the DOM
+ *  (one CSS-hidden), so a portalled panel per bell would open twice. */
 export function NotificationPanel() {
   const open = useNotificationStore((s) => s.panelOpen);
   const setOpen = useNotificationStore((s) => s.setPanelOpen);

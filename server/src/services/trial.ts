@@ -23,10 +23,7 @@ import { recordPlanEvent } from "./planHistory.js";
 import { consumeCycle, effectiveIncludedMinutes, healDiscountDrift } from "./coupons.js";
 import { isAdminRole } from "../lib/roles.js";
 
-/**
- * Best-effort: email + in-app notify the user that their free trial converted to
- * a paid plan. Call ONLY on the trial→active transition (not on renewals).
- */
+/** Tells the user their trial converted to a paid plan. Only on the trial->active transition, not renewals. Best-effort. */
 export async function notifyPlanActivated(
   userId: string,
   opts: { number?: string } = {},
@@ -64,19 +61,8 @@ export async function notifyPlanActivated(
   }
 }
 
-/**
- * Entitlement service — the single source of truth for whether a user can use
- * paid (AI-call) functionality right now, and how many call minutes they have
- * left. It spans the whole lifecycle:
- *
- *   trialing  → free trial: global trial minutes + a trial end date.
- *   active    → paid plan: the plan's `includedMinutes`, reset every renewal.
- *   past_due / none / canceled → blocked (must (re)subscribe / fix payment).
- *
- * A trial ends when EITHER the allocated minutes run out OR the end date passes
- * (minutes exhaustion takes precedence). A paid plan only blocks when the
- * period's minutes are exhausted; usage resets on the next renewal.
- */
+// Entitlement: the single source of truth for whether a user can make AI calls and how
+// many minutes are left. A trial ends on minutes OR date (minutes wins); a plan blocks on minutes.
 
 export type TrialStatus = "active" | "expired_minutes" | "expired_date";
 
@@ -176,14 +162,9 @@ export interface EntitlementState {
   trialEndsAt: string | null;
   periodEnd: string | null;
   blocked: boolean;
-  /** True when the user has an existing paid plan they can renew now (blocked
-   *  active plan / past_due) — vs needing to pick a plan fresh. Drives the
-   *  "Renew plan" CTA instead of sending them to /subscribe. */
+  /** Has a paid plan to renew now (vs picking one fresh). Drives the "Renew plan" CTA. */
   canRenew: boolean;
-  /** Whether the plan auto-renews + auto-charges the saved card on exhaustion.
-   *  Drives the per-call cap: an active plan with this ON isn't hard-cut at its
-   *  remaining minutes — the call runs into the next cycle and the renewal tops
-   *  up + charges after it ends (so a live call is never interrupted). */
+  /** Auto-charges on exhaustion. With this ON a live call isn't hard-cut at the remaining minutes. */
   autoRenew: boolean;
   /** Human-readable plan label for the dashboard badge ("Free Trial", "Starter", …). */
   planName: string | null;
@@ -195,9 +176,7 @@ export interface EntitlementState {
   /** Account fully suspended (grace lapsed without renewal): number released and
    *  the whole dashboard is locked behind the reactivation (pick-a-plan) screen. */
   suspended: boolean;
-  /** Account locked by an admin (manual suspend). Unlike `suspended` (billing
-   *  lapse, self-recoverable via /subscribe), this hard-locks the account — the
-   *  frontend force-logs-out to /login; only an admin can lift it. */
+  /** Admin hard-lock. Unlike `suspended` (billing lapse, self-recoverable), only an admin can lift it. */
   adminSuspended: boolean;
 }
 
@@ -230,12 +209,7 @@ type EntitlementProfile = {
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-/**
- * Platform admins aren't customers — they have no subscription/onboarding but
- * still need to exercise the AI (test calls, the assistant) to support the
- * product. Treat them as an always-on, unlimited entitlement so every gate
- * (the trial middleware, the per-call cap, the frontend test button) clears.
- */
+// Admins aren't customers but need the AI to support the product: always-on, unlimited.
 function adminEntitlement(): EntitlementState {
   return {
     phase: "active",
@@ -262,10 +236,7 @@ function adminEntitlement(): EntitlementState {
   };
 }
 
-/**
- * Compute the user's live entitlement. Reads the profile + the chosen plan's
- * included minutes and resolves trial vs paid limits.
- */
+/** The user's live entitlement, resolved from the profile and its plan. */
 export async function getEntitlement(userId: string, now = new Date()): Promise<EntitlementState> {
   const profile = (await withPlan(await (await tenantForUser(userId)).profile.findUnique({
     where: { userId },
@@ -303,21 +274,9 @@ export async function getEntitlement(userId: string, now = new Date()): Promise<
     adminSuspended: !!profile?.suspendedAt,
   };
 
-  // THE CARD WALL. An account that signed up while `onboarding.cardRequired` was
-  // ON has no entitlement of any kind until its first card is confirmed —
-  // whatever subscriptionStatus happens to say.
-  //
-  // Checked here, above every status branch, and keyed on cardConfirmedAt rather
-  // than on the status string, because the status is written from several places
-  // this module doesn't control: /subscribe opens a REAL Stripe trial
-  // subscription before any card exists, so Stripe reports "trialing" and the
-  // billing webhook mirrors it — a user who picks a plan and closes the tab would
-  // otherwise be handed the full trial with no card. /billing/renew's failure
-  // path writes "past_due", and an abandoned trial is cancelled to "canceled".
-  // A positive, locally-owned flag can't be moved by any of them.
-  //
-  // Grandfathered accounts are untouched: cardRequiredAtSignup is false for every
-  // row that existed before this shipped, so this never fires for them.
+  // THE CARD WALL: a card-required signup has no entitlement until its card is confirmed,
+  // whatever subscriptionStatus says — Stripe writes "trialing" before any card exists, so
+  // a status-keyed wall would hand out free trials. Keyed on the row's own flags only.
   if (profile && profile.cardRequiredAtSignup && !profile.cardConfirmedAt) {
     return {
       phase: "none",
@@ -382,21 +341,13 @@ export async function getEntitlement(userId: string, now = new Date()): Promise<
     const rawUsed = round1(profile.planSecondsUsed / 60);
 
     const exhausted = !unlimited && rawUsed >= minutesAllocated;
-    // A non-renewing plan (auto-renew OFF) whose billing period has ended is expired
-    // even if minutes remain: the plan was sold for that ONE period (e.g. a month),
-    // so once the period is over and it won't renew, entitlement stops — leftover
-    // minutes don't extend it past the date it was paid for. Auto-renew ON is
-    // excluded: that plan renews at the boundary (Stripe pushes currentPeriodEnd
-    // forward), so a momentarily-past period end is just webhook lag, not an expiry.
+    // Auto-renew OFF + period ended = expired even with minutes left (the plan was sold
+    // for one period). Auto-renew ON is excluded — a past period end there is webhook lag.
     const periodEnded =
       !!profile.currentPeriodEnd && now.getTime() >= profile.currentPeriodEnd.getTime();
     const dateExpired = periodEnded && !profile.autoRenew;
-    // Auto-renew tops the plan up the instant minutes run out, so an exhausted
-    // auto-renew plan is never really "blocked". Present the PROJECTED
-    // post-renewal numbers (the overage carried into a fresh cycle) so the
-    // dashboard shows e.g. 1/5 immediately instead of flickering to "6/5 — minutes
-    // used up / calls paused" while the background renewal completes. The renewal
-    // itself fires off RAW usage (renewActivePlanIfExhausted), not this status.
+    // An exhausted auto-renew plan isn't really blocked — show the projected post-renewal
+    // numbers so the dashboard doesn't flicker to "6/5, calls paused" mid-renewal.
     const willAutoRenew = exhausted && profile.autoRenew;
     const minutesUsed = willAutoRenew
       ? Math.min(round1(rawUsed - minutesAllocated), Math.max(0, minutesAllocated - 1))
@@ -427,17 +378,8 @@ export async function getEntitlement(userId: string, now = new Date()): Promise<
     };
   }
 
-  // Fresh account that never subscribed → a CARD-LESS free trial so they can test
-  // the assistant (web calls) on a limited allowance without a card. They stay
-  // subscriptionStatus="none" — the dashboard is reachable and plan + card are
-  // only collected in the "tap to set up" number wizard when they claim a number.
-  // The trial runs from account creation, capped by the same minutes/days as the
-  // paid trial; usage accrues in trialSecondsUsed (reset when a paid trial starts).
-  //
-  // A card-required account never reaches here — the card wall above returns
-  // first until its card is confirmed. The flag it reads comes from THIS ROW only;
-  // the platform setting is deliberately never consulted in this module, so
-  // flipping the admin toggle can't change the answer for anyone already signed up.
+  // Never subscribed = card-less free trial from account creation, same limits as the paid trial.
+  // The platform toggle is never read here, so flipping it can't change the answer for existing signups.
   if (profile && sub === "none") {
     const minutesAllocated = await getTrialMinutes();
     const trialDays = await getTrialDays();
@@ -461,10 +403,8 @@ export async function getEntitlement(userId: string, now = new Date()): Promise<
       blocked: status !== TRIAL_STATUS.ACTIVE,
       // No plan to "renew" — they start one via the number wizard / plans page.
       canRenew: false,
-      // A card-less trial can NEVER auto-renew/auto-convert (no card on file), so
-      // it must be false regardless of the profile flag — otherwise the per-call
-      // cap grants "auto-renew headroom" and a call runs past the last minute,
-      // overshooting the allowance (e.g. showing 6/5 minutes used).
+      // No card = can never auto-renew, so force false or the per-call cap grants
+      // headroom and a call overshoots the allowance.
       autoRenew: false,
       planName: "Free Trial",
       ...grace,
@@ -504,13 +444,7 @@ export interface PlanFeatures {
   whatsapp: boolean;
   customCrm: boolean;
   multilingual: boolean;
-  /**
-   * Human Call Transfer, already resolved to a single number of departments:
-   * 0 = the plan excludes transfer entirely. Deliberately not the raw
-   * `callTransferEnabled` / `callTransferLimit` pair — there 0 means both
-   * "unlimited" and "off" depending on the flag, which is easy to read
-   * backwards. See transferDepartmentAllowance().
-   */
+  /** Transfer departments allowed; 0 = no transfer. Pre-resolved because in the raw enabled/limit pair 0 means "unlimited" or "off" depending on the flag. */
   callTransferDepartments: number;
 }
 
@@ -532,22 +466,7 @@ const NO_FEATURES: PlanFeatures = {
   callTransferDepartments: 0,
 };
 
-/**
- * Which add-on features the user's plan grants right now.
- *
- * The gate is PAYMENT, not going live. Signup and the free trial stay wide open
- * so people can try every add-on before they buy; the moment a payment lands
- * (`subscriptionStatus` = "active") the chosen plan's flags apply, whether or not
- * a receptionist number has been claimed yet.
- *
- * This used to hinge on having a number, which meant a paying customer on a
- * cheaper plan kept every premium add-on until they finished the number wizard.
- *
- * A lapsed subscription (past_due / suspended / canceled) keeps being judged by
- * its plan rather than falling back open — nobody should gain features by not
- * paying. Whether they can take calls at all is decided separately (see
- * `blockedCopy` / the trial middleware).
- */
+/** Add-on features the plan grants now. Gated on PAYMENT, not on going live: trial is wide open, and a lapsed sub is still judged by its plan (nobody gains features by not paying). */
 export async function getPlanFeatures(userId: string): Promise<PlanFeatures> {
   const profile = await withPlan(await (await tenantForUser(userId)).profile.findUnique({
     where: { userId },
@@ -558,32 +477,14 @@ export async function getPlanFeatures(userId: string): Promise<PlanFeatures> {
       user: { select: { role: true } },
       subscriptionPlanId: true } }));
   if (isAdminRole(profile?.user?.role)) return ALL_FEATURES;
-  // Signup + free trial: everything unlocked, so an add-on can be tried before
-  // it's paid for. Nothing has been charged yet, so there is nothing to enforce.
-  //
-  // This stays deliberately wide open for signup AND the whole trial, including a
-  // card-required account still waiting on its card. Feature restriction is a
-  // PLAN concern: nothing is restricted until a plan activates, and then only to
-  // what that plan includes. Whether an account may use the service at all is a
-  // separate question answered by getEntitlement — so the card wall is enforced
-  // there (and at each route that spends money), never by quietly stripping
-  // features here.
+  // Trial (even card-required, card pending) is wide open: features are a PLAN concern.
+  // The card wall lives in getEntitlement, never in quietly stripped features here.
   const status = profile?.subscriptionStatus ?? "none";
   if (status === "none" || status === "trialing") {
     return {
       ...ALL_FEATURES,
-      // COUNTS are the one exception to "everything unlocked during the trial".
-      //
-      // A boolean add-on can be handed out freely and simply flips off at
-      // conversion — nothing is left behind. A department is real state the
-      // customer created: unlock 20 on a 2-department plan and, the moment the
-      // trial converts, the extras are orphaned. They stay configured, the
-      // assistant silently stops offering them, and the next plan change is
-      // refused over departments the customer never knew were surplus.
-      //
-      // So the trial previews the number they actually bought. Before a plan is
-      // picked there is nothing to preview, and nothing has been sold, so the
-      // hard ceiling stands.
+      // Counts are the exception: departments are real state, and 20 unlocked on a
+      // 2-department plan get orphaned at conversion. So the trial previews the plan's count.
       callTransferDepartments: profile?.subscriptionPlan
         ? transferDepartmentAllowance(profile.subscriptionPlan)
         : MAX_DEPARTMENTS,
@@ -611,30 +512,13 @@ export interface ProrationResult {
   amountDueCents: number;
 }
 
-/**
- * Minutes-based proration credit for a plan change. The unused portion of the
- * current plan's minutes is credited against the new plan's price:
- *   credit = (remainingMinutes / allocatedMinutes) × currentPriceCents
- * Upgrade → pay max(0, newPrice − credit) now. Downgrade → pay nothing now (the
- * lower price simply applies next cycle). Pure function (easy to unit-test).
- */
+/** Minutes-based proration: credit = unused fraction x price paid. Upgrade pays newPrice - credit now; downgrade pays nothing now. Pure. */
 export function computeProration(input: {
   currentPriceCents: number;
   newPriceCents: number;
   minutesAllocated: number;
   minutesRemaining: number;
-  /**
-   * What the customer ACTUALLY paid toward the cycle being replaced, when we can
-   * establish it. Credit is a refund of unused time, so it can only ever be a
-   * share of money that changed hands — the plan's list price is the wrong base
-   * the moment a discount exists. A 50%-off customer on a $20 plan paid $10; on
-   * an untouched allowance the list price handed them $20 back, so upgrading to
-   * $50 cost $30 instead of $40 and we lost the discount twice over.
-   *
-   * Left undefined when it can't be determined (no charge yet, Stripe
-   * unreachable) — the list price is then the best estimate available, which is
-   * also the long-standing behaviour for the undiscounted majority.
-   */
+  /** What was ACTUALLY paid for the cycle. Credit must be a share of real money — list price over-refunded discounted customers. Undefined falls back to list price. */
   paidCents?: number;
 }): ProrationResult {
   const { currentPriceCents, newPriceCents, minutesAllocated, minutesRemaining } = input;
@@ -659,21 +543,7 @@ export function clampCallSeconds(seconds: number): number {
   return Math.min(VAPI_MAX_CALL_SECONDS, Math.max(VAPI_MIN_CALL_SECONDS, Math.floor(seconds)));
 }
 
-/**
- * Seconds a single call may run, given the user's live entitlement:
- *   - `null`  → no cap (unlimited plan).
- *   - clamped seconds remaining otherwise.
- * A blocked user gets the minimum so any connected call is cut almost immediately.
- *
- * Exception: an auto-renew plan/trial isn't hard-cut at its remaining minutes.
- * The moment minutes run out it auto-renews (active plan → charges the saved card
- * + tops minutes up) OR auto-converts the trial to the paid plan (charges the
- * card saved at signup), so a live call must be free to run on instead of being
- * dropped mid-conversation. We grant the remaining minutes PLUS one full
- * allowance of headroom; the post-call settlement performs the renewal/conversion.
- * This also covers an already-exhausted allowance (minutesRemaining ≈ 0 → a full
- * cycle of headroom).
- */
+/** Per-call cap in seconds; null = unlimited, minimum when blocked. An auto-renew plan/trial gets remaining + one full allowance of headroom so a live call isn't dropped mid-conversation — settlement renews afterwards. */
 export function remainingCallSeconds(state: EntitlementState): number | null {
   if (state.unlimited) return null;
   if (
@@ -687,10 +557,7 @@ export function remainingCallSeconds(state: EntitlementState): number | null {
   return clampCallSeconds(state.minutesRemaining * 60);
 }
 
-/** Convenience: compute a user's per-call cap from their stored entitlement,
- *  then lower it to the platform's per-call ceiling when the admin has one set.
- *  Every path that stamps `maxDurationSeconds` onto an assistant goes through
- *  here, so the ceiling can't be missed by one of them. */
+/** Per-call cap lowered to the platform ceiling. Every path stamping maxDurationSeconds goes through here so the ceiling can't be missed. */
 export async function getCallDurationCap(
   userId: string,
   now = new Date(),
@@ -730,29 +597,14 @@ export async function getTrialDurationDays(): Promise<number> {
   return getTrialDays();
 }
 
-/**
- * Snapshot a newly-active (or renewed) plan's minute allowance and reset the
- * per-cycle usage counter. Idempotent per billing period: pass the period end
- * and we only reset when it actually advances.
- *
- * `resetUsage` forces the usage counter to zero even when the period end is
- * unchanged. An immediate upgrade keeps the same billing date (we swap the
- * Stripe price with `proration_behavior: 'none'`), but the user has paid the
- * full new-plan price minus a credit for their *unused* old-plan minutes — so
- * the new plan must grant its full allowance. Without this, minutes already
- * used on the cheaper plan would carry over and silently shrink the upgraded
- * allowance (e.g. 3 min used on a 100-min plan → only 197 of a new 200).
- */
+/** Snapshots a plan's allowance and resets per-cycle usage. Idempotent per period; `resetUsage` forces the reset for an upgrade that keeps its billing date (they paid for a full new allowance). */
 export async function applyActivePlanMinutes(
   userId: string,
   opts: {
     includedMinutes: number;
     periodEnd: Date | null;
     resetUsage?: boolean;
-    /** Seconds of overage to carry into the new cycle from a source OTHER than the
-     *  plan counter — used on a trial→paid conversion, where the overage sits in
-     *  `trialSecondsUsed` (the plan counter is still 0). Overrides the plan-derived
-     *  overage when set. */
+    /** Overage from a source other than the plan counter (trial->paid: it sits in trialSecondsUsed). Overrides the derived overage. */
     carryOverSeconds?: number;
   },
 ): Promise<void> {
@@ -764,33 +616,8 @@ export async function applyActivePlanMinutes(
   const usedSec = profile?.planSecondsUsed ?? 0;
   const storedEnd = profile?.currentPeriodEnd ?? null;
 
-  // Is this a genuinely NEW billing period? This must be IDEMPOTENT: an early
-  // auto-renew applies the new period itself (renewActivePlanIfExhausted) AND
-  // the `customer.subscription.updated` webhook it triggers applies it again. If
-  // both counted as "new", the second one would recompute the overage against
-  // the already-reset usage (now below the allowance) and wipe the carried
-  // overage back to 0 (the "shows 0/5 instead of 1/5" bug). So we only treat it
-  // as new when there's a real boundary: forced; OR usage hit the old allowance
-  // (early renewal); OR the period jumped forward by a real cycle (> 1 hour) vs
-  // what we already stored. A re-application of the SAME renewal sees usage
-  // already below the allowance and a near-identical period end → no-op.
-  // A missing stored period end proves NOTHING about a boundary — it just means we
-  // never learned one (Stripe sent no `current_period_end`, or a webhook hasn't
-  // landed). Treating it as "new period" made EVERY call here wipe usage, so a mere
-  // auto-renew toggle or downgrade — which fire `customer.subscription.updated` —
-  // reset a user's 100/200 back to 0/200. A real boundary is: an explicit reset, a
-  // cycle that ran out of minutes, or a period end that actually moved forward.
-  // Exhaustion is deliberately NOT a boundary. Running out of minutes is a state
-  // the user sits in until something actually charges them — it is not, by itself,
-  // evidence that a new cycle was paid for. Every caller that has taken money says
-  // so explicitly with `resetUsage: true` (renewal, trial conversion, upgrade,
-  // /renew), and the early-renewal path zeroes the counter before calling anyway.
-  // So inferring a reset from "usage >= allowance" only ever fired on the one
-  // caller that doesn't pass the flag — the customer.subscription.updated webhook,
-  // which also fires for edits that move no money at all (toggling auto-renew,
-  // scheduling a downgrade, a price swap). A customer with auto-renew OFF who had
-  // spent their allowance was handed a fresh one, free, the next time any of those
-  // happened.
+  // IDEMPOTENT by design (the renewal path and its webhook both land here): only an explicit reset or a
+  // period end moved > 1h counts. A null stored end and exhaustion are NOT boundaries — both used to wipe usage.
   const PERIOD_ADVANCE_MS = 60 * 60 * 1000; // 1h: far below a real cycle, far above a re-applied tick
   const periodAdvanced =
     opts.periodEnd != null &&
@@ -798,15 +625,8 @@ export async function applyActivePlanMinutes(
     opts.periodEnd.getTime() - storedEnd.getTime() > PERIOD_ADVANCE_MS;
   const isNewPeriod = opts.resetUsage === true || periodAdvanced;
 
-  // Carry forward any OVERAGE into the new cycle: when an auto-renew call runs
-  // past the old cycle's allowance (the call isn't cut mid-conversation), the
-  // seconds used beyond that allowance are counted against the renewed cycle so
-  // they aren't given away free (e.g. a 1:15 call with 1 min left → 1 min carried
-  // → new cycle shows 1/5, not 0/5). Usually 0 → a clean reset. Capped to leave
-  // at least one minute in the new cycle so a huge overrun can't immediately
-  // re-exhaust it and trigger a second renewal/charge.
-  // Overage source: an explicit carry-over (trial→paid, overage lives in the trial
-  // counter) when given, otherwise the plan counter's own overage (active renewal).
+  // Carry overage from an auto-renew call into the new cycle so it isn't free, capped to
+  // leave at least one minute so a huge overrun can't trigger a second renewal at once.
   const planOverageSec = oldAllocatedSec > 0 ? Math.max(0, usedSec - oldAllocatedSec) : 0;
   const overageSec = opts.carryOverSeconds != null ? Math.max(0, opts.carryOverSeconds) : planOverageSec;
   const carriedOverageSec = Math.min(overageSec, Math.max(0, opts.includedMinutes * 60 - 60));
@@ -815,10 +635,8 @@ export async function applyActivePlanMinutes(
     where: { userId },
     data: {
       planMinutesAllocated: opts.includedMinutes,
-      // Only write a period end we actually know. Writing `null` over a good value
-      // (a caller that couldn't read one from Stripe) blanked "Renews —" on the
-      // billing page and, before the guard above, left the profile permanently in
-      // the state where every later call reset usage.
+      // Never write null over a known period end — it blanked "Renews" and used to
+      // put the profile in a permanent reset-on-every-call state.
       ...(opts.periodEnd != null ? { currentPeriodEnd: opts.periodEnd } : {}),
       // A fresh period resets usage to just the carried-over overage (usually 0)
       // and clears the alert flags so 50/80/90% emails fire for the new allowance.
@@ -830,22 +648,12 @@ export async function applyActivePlanMinutes(
     },
   });
 
-  // The plan just took effect, so re-push the live assistant. Entitlement checks
-  // shape the assistant PAYLOAD (which tools are attached — info-SMS, booking,
-  // transfer), and that payload is frozen on Vapi at the last push. Without this
-  // a customer who paid for a cheaper plan kept using the premium tools on real
-  // calls until something unrelated happened to re-sync them.
+  // Re-push the assistant: entitlements decide which tools are attached, and the
+  // payload is frozen on Vapi until the next push.
   void syncEntitlementsToAssistant(userId);
 }
 
-/**
- * Re-push a user's live assistant so plan entitlements apply to calls now.
- *
- * Best-effort and deliberately not awaited by callers: a Vapi hiccup must never
- * fail a payment that already succeeded. The next save or resync would fix it
- * anyway — this just removes the window where the UI says "not in your plan"
- * while the agent still offers it.
- */
+/** Re-pushes the live assistant so entitlements apply now. Not awaited — a Vapi hiccup must never fail a payment that already went through. */
 export async function syncEntitlementsToAssistant(userId: string): Promise<void> {
   try {
     const conv = await (await tenantForUser(userId)).conversion.findUnique({
@@ -868,20 +676,7 @@ export function billableSeconds(seconds: number): number {
   return Math.ceil(seconds / 60) * 60;
 }
 
-/**
- * Total billed minutes across every call on a conversion, summed in Postgres.
- *
- * The rounding has to happen PER CALL — `billableSeconds` charges each started
- * minute in full, so summing raw seconds and rounding once at the end
- * undercounts badly (sixty 5-second calls are 60 billed minutes, not 5). That
- * per-row `ceil` is why this is raw SQL: Prisma's `_sum` can only add the column
- * as stored, so both call sites used to fetch every row and fold them in
- * JavaScript instead — an unbounded read that grew with the customer's history
- * every time an admin opened their page.
- *
- * `CEIL(durationSec / 60)` is exactly `billableSeconds(s) / 60`, so this returns
- * whole minutes directly and the two agree row for row.
- */
+/** Total billed minutes on a conversion, summed in Postgres. Rounding is PER CALL (sixty 5s calls = 60 minutes), which Prisma's _sum can't do — hence raw SQL. */
 export async function billedMinutesFor(db: TenantClient, conversionId: string): Promise<number> {
   const rows = await db.$queryRaw<{ minutes: bigint | null }[]>`
     SELECT COALESCE(SUM(CEIL("durationSec"::numeric / 60)), 0)::bigint AS minutes
@@ -891,14 +686,7 @@ export async function billedMinutesFor(db: TenantClient, conversionId: string): 
   return Number(rows[0]?.minutes ?? 0);
 }
 
-/**
- * Record call usage against whichever quota is active (trial or plan) and
- * recompute the cached trial status. The seconds increment is a single atomic
- * DB op so concurrent calls can't lose updates. No-op for unentitled users.
- *
- * Billing rounds each call up to a full minute (`billableSeconds`) — the real
- * call duration is still stored verbatim on the CallLog for display.
- */
+/** Records call usage against the active quota with one atomic increment (concurrent calls can't lose updates). Rounded up to a full minute; the CallLog keeps the real duration. */
 export async function recordUsage(
   userId: string,
   seconds: number,
@@ -947,9 +735,7 @@ export async function recordUsage(
     return state;
   }
 
-  // Card-less free trial (never subscribed) — accrue usage against the same
-  // trialSecondsUsed counter so the free web-call allowance depletes and blocks
-  // once exhausted. Reset to 0 when a paid trial later starts (buildTrialStartData).
+  // Card-less trial shares the trialSecondsUsed counter; reset when a paid trial starts.
   if (profile.subscriptionStatus === "none") {
     await (await tenantForUser(userId)).profile.update({
       where: { userId },
@@ -973,15 +759,8 @@ function parseUsageAlerts(s: string | null | undefined): number[] {
     .filter((n) => Number.isFinite(n));
 }
 
-/**
- * After usage is recorded, email the owner the first time their usage crosses
- * 50%, 80%, or 90% of the cycle's allowance. Emails EVERY newly-crossed
- * threshold (so a single big call that jumps past several still sends each one,
- * not just the highest) and de-dupes via Profile.usageAlertsSent so a threshold
- * is never emailed twice in the same cycle. Marks a threshold sent only AFTER its
- * email succeeds, so a transient failure retries on the next call.
- * Best-effort — never throws into the call path.
- */
+// Emails each newly crossed 50/80/90% threshold once per cycle (usageAlertsSent). A
+// threshold is marked sent only after its email succeeds so a blip retries next call.
 async function maybeSendUsageAlerts(
   userId: string,
   state: EntitlementState | null,
@@ -1006,12 +785,8 @@ async function maybeSendUsageAlerts(
     const due = crossed.filter((t) => !already.includes(t)).sort((a, b) => a - b);
     if (!due.length) return;
 
-    // Email EVERY newly-crossed threshold, lowest first — if a single big call
-    // jumps past several at once (e.g. 40% → 80%), the owner still gets the 50%
-    // AND 80% alerts, not just the highest. Each email shows that threshold's own
-    // minutes (e.g. 50% of a 5-min plan = 2.5 used) so its headline and figures
-    // stay consistent. Mark a threshold sent only after its email succeeds, so a
-    // transient failure retries it on the next call.
+    // Every crossed threshold, lowest first, each showing its own minutes so the
+    // headline and figures agree.
     const sent: number[] = [];
     for (const threshold of due) {
       try {
@@ -1040,12 +815,8 @@ async function maybeSendUsageAlerts(
   }
 }
 
-/**
- * For an ACTIVE paid plan whose included minutes are exhausted, renew the billing
- * cycle immediately: charge a fresh full period on the saved card, reset the
- * per-cycle minute counter, and restart the clock. A declined card flips the user
- * to past_due (blocked) until they fix payment. Best-effort, never throws.
- */
+// Early renewal for an exhausted active plan: charge a full period, reset the counter.
+// A declined card flips to past_due. Never throws.
 async function renewActivePlanIfExhausted(
   userId: string,
   stripeSubscriptionId: string,
@@ -1053,9 +824,7 @@ async function renewActivePlanIfExhausted(
   autoRenew: boolean,
   _now: Date,
 ): Promise<void> {
-  // Auto-renew off → never auto-charge. The user stays blocked on exhausted
-  // minutes (calls frozen) for the rest of the period; at period end Stripe
-  // cancels the subscription (cancel_at_period_end) and they must pick a plan.
+  // Auto-renew off = never auto-charge; Stripe cancels at period end.
   if (!autoRenew) return;
   // Check RAW usage from the profile (not getEntitlement, which masks an exhausted
   // auto-renew plan as "active" for display) so the renewal still fires.
@@ -1071,11 +840,8 @@ async function renewActivePlanIfExhausted(
   if (allocatedMin <= 0) return; // unlimited plan — never exhausts
   if (fresh.planSecondsUsed / 60 < allocatedMin) return; // not exhausted yet
 
-  // Safety net against a stale local flag: if the user cancelled in the Stripe
-  // hosted portal but that webhook hasn't landed yet (it never reaches a local
-  // dev server, and can lag in prod), the DB may still say autoRenew=true. Read
-  // the live cancel state straight from Stripe before charging; if it's set to
-  // cancel, honour that — sync the flag off and don't charge a cancelled card.
+  // A portal cancel's webhook can lag (or never reach dev), so check Stripe's live
+  // cancel state before charging.
   try {
     const stillAutoRenews = await getSubscriptionAutoRenew(stripeSubscriptionId);
     if (!stillAutoRenews) {
@@ -1089,17 +855,8 @@ async function renewActivePlanIfExhausted(
     // rather than blocking a legitimate renewal on a transient read failure.
   }
 
-  // CLAIM the renewal before charging. `reconcileSubscription` runs from five
-  // places — including `validateTrial`, which fires on EVERY gated API request —
-  // so a dashboard load issuing parallel requests had several of them read
-  // "minutes exhausted" at once and each call Stripe. That double-charged the
-  // customer's card (observed: two renewals in the same minute).
-  //
-  // This UPDATE is atomic in Postgres: the `gte` predicate is re-evaluated after
-  // the row lock, so exactly ONE concurrent caller matches and proceeds; the rest
-  // see count 0 and bail. Usage is zeroed here rather than after the charge — a
-  // failed charge flips the account to past_due (blocked) below, so a zeroed
-  // counter can't hand out free minutes.
+  // CLAIM before charging — parallel requests each saw "exhausted" and double-charged. The `gte`
+  // is re-evaluated under the row lock so one caller wins; zeroing is safe since a failed charge flips to past_due.
   const allocatedSec = allocatedMin * 60;
   const claim = await (await tenantForUser(userId)).profile.updateMany({
     where: { userId, planSecondsUsed: { gte: allocatedSec } },
@@ -1115,9 +872,8 @@ async function renewActivePlanIfExhausted(
       // Automatic path → dedupe, so a request that slipped past the claim above
       // still can't turn into a second charge.
       await renewSubscriptionNow(stripeSubscriptionId, { dedupeConcurrent: true });
-    // The early renewal consumed the cycle boundary the downgrade was pinned to,
-    // so Stripe no longer holds it — drop our mirror of it too, or the UI keeps
-    // showing a plan change that will never happen.
+    // The renewal released the downgrade schedule; drop our mirror or the UI shows a
+    // plan change that will never happen.
     if (releasedScheduleId) {
       await (await tenantForUser(userId)).profile
         .update({
@@ -1136,17 +892,12 @@ async function renewActivePlanIfExhausted(
     await applyActivePlanMinutes(userId, {
       includedMinutes: await effectiveIncludedMinutes(userId, plan?.includedMinutes ?? 0),
       periodEnd: currentPeriodEnd ? new Date(currentPeriodEnd * 1000) : null,
-      // The claim above already zeroed the counter, so the usual "derive overage
-      // from the stored usage" path would see 0. Pass the real overage across
-      // explicitly, and state the reset — a paid renewal is always a new cycle.
+      // The claim zeroed the counter, so pass the real overage explicitly.
       resetUsage: true,
       ...(overageSec > 0 ? { carryOverSeconds: overageSec } : {}),
     });
-    // The invoice this renewal just settled. Read BEFORE the coupon cycle is
-    // counted so it can key on the invoice id: this path anchors the new cycle at
-    // "now", so a customer who burns their minutes twice in a day produces period
-    // ends minutes apart, and the period-end window alone would discard the
-    // second charge as a duplicate and never spend the discount's budget.
+    // Read the invoice first so consumeCycle can key on its id — two early renewals in
+    // one day have period ends minutes apart, and the window alone would dedupe them.
     const inv = await getLatestPaidInvoice(stripeSubscriptionId);
     // The cycle just paid for is one the coupon covered, so count it only now —
     // after its discount and bonus minutes have both been applied.
@@ -1178,10 +929,7 @@ async function renewActivePlanIfExhausted(
         source: "renewal",
       });
     }
-    // History for the admin timeline. Without this an early renewal left no trace
-    // anywhere in the app — the only record was in Stripe, so a support question
-    // like "why was I charged three times?" could not be answered from the admin
-    // panel at all.
+    // Admin timeline — without it "why was I charged three times?" was only answerable in Stripe.
     void recordPlanEvent({
       userId,
       type: "renewed",
@@ -1198,23 +946,12 @@ async function renewActivePlanIfExhausted(
   }
 }
 
-/* ------------------- Hosted-portal cancel mirror ------------------- *
- *  A cancel done in the Stripe hosted portal ("Manage billing") only touches
- *  Stripe: it sets cancel_at_period_end (the sub stays "active" until the
- *  period ends) or, for an immediate cancel, deletes the sub. The webhook
- *  mirrors both in production, but it can lag and NEVER reaches a local dev
- *  server — leaving the app showing auto-renew "On" and the admin panel
- *  showing a live subscription the user has already cancelled. So reconcile
- *  polls the live subscription (at most once per user per interval) and
- *  mirrors the cancel state onto the profile + plan history.                 */
+// Hosted-portal cancel mirror: the webhook can lag and never reaches local dev, so
+// reconcile polls the live sub (once per user per interval) and mirrors the cancel state.
 const PORTAL_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const lastPortalSyncAt = new Map<string, number>();
 
-/**
- * Mirror the live Stripe cancel state onto the local profile. Returns the
- * fresh { status, autoRenew } (or the local snapshot when throttled/failed)
- * so the caller can gate on post-sync truth. Best-effort — never throws.
- */
+// Mirrors Stripe's live cancel state onto the profile; returns the local snapshot when throttled/failed.
 async function syncPortalCancelState(
   userId: string,
   profile: {
@@ -1269,32 +1006,7 @@ async function syncPortalCancelState(
   }
 }
 
-/**
- * Reconcile a user's subscription with Stripe and auto-activate the paid plan
- * once their trial has ended. In local dev the Stripe webhook can't reach the
- * server, so an ended trial (date OR minutes) that should auto-charge the card
- * saved at signup isn't reflected — leaving the user wrongly blocked / sent
- * back to /subscribe. Here we read the live Stripe status: if the trial lapsed
- * we charge now and flip them to active (snapshotting the plan's minutes).
- * Best-effort, never throws. A no-op unless the local state is likely stale.
- */
-/**
- * Convert a TRIALING user to their paid plan RIGHT NOW: end the Stripe trial so
- * the saved card is charged immediately, then flip the profile to the active plan
- * with a fresh full allowance. Used when a trial user goes live by claiming their
- * number — going live commits them to the plan they picked at onboarding, instead
- * of letting the trial run its course.
- *
- * Unlike reconcileSubscription (best-effort, silent), this THROWS a 400 on a
- * charge failure so the caller can refuse to assign the number and tell the user
- * to fix their card. A no-op — returns { converted: false } — for anyone who
- * isn't a trialing user with a live subscription (already active, past_due, no
- * sub, or a card-less trial), so a later number change never re-charges.
- *
- * Note: the charge is off-session. A card that needs authentication (3DS) fails
- * here; that surfaces as the card error and the number isn't assigned. A proper
- * on-session 3DS flow is a separate follow-up.
- */
+/** Converts a trialing user to paid NOW (going live commits them). THROWS 400 on a charge failure so the number isn't assigned; no-op for anyone not trialing with a live sub, so a later number change never re-charges. Off-session, so 3DS cards fail here. */
 export async function chargeTrialAndActivateNow(
   userId: string,
   opts: { number?: string } = {},
@@ -1331,9 +1043,8 @@ export async function chargeTrialAndActivateNow(
     await setSubscriptionAutoRenew(profile.stripeSubscriptionId, true);
     let sub = await getSubscription(profile.stripeSubscriptionId);
     if (sub.status === "trialing") {
-      // Atomic: a declined / 3DS card throws here and LEAVES the trial intact, so
-      // the user keeps their trial and can retry after fixing their card — instead
-      // of the trial being destroyed and the account stranded in past_due.
+      // Atomic: a decline throws and LEAVES the trial intact instead of stranding
+      // the account in past_due.
       await endTrialNow(profile.stripeSubscriptionId, { errorIfIncomplete: true });
       sub = await getSubscription(profile.stripeSubscriptionId);
     }
@@ -1387,9 +1098,7 @@ export async function chargeTrialAndActivateNow(
       `[trial] go-live conversion failed for user ${userId}:`,
       e instanceof Error ? e.message : e,
     );
-    // Leave the account trialing on a charge failure — do NOT flip to past_due,
-    // or a transient decline would freeze a user who still has trial left. The
-    // number simply isn't assigned; they can fix their card and retry going live.
+    // Stay trialing — flipping to past_due would freeze a user who still has trial left.
     throw badRequest(
       e instanceof Error && /card|declined|payment|incomplete|authentication/i.test(e.message)
         ? "We couldn't charge your saved card to activate your plan. Update your card and try again."
@@ -1398,6 +1107,7 @@ export async function chargeTrialAndActivateNow(
   }
 }
 
+/** Reconciles with Stripe: mirrors portal cancels, renews an exhausted plan early, and converts a lapsed trial (the webhook never reaches local dev). Best-effort, never throws. */
 export async function reconcileSubscription(
   userId: string,
   now = new Date(),
@@ -1437,14 +1147,10 @@ export async function reconcileSubscription(
     profile.autoRenew = synced.autoRenew;
   }
 
-  // Active plan that's burned through its included minutes before the period
-  // date → renew the cycle NOW (charge a fresh full period, reset minutes) so the
-  // user is never blocked. "Whichever limit hits first" — minutes here, the date
-  // via Stripe's natural renewal webhook. Auto-renew off short-circuits this.
+  // Minutes ran out before the date -> renew now. The date is Stripe's job.
   if (profile.subscriptionStatus === "active") {
-    // Safety net: a discount that outlived its cycle budget (a failed detach, or
-    // a renewal webhook that never landed) would otherwise keep discounting
-    // forever. Fail-open and best-effort, like the portal-cancel sync above.
+    // A discount that outlived its cycle budget (failed detach, missed webhook) would
+    // otherwise discount forever. Fail-open.
     await healDiscountDrift(userId, profile.stripeSubscriptionId);
     await renewActivePlanIfExhausted(
       userId,
@@ -1458,9 +1164,7 @@ export async function reconcileSubscription(
 
   if (profile.subscriptionStatus !== "trialing" && profile.subscriptionStatus !== "past_due") return;
 
-  // Auto-renew off → don't convert the trial to a paid plan. The trial just lapses
-  // (calls frozen); Stripe cancels at trial end (cancel_at_period_end) and the user
-  // must pick a plan to unfreeze. No auto-charge.
+  // Auto-renew off = no auto-charge; the trial lapses and Stripe cancels at trial end.
   if (!profile.autoRenew) return;
 
   // For a trialing user, only act once the trial is actually over (date or minutes).
@@ -1477,9 +1181,7 @@ export async function reconcileSubscription(
       sub = await getSubscription(profile.stripeSubscriptionId);
     }
     if (sub.status === "active") {
-      // Carry the trial OVERAGE (minutes used past the trial allowance, e.g. a
-      // last call that ran on after auto-renew converted the trial) into the new
-      // paid cycle — it lives in the trial counter, not the plan counter.
+      // Trial overage lives in the trial counter, not the plan counter — carry it explicitly.
       const trialAllocSec = (profile.trialMinutesAllocated ?? (await getTrialMinutes())) * 60;
       const trialOverageSec =
         profile.subscriptionStatus === "trialing" && trialAllocSec > 0
@@ -1495,9 +1197,7 @@ export async function reconcileSubscription(
           profile.subscriptionPlan?.includedMinutes ?? 0,
         ),
         periodEnd: sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd * 1000) : null,
-        // Reached only when a trialing/past_due account just went active — a real
-        // new paid cycle, so grant the full allowance regardless of what period end
-        // Stripe gave us.
+        // A real new paid cycle, whatever period end Stripe gave us.
         resetUsage: true,
         ...(trialOverageSec > 0 ? { carryOverSeconds: trialOverageSec } : {}),
       });
@@ -1514,9 +1214,7 @@ export async function reconcileSubscription(
       );
       // Reaching here means a trialing/past_due account just went active — tell them.
       void notifyPlanActivated(userId);
-      // Accrue the reseller's commission for the charge now (covers local dev,
-      // where Stripe's invoice webhook never reaches us). Idempotent on the
-      // invoice id, so the webhook won't double-count in production.
+      // Commission now (the invoice webhook never reaches local dev); idempotent on invoice id.
       if (inv) {
         await accrueCommissionForInvoice({
           invoiceId: inv.id,

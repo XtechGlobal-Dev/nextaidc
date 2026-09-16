@@ -25,14 +25,8 @@ import {
 } from "@/lib/brandRoute";
 import type { AuthUser, UserRole } from "@/lib/api";
 
-/* ------------------------------------------------------------------ *
- *  Who gets a customer workspace, and where the rest are sent.
- *
- *  These two answers drive the sidebar, the bottom bar, the command
- *  palette, RequireCustomer and the post-login redirect. Getting either
- *  wrong is how a super admin ends up staring at an empty Call Inbox —
- *  or, worse, how a real customer loses their own dashboard.
- * ------------------------------------------------------------------ */
+// Who gets a customer workspace and where the rest land. Drives the nav, RequireCustomer and the post-login
+// redirect; wrong either way means a super admin on an empty inbox or a customer losing their dashboard.
 
 function user(role: UserRole, over: Partial<AuthUser> = {}): AuthUser {
   return {
@@ -78,9 +72,8 @@ describe("hasCustomerWorkspace", () => {
 
 describe("adminLandingPath", () => {
   it("sends the super admin to the platform overview in their own URL space", () => {
-    // Not the brand Overview: that's a brand-scoped section they don't hold. And
-    // they carry no permission keys (they bypass the matrix), so running them
-    // through the staff logic would strand them on "no access yet".
+    // Not the brand Overview (brand-scoped, refused to them), and the staff logic would
+    // strand them on "no access yet" since they hold no permission keys.
     expect(adminLandingPath(user("SUPER_ADMIN"))).toBe("/superadmin/platform");
   });
 
@@ -123,10 +116,7 @@ describe("onboardingRedirectPath", () => {
 
 describe("canUseSection", () => {
   it("refuses the super admin the sections that belong to a brand", () => {
-    // A tenant's signup metrics, its customers, their subscriptions, the voices
-    // they may pick from and the support requests those customers raise are the
-    // brand admin's job — and in a white-label setup one brand's customer list
-    // (in a table or in conversation) is that brand's business.
+    // In a white-label setup one brand's customer list (table or conversation) is that brand's business.
     for (const section of ["overview", "customers", "subscriptions", "voice_bank", "tickets"]) {
       expect({ section, allowed: canUseSection("SUPER_ADMIN", section) }).toEqual({
         section,
@@ -155,9 +145,7 @@ describe("canUseSection", () => {
   });
 
   it("refuses the platform-only sections to everyone but the super admin", () => {
-    // The Audit Log is the platform owner's: an audit log a tenant's own admin
-    // can read is a weak audit log. Resellers deliberately is NOT here — see
-    // the reseller test below.
+    // An audit log a tenant's own admin can read is a weak one. Resellers is deliberately NOT here (see below).
     expect([...PLATFORM_ONLY_SECTIONS].sort()).toEqual(["audit"]);
     for (const section of PLATFORM_ONLY_SECTIONS) {
       expect({ section, superAdmin: canUseSection("SUPER_ADMIN", section) }).toEqual({
@@ -174,10 +162,7 @@ describe("canUseSection", () => {
   });
 
   it("gives the platform's team sections to the owner and their own staff only", () => {
-    // `brand_tickets` is the inbox of requests brand admins raise WITH the
-    // platform — one brand's query is between that brand and the platform, so
-    // the owner works it, and so do the staff they employ (no brand). No
-    // tenant's admin or staff member can hold it.
+    // `brand_tickets` is between a brand and the platform: the owner and their brand-less staff only.
     expect([...PLATFORM_TEAM_SECTIONS]).toEqual(["brand_tickets"]);
     expect(canUseSection("SUPER_ADMIN", "brand_tickets", null)).toBe(true);
     expect(canUseSection("STAFF", "brand_tickets", null)).toBe(true);
@@ -186,10 +171,7 @@ describe("canUseSection", () => {
   });
 
   it("gives each tier exactly one support inbox, and never the other's", () => {
-    // The whole safety property of the two-lane ticket system, stated in terms
-    // of the section gates: a brand admin (and their staff) can reach the
-    // customer inbox and nothing else; the platform owner (and their staff)
-    // the brand inbox and nothing else. No account holds both.
+    // The safety property of the two-lane ticket system: no account holds both inboxes.
     expect(canUseSection("ADMIN", "tickets", "b_acme")).toBe(true);
     expect(canUseSection("STAFF", "tickets", "b_acme")).toBe(true);
     expect(canUseSection("SUPER_ADMIN", "tickets", null)).toBe(false);
@@ -206,15 +188,11 @@ describe("canUseSection", () => {
   });
 
   it("opens Resellers to brand admins, not just the platform owner", () => {
-    // A brand recruits and pays its own resellers, so the section is no longer
-    // platform-only. The server narrows every /resellers and /commissions query
-    // to the caller's own tenant, so a brand admin still sees only their own.
+    // Brands run their own resellers; the server scopes the queries to the caller's tenant.
     expect(PLATFORM_ONLY_SECTIONS.has("resellers")).toBe(false);
     expect(canUseSection("ADMIN", "resellers")).toBe(true);
     expect(canUseSection("SUPER_ADMIN", "resellers")).toBe(true);
-    // STAFF clear the scope rule, but "resellers" is absent from the server's
-    // SECTIONS matrix, so `resellers.view` is never grantable and hasPermission
-    // keeps the nav item hidden for them.
+    // STAFF clear the scope rule, but `resellers.view` isn't grantable so the nav stays hidden for them.
     expect(canUseSection("STAFF", "resellers")).toBe(true);
   });
 
@@ -259,14 +237,8 @@ describe("admin URL spaces", () => {
   });
 
   it("reads the handler inbox as whichever section the caller's own tier holds", () => {
-    // One page, one path, two sections — the lane comes from the role, so the
-    // path alone is ambiguous and the ROLE has to break the tie.
-    //
-    // This is a regression test with a visible symptom: unresolved, the first
-    // matching key won, which is `tickets` — a brand-scoped section the platform
-    // owner is refused. RequireAdmin then bounced the super admin off
-    // /superadmin/tickets to /superadmin/brands, so their own inbox was
-    // UNREACHABLE while its nav link sat right there in the sidebar.
+    // Regression: the first matching key (`tickets`) used to win, so RequireAdmin bounced
+    // the super admin off their own inbox while its nav link sat in the sidebar.
     expect(sectionForPath("/superadmin/tickets", "SUPER_ADMIN")).toBe("brand_tickets");
     expect(sectionForPath("/dashboard/admin/tickets", "ADMIN")).toBe("tickets");
     expect(sectionForPath("/dashboard/admin/tickets", "STAFF")).toBe("tickets");
@@ -276,9 +248,7 @@ describe("admin URL spaces", () => {
   });
 
   it("still answers with a section when the role holds neither", () => {
-    // A customer never reaches RequireAdmin, but the answer must stay a section
-    // rather than null: null means "not a staff-assignable page", which would
-    // wave the path through the guard instead of refusing it.
+    // Null means "not a staff-assignable page" and would wave the path through the guard.
     expect(sectionForPath("/dashboard/admin/tickets", "USER")).not.toBeNull();
     expect(sectionForPath("/dashboard/admin/tickets")).not.toBeNull();
   });

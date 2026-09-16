@@ -2,10 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { Response } from "express";
 import { addClient, removeClient, onlineUserIds, liveClientCount } from "./events.js";
 
-/* Presence is derived from open SSE streams, and admin tabs only re-fetch when
- * something is pushed to them. So a presence CHANGE has to publish, or the
- * online dot sits stale until an unrelated event happens to arrive. These pin
- * the "changed" part: first stream on, last stream off, and nothing in between. */
+// A presence CHANGE must publish or the admin dot sits stale. Pins: first stream
+// on, last stream off, nothing in between.
 
 /** A fake SSE response that records what was written to it. */
 function fakeRes(): Response & { events: { type: string; userId?: string; online?: boolean }[] } {

@@ -6,11 +6,8 @@ import {
   DEFAULT_PROMPT_TEMPLATE_SHORT,
 } from "./agentConfig.js";
 
-/* The call-behaviour rules are appended to every wire prompt in
- * buildVapiSystemPrompt, which is the only reason they reach an agent whose
- * owner froze their master prompt with a manual edit. These lock down the
- * pieces that makes that safe: the block is self-contained, and any earlier
- * copy is removable so the two can't contradict each other. */
+// The wire rules are appended in buildVapiSystemPrompt — the only way they reach a frozen prompt.
+// These lock down what makes that safe: self-contained block, earlier copies removable.
 
 describe("WIRE_BEHAVIOUR_RULES", () => {
   it("carries the rules the agent regresses on the moment they're softened", () => {
@@ -26,9 +23,7 @@ describe("WIRE_BEHAVIOUR_RULES", () => {
   });
 });
 
-/* Callers read a phone number out in groups. Everything here exists because the
- * agent used to answer the first group as if it were the whole number and then
- * ask for it again — see the transcriber side in services/vapi.ts. */
+// The agent used to answer the first digit group as the whole number, then ask again.
 describe("WIRE_NUMBER_RULES", () => {
   it("tells the agent a short digit run is an unfinished number, not an answer", () => {
     expect(WIRE_NUMBER_RULES).toMatch(/^## TAKING A NUMBER/);
@@ -45,9 +40,7 @@ describe("WIRE_NUMBER_RULES", () => {
   });
 
   it("stays OUT of the editable scaffold, unlike the behaviour rules", () => {
-    // Deliberate: this block is wire-only, so it can never be frozen into a
-    // customer's master prompt, reworded by the summarizer, or drift from the
-    // transcriber settings it partners with.
+    // Wire-only on purpose — never frozen into a master prompt or reworded by the summarizer.
     expect(DEFAULT_PROMPT_TEMPLATE_SHORT).not.toContain(WIRE_NUMBER_RULES);
     expect(DEFAULT_PROMPT_TEMPLATE_SHORT).not.toMatch(/## TAKING A NUMBER/);
   });

@@ -1,6 +1,4 @@
-/* Parsing for the tool-call batches Vapi POSTs to our dispatchers mid-call.
- * Shared by the booking dispatcher (routes/bookingAi.routes.ts) and the
- * caller-SMS dispatcher (routes/aiSms.routes.ts). Dependency-free. */
+// Parsing for the tool-call batches Vapi POSTs mid-call. Dependency-free.
 
 export interface ToolCall {
   id: string;

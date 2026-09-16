@@ -1,20 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import qs from "qs";
 
-// Clearing a Stripe list param is a wire-format trap, and it fails SILENTLY.
-//
-// Stripe's API is form-encoded and stripe-node runs params through
-// `qs.stringify`, which emits nothing at all for an empty array. So
-// `subscriptions.update(id, { discounts: [] })` posted an entirely empty body —
-// a successful no-op that left the coupon attached. A 2-cycle coupon therefore
-// discounted every invoice forever: our own bookkeeping retired the redemption
-// on time, the detach reported success, and Stripe never heard about it.
-//
-// Nothing threw, so no error path could catch it — which is why these tests
-// assert the ENCODED request rather than just the argument. Asserting
-// `{ discounts: "" }` alone would still pass if someone "simplified" it back to
-// `[]` at some other layer; asserting that the encoded body actually carries a
-// `discounts` key is what pins the behaviour that matters.
+// qs emits nothing for an empty array, so `{ discounts: [] }` posted an empty body and a coupon
+// "detach" silently did nothing. These tests assert the ENCODED body, not just the argument.
 
 const subscriptions = { retrieve: vi.fn(), update: vi.fn() };
 const subscriptionSchedules = { retrieve: vi.fn(), update: vi.fn() };
@@ -26,8 +14,7 @@ vi.mock("stripe", () => ({
   },
 }));
 vi.mock("../env.js", () => ({
-  // Brand hosts resolve against these; the real module exports them, so a
-  // mock that omits them fails to link for anything importing brandUrls.
+  // brandUrls imports these; a mock without them fails to link.
   platformDomain: "hello22.ai",
   platformDomains: ["hello22.ai"],
   allowUnverifiedBrandDomains: false,
@@ -41,11 +28,7 @@ import {
   setSchedulePhaseDiscounts,
 } from "./stripe.js";
 
-/**
- * Exactly how stripe-node serialises a v1 request body — `qs.stringify` with
- * indexed arrays, then the square brackets put back as literals
- * (see `queryStringifyRequestData` in stripe/cjs/utils.js).
- */
+// Mirrors stripe-node's `queryStringifyRequestData`: qs with indexed arrays, brackets restored.
 function encode(params: unknown): string {
   return qs
     .stringify(params, { arrayFormat: "indices" })

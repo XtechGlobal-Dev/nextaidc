@@ -1,9 +1,4 @@
-/* ------------------------------------------------------------------ *
- *  CSV export — spreadsheet downloads without a spreadsheet library.
- *
- *  Excel opens CSV natively, so a real .xlsx writer (and ~1MB of
- *  dependency) buys nothing for a plain table of rows.
- * ------------------------------------------------------------------ */
+// CSV export. Excel opens CSV natively, so an .xlsx writer (~1MB of dependency) buys nothing here.
 
 /** One output column: a header and how to read it off a row. */
 export interface CsvColumn<T> {
@@ -11,13 +6,7 @@ export interface CsvColumn<T> {
   value: (row: T) => string | number | null | undefined;
 }
 
-/**
- * Characters that make Excel treat a cell as a formula.
- *
- * A customer called "=cmd" or a business named "+61 Plumbing" would otherwise be
- * evaluated when the file is opened — the CSV-injection problem. Prefixing with
- * an apostrophe forces Excel to read the cell as text.
- */
+/** Leading chars Excel treats as a formula (CSV injection: "+61 Plumbing" would be evaluated). Apostrophe-prefixed to force text. */
 const FORMULA_START = /^[=+\-@\t\r]/;
 
 /** Quote one cell for CSV, neutralising anything Excel would run as a formula. */
@@ -37,12 +26,7 @@ export function toCsv<T>(columns: CsvColumn<T>[], rows: T[]): string {
   ].join("\r\n");
 }
 
-/**
- * Trigger a browser download of `csv` as `filename`.
- *
- * The leading BOM matters: without it Excel reads the file as the local ANSI
- * codepage and mangles every accented name.
- */
+/** Download `csv` as `filename`. The BOM matters: without it Excel reads the local ANSI codepage and mangles accents. */
 export function downloadCsv(filename: string, csv: string): void {
   const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);

@@ -5,14 +5,8 @@ import { currentBrandId } from "../lib/brandContext.js";
 import { brandDisplayName, brandSupportEmail } from "../lib/brandUrls.js";
 import { cachedBrand } from "./brands.js";
 
-/* ------------------------------------------------------------------ *
- *  System email templates.
- *  Code-seeded defaults for every email the platform already sends.
- *  Admins edit subject/body/enabled from Admin → System Emails; the
- *  senders render through renderEmail() so edits take effect live.
- *  Body is plain text with {{variables}} rendered to HTML on send and
- *  wrapped in the editable header/footer.
- * ------------------------------------------------------------------ */
+// System email templates: code-seeded defaults, admin-editable, rendered live.
+// Bodies are plain text with {{variables}}, turned into HTML on send.
 
 export type EmailAudience = "User" | "Admin" | "Staff";
 
@@ -41,11 +35,7 @@ export const GLOBAL_VARS = [
   "website_url",
 ];
 
-/**
- * Every email the system currently sends, as an editable template. Bodies use
- * {{snake_case}} placeholders; empty values collapse (their paragraph is
- * dropped) so optional lines like {{reason}} disappear cleanly.
- */
+/** Every email the system sends. Empty placeholder values drop their paragraph, so optional lines vanish cleanly. */
 export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
   /* ----------------------------- Authentication ----------------------------- */
   {
@@ -352,13 +342,8 @@ export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
       "If you think this is a mistake, please contact us at {{support_email}}.",
     variables: ["user_name"],
   },
-  /* ------------------------------- Support -------------------------------- *
-   *  Both ticket lanes share these templates. What differs is only wording the
-   *  senders interpolate: {{handler_name}} is "the support team" on a
-   *  customer's ticket and "the platform team" on a brand's, and
-   *  {{brand_name}} names the tenant a request came from. One set rather than
-   *  two, so an admin editing the copy edits it once.
-   * ------------------------------------------------------------------------ */
+  // Support: both ticket lanes share these so an admin edits the copy once;
+  // {{handler_name}} and {{brand_name}} carry the lane-specific wording.
   {
     key: "ticket_created",
     category: "Support",
@@ -570,14 +555,7 @@ export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
 
 const DEF_BY_KEY = new Map(EMAIL_TEMPLATE_DEFS.map((d) => [d.key, d]));
 
-/**
- * Template keys the recipient can unsubscribe from. These are non-essential
- * notification emails only — call summaries, usage-threshold alerts and the
- * grace/trial reminders. Security and account-critical emails (verification,
- * password reset, suspension/reactivation, staff) are deliberately excluded and
- * always send. When a template is unsubscribable, senders inject a tokenized
- * footer link + List-Unsubscribe header and skip delivery to opted-out users.
- */
+/** Templates a recipient may opt out of. Security and account-critical mail is deliberately excluded and always sends. */
 export const UNSUBSCRIBABLE_KEYS = new Set<string>([
   "call_summary",
   "usage_threshold",
@@ -599,20 +577,11 @@ const BRANDING_KEYS = {
   fromName: "email.fromName",
 } as const;
 
-/**
- * App name + support email that every template can interpolate.
- *
- * Resolved against the ambient brand, so a white-label tenant's customers read
- * that tenant's name in the header, footer and subject lines rather than the
- * platform's. Off-request sends have no ambient brand and fall through to the
- * platform values, which is the behaviour that existed before brands.
- */
+/** Globals every template can interpolate. Resolved against the ambient brand; off-request sends get platform values. */
 export interface EmailGlobals {
   app_name: string;
   support_email: string;
-  /** The tenant's legal identity and policy links, "" when it hasn't set them.
-   *  A footer that says "© Acme Voice Pty Ltd, 12 Example St" is a compliance
-   *  line the brand owns; the platform has no equivalent, so blanks are left out. */
+  /** Tenant legal identity and policy links, "" when unset — the platform has no equivalent, so blanks are left out. */
   legal_name: string;
   legal_address: string;
   terms_url: string;
@@ -637,11 +606,7 @@ export function emailGlobals(): EmailGlobals {
   };
 }
 
-/**
- * The legal lines of the footer: who is sending, from where, and the policies
- * that apply. Split out so it can be checked on its own, and so a custom
- * footer can drop it in via {{legal}} without re-typing the markup.
- */
+/** Legal footer lines, split out so a custom footer can drop them in via {{legal}}. */
 export function legalFooterHtml(g: EmailGlobals = emailGlobals()): string {
   const links = [
     g.website_url ? `<a href="${escapeHtml(g.website_url)}" style="color:#888;text-decoration:underline">Website</a>` : "",
@@ -686,9 +651,7 @@ export function defaultFooterHtml(): string {
   );
 }
 
-/** The unsubscribe line that renderEmail drops into the footer's {{unsubscribe}}
- *  marker on notification emails. Just the <p> (it lives inside the footer div),
- *  carrying the recipient's token — which the static footer HTML can't. */
+/** Per-recipient unsubscribe <p> for the footer's {{unsubscribe}} marker; static footer HTML can't carry the token. */
 export function unsubscribeLineHtml(unsubscribeUrl: string): string {
   const { app_name } = emailGlobals();
   return (
@@ -735,9 +698,7 @@ function interpolate(text: string, vars: Record<string, string>): string {
   });
 }
 
-/** Turn a plain-text body into HTML paragraphs (blank line = new paragraph,
- *  single newline = <br>). Empty paragraphs (from collapsed optional vars) are
- *  dropped. Bare URLs and emails are linkified. */
+// Blank line = paragraph, single newline = <br>; empty paragraphs from collapsed vars are dropped.
 function textToHtml(text: string): string {
   const paras = text
     .split(/\n{2,}/)
@@ -765,11 +726,7 @@ export interface RenderedEmail {
   alwaysOn: boolean;
 }
 
-/**
- * Render a template by key with the given variables. Falls back to the code
- * default when the DB row is missing (e.g. before the first seed). Variable
- * values are escaped; app_name/support_email are always injected.
- */
+/** Renders a template by key; falls back to the code default when the DB row is missing. */
 export async function renderEmail(
   key: string,
   vars: Record<string, string | number | undefined>,
@@ -783,10 +740,8 @@ export async function renderEmail(
   const alwaysOn = def?.alwaysOn ?? row?.alwaysOn ?? false;
   const enabled = alwaysOn || (row?.enabled ?? true);
 
-  // Keep values raw here — textToHtml() escapes every body line on render, so
-  // escaping now would double-encode (e.g. "You've" -> "You&#39;ve" -> "You&amp;#39;ve",
-  // which shows the literal "&#39;" in the email). The plain-text fallback also
-  // needs the raw text.
+  // Keep values raw: textToHtml() escapes on render, so escaping here would
+  // double-encode ("You've" shows as "&#39;"). The text fallback needs raw too.
   const merged: Record<string, string> = { ...emailGlobals() };
   for (const [k, v] of Object.entries(vars)) {
     merged[k] = v === undefined || v === null ? "" : String(v);
@@ -795,9 +750,7 @@ export async function renderEmail(
   const subject = interpolate(tpl.subject, merged).trim();
   const bodyText = interpolate(tpl.body, merged);
   const branding = await getEmailBranding();
-  // Fill the footer's {{unsubscribe}} marker with the recipient's unsubscribe line
-  // on notification emails (blank on others). If a custom footer has no marker,
-  // append the line so the (compliance-required) link is never dropped.
+  // A custom footer without the marker still gets the line appended — the link is compliance-required.
   const unsubLine = opts.unsubscribeUrl ? unsubscribeLineHtml(opts.unsubscribeUrl) : "";
   const footer = branding.footer.includes("{{unsubscribe}}")
     ? branding.footer.replace("{{unsubscribe}}", () => unsubLine)
@@ -825,12 +778,7 @@ export async function renderEmail(
 
 /* ------------------------------ Seeding ------------------------------ */
 
-/**
- * Insert any missing template rows from the code defaults. Never overwrites an
- * admin's edits to subject/body/enabled — only refreshes metadata (category,
- * name, description, audience, variables, alwaysOn) so those stay in sync.
- * Best-effort; safe to call on every boot.
- */
+/** Seeds missing template rows. Never overwrites admin edits to subject/body/enabled — only metadata is refreshed. */
 export async function seedEmailTemplates(): Promise<void> {
   for (const d of EMAIL_TEMPLATE_DEFS) {
     try {

@@ -7,14 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-/* ------------------------------------------------------------------ *
- *  A small emoji keyboard for the composer.
- *
- *  Deliberately a fixed, hand-picked set rather than a full picker: the
- *  complete Unicode set means a search index and a dependency, and a
- *  support chat needs the twenty faces people actually use. Anything
- *  else can still be typed or pasted straight into the box.
- * ------------------------------------------------------------------ */
+// Small hand-picked emoji set for the composer; a full picker means a dependency and a search index. Anything else can be pasted.
 
 const GROUPS: { label: string; emoji: string[] }[] = [
   {

@@ -43,16 +43,10 @@ import {
   cacheArchivedTranslation,
 } from "../services/callArchive.js";
 
-/** How long a recording link stays playable. Short for the owner's dashboard —
- *  a fresh token is minted every time they open a call, so it never actually
- *  expires for them — and a bounded window for links that leave our control
- *  (emailed summaries, CRM leads, the public conversation page). */
+/** Dashboard recording token TTL. Short is fine — a fresh one is minted every time the owner opens a call. */
 const RECORDING_TOKEN_TTL_OWNER = "12h";
 const RECORDING_TOKEN_TTL_SHARED = "30d";
-/** A link the owner deliberately copied to send to someone. Longer than the
- *  dashboard's own token — 12h died before the recipient got round to it — but
- *  well short of the 30d we give machine-generated summary links, because this
- *  one is pasted into chats and inboxes we don't control. */
+/** Owner-copied share link TTL. 12h died before recipients opened it; kept well under 30d since it lands in inboxes we don't control. */
 const RECORDING_TOKEN_TTL_SHARE = "7d";
 /** Kept beside the constant so the UI can state the expiry without hardcoding it. */
 const RECORDING_SHARE_DAYS = 7;
@@ -63,25 +57,13 @@ function newPublicId(): string {
   return randomBytes(6).toString("base64url");
 }
 
-/**
- * Public URL of a call's conversation page, linked from the summary SMS.
- *
- * Always on the platform's share host (SHARE_LINK_BASE_URL), never the brand's
- * domain: a brand's domain serves only the SPA, while the API and everything
- * call-related — this page, the webhooks, the recording proxy — stay on the
- * platform's host for every tenant. The page still paints the owning brand's
- * name (see routes/publicCall.routes.ts).
- */
+/** Public conversation page URL. Always the platform share host, never the brand domain (which serves only the SPA); the page still paints the brand's name. */
 function conversationUrlFor(publicId: string): string {
   return `${brandShareOrigin()}/c/${publicId}`;
 }
 
-/** Public URL of our recording proxy for a call log, so links carry our own
- *  domain instead of exposing storage.vapi.ai. The path segment is a SIGNED,
- *  expiring token wrapping the call-log id — not the id itself — so a leaked
- *  link can't be replayed forever and the (non-secret) id grants nothing on its
- *  own. Falls back to the raw Vapi URL when no public base is configured.
- *  `ttl` defaults to the shared-link window; the owner dashboard passes a short one. */
+/** Recording proxy URL on our domain. The path is a SIGNED expiring token, not the (non-secret) id, so a leaked link dies.
+ *  Falls back to the raw Vapi URL when no public base is configured. */
 function proxiedRecordingUrl(
   callLogId: string,
   brandId: string,
@@ -93,21 +75,14 @@ function proxiedRecordingUrl(
   return `${base}/api/calls/recording-file/${signRecording(callLogId, brandId, ttl)}`;
 }
 
-/**
- * The signed-in customer's brand — which is to say, which database their calls
- * are in. Every route below sits behind requireCustomerAccount, and a customer
- * always belongs to a brand; the throw is for a session minted before tokens
- * carried one, which a fresh sign-in fixes.
- */
+/** The customer's brand, i.e. which DB their calls are in. Throws only for a pre-brand session token; a fresh sign-in fixes it. */
 function brandOf(req: { user?: { brandId?: string | null } }): string {
   const brandId = req.user?.brandId;
   if (!brandId) throw new HttpError(401, "Please sign in again.", "session_stale");
   return brandId;
 }
 
-/** Extension for the audio we're proxying. Vapi serves WAV today; read it from
- *  the upstream content-type so a future format lands with the right suffix
- *  instead of a file named `.wav` that isn't one. */
+/** Audio extension from the upstream content-type, so a future format doesn't land as a `.wav` that isn't one. */
 function audioExtFor(contentType: string): string {
   const t = contentType.toLowerCase();
   if (t.includes("mpeg") || t.includes("mp3")) return "mp3";
@@ -117,18 +92,7 @@ function audioExtFor(contentType: string): string {
   return "wav";
 }
 
-/**
- * The filename a downloaded recording lands on disk with.
- *
- * Without this the browser names the file after the URL's last segment — which
- * is the signed JWT — so downloads arrived as an unreadable 200-character blob
- * with no extension, and you couldn't tell what kind of file it even was.
- *
- * Reduced to ASCII letters, digits and dashes: a caller name can contain quotes
- * (which would terminate the header value), slashes, or a non-Latin script that
- * turns into mojibake in a bare `filename=`. A name that survives none of that
- * simply drops out, leaving the date to identify the call.
- */
+/** Download filename (without it the browser uses the JWT path segment). ASCII-only: quotes would end the header value, non-Latin turns to mojibake. */
 function recordingFilename(callerName: string, createdAt: Date, contentType: string): string {
   const who = (callerName || "")
     .normalize("NFKD")
@@ -138,13 +102,8 @@ function recordingFilename(callerName: string, createdAt: Date, contentType: str
     .slice(0, 40)
     .toLowerCase();
   const stamp = createdAt.toISOString().slice(0, 16).replace("T", "-").replace(":", "");
-  // Brand the file itself — an Acme customer saving a recording should not end
-  // up with the platform's name sitting in their downloads folder.
-  //
-  // Only the part before the first dot: the fallback display name is a domain
-  // ("hello22.ai"), and slugifying that whole thing gives "hello22-ai", which
-  // reads as a typo in a filename. A real brand name has no dot and is
-  // unaffected.
+  // Brand the file — an Acme customer shouldn't see the platform's name in their downloads.
+  // Only up to the first dot: the fallback name is a domain, and "hello22-ai" reads like a typo.
   const label =
     brandDisplayName()
       .split(".")[0]
@@ -168,9 +127,7 @@ function transcriptToPlainText(raw: unknown): string {
     .join("\n");
 }
 
-/** Just the CALLER's words, for the classifier's "did anyone actually speak?"
- *  check. When no turn carries a recognisable role we can't tell who said what,
- *  so we return everything rather than wrongly reporting silence. */
+/** Just the CALLER's words for the "did anyone speak?" check. With no recognisable roles, return everything rather than report silence. */
 function callerTranscriptText(raw: unknown): string {
   const turns = normalizeTranscript(raw);
   const roleKnown = turns.some((t) => t.role === "caller" || t.role === "agent");
@@ -178,18 +135,8 @@ function callerTranscriptText(raw: unknown): string {
   return kept.map((t) => t.text).join(" ");
 }
 
-/**
- * Did the AI actually book something on this call?
- *
- * The live booking tools write an Appointment row mid-call (services/booking/
- * engine.ts) but carry no call id, so we match on owner + time window: an
- * AI-sourced, confirmed appointment created between the call starting and now.
- * A 60s tail absorbs the gap between the tool firing and the end-of-call report.
- *
- * This is the ONLY thing that earns a "booking" badge. Deliberately narrow: a
- * false positive would tell an owner a table is in the diary when it isn't.
- * Best-effort — never throws, and "unsure" means "not a booking".
- */
+/** Did the AI book something? Appointment rows carry no call id, so match owner + time window (+60s tail).
+ *  The ONLY source of a "booking" badge — deliberately narrow, a false positive is worse. Never throws. */
 async function bookingConfirmedDuringCall(
   userId: string,
   callEndedAt: Date,
@@ -230,9 +177,7 @@ function notifyOwnerOfCall(
 ): void {
   const who = realCallerName(call.callerName) || call.callerNumber?.trim() || CALLER_FALLBACK;
 
-  // Web calls are the owner trying their own agent. They still get a record +
-  // notification (so the tester previews exactly what a real call produces), but
-  // labelled "Test call" so it can never be mistaken for real business.
+  // Web calls still get a record + notification (that's the rehearsal), labelled "Test call" so they're never mistaken for business.
   if (opts?.test) {
     void notify(userId, {
       type: "new_lead",
@@ -273,9 +218,7 @@ function notifyOwnerOfCall(
   });
 }
 
-/** Everything the owner's post-call summary needs, already localised into their
- *  report language. Deliberately channel-agnostic: the same shape is built from
- *  a Vapi end-of-call report and from a browser test call. */
+/** Everything the owner's post-call summary needs, already localised. Channel-agnostic: built from both the Vapi report and a browser test call. */
 interface OwnerSummaryCall {
   /** CallLog id — the recording proxy link is built from it. */
   id: string;
@@ -297,28 +240,13 @@ interface OwnerSummaryCall {
   /** Short "why they called" line for the SMS. */
   purpose?: string;
   durationSec?: number;
-  /** Which brand owns the call — which is to say, which database it is in. A
-   *  late-arriving recording URL is written there, and the recording link is
-   *  signed with it. Required, not optional: an omitted brand would be
-   *  silently wrong. `createdAt` is the other half of the call's key. */
+  /** Which DB the call is in; the recording link is signed with it. Required — an omitted brand would be silently wrong. */
   brandId: string | null;
   createdAt: Date;
 }
 
-/**
- * Send the owner their post-call summary on every channel they've enabled:
- * email (summary + recording + full transcript), SMS and WhatsApp.
- *
- * Shared by BOTH ingestion paths — the Vapi webhook for real phone calls and
- * `POST /` for browser test calls. Web calls start an inline assistant with no
- * assistantId, so Vapi never fires an end-of-call report for them; without this
- * being called from both places a test call produced an inbox record and nothing
- * else, which is exactly the thing the tester is supposed to rehearse.
- *
- * Fire-and-forget per channel: each is best-effort and independent, so a failing
- * SMS sender can never cost the owner their summary email, and nothing here can
- * break call ingestion.
- */
+/** Owner post-call summary on every enabled channel. Called from BOTH the Vapi webhook and POST / — web calls use an
+ *  inline assistant so Vapi never fires a report for them. Each channel is fire-and-forget so none can break ingestion. */
 function sendOwnerCallNotifications(
   userId: string,
   call: OwnerSummaryCall,
@@ -374,10 +302,7 @@ function sendOwnerCallNotifications(
     })();
   }
 
-  // Best-effort owner SMS summary. Gated on the owner's plan including SMS
-  // + an SMS sender being set (the admin's global on/off, in Admin → Phone
-  // Numbers) + the owner having a mobile on file. Texts from the same sender
-  // number as the test button.
+  // Owner SMS summary: needs the plan feature, an admin-set sender, and a mobile on file.
   if (
     automations.ownerSmsSummary &&
     isTwilioConfigured() &&
@@ -450,13 +375,7 @@ function sendOwnerCallNotifications(
   }
 }
 
-/**
- * Translate a call's transcript into the owner's report language and cache it on
- * the call log, so the portal view reuses it for free. Returns the text to put in
- * the owner's email — the translation when it worked, the original otherwise.
- *
- * Only worth paying for when an email will actually send, so callers gate on that.
- */
+/** Translates the transcript into the owner's language and caches it on the call. Costs money, so callers gate on an email actually sending. */
 async function localizeTranscriptForOwner(
   call: { id: string; createdAt: Date; brandId: string | null },
   transcript: unknown,
@@ -472,9 +391,7 @@ async function localizeTranscriptForOwner(
   );
   if (!translated) return transcriptText;
   const merged = translated.map((t, i) => ({ ...t, at: turns[i]?.at }));
-  // Cached on the call, in the brand's database, with the marker that says
-  // which language is cached. Always a call logged seconds ago, so it is never
-  // archived and the row is the right place for the cache.
+  // Cached on the row (never archived — the call was logged seconds ago) with the language marker.
   await updateCall(
     call.brandId,
     { id: call.id, createdAt: call.createdAt },
@@ -513,9 +430,7 @@ async function getConversionId(userId: string): Promise<string> {
   return created.id;
 }
 
-/** As `getConversionId`, but also returns the agent config — for the one caller
- *  that needs the owner's notification preferences. Kept separate so the hot
- *  read paths don't drag the whole config JSON along. */
+/** getConversionId plus the agent config. Separate so hot read paths don't drag the config JSON along. */
 async function getConversionWithConfig(
   userId: string,
 ): Promise<{ id: string; agentConfig: TenantPrisma.JsonValue }> {
@@ -594,13 +509,8 @@ router.get(
       db.callLog.count({ where }),
     ]);
 
-    // Archived rows come back with empty transcript/analysis columns. The list
-    // deliberately does NOT rehydrate them: a page can be 500 calls, and paying
-    // 500 S3 round trips to fill a view that mostly renders scalars would trade
-    // one slow query for something far worse. Instead each archived row is
-    // flagged, and the client fetches the single call it actually opens through
-    // `GET /:id`, which does hydrate. `blobKey` is a bucket path and stays on
-    // the server.
+    // Archived rows are NOT rehydrated here (500 S3 round trips for a list page); they're flagged and
+    // GET /:id hydrates the one that's opened. blobKey is a bucket path and stays server-side.
     const calls = rows.map(({ blobKey, blobArchivedAt, ...call }) => ({
       ...call,
       blobArchived: Boolean(blobKey),
@@ -620,11 +530,7 @@ router.get(
     const where = buildWhere(conversionId, q);
     const db = await callDb(brandOf(req));
 
-    // One grouped aggregate, not the whole call history. This used to pull every
-    // matching row into Node just to count it, so an owner with 50k calls moved
-    // 50k rows across the wire to render four numbers — and the cost grew with
-    // their history, which is exactly backwards for a stat card. Postgres counts
-    // and sums off the (conversionId, createdAt) index instead.
+    // One grouped aggregate off the (conversionId, createdAt) index — this used to pull 50k rows into Node to render four numbers.
     const groups = await db.callLog.groupBy({
       by: ["outcome"],
       where,
@@ -647,12 +553,7 @@ router.get(
   }),
 );
 
-/**
- * Log human-transfer call actions from Vapi webhook events so a live transfer
- * can be traced end-to-end in the server logs: when the AI requests a transfer,
- * whether the human answered, and how it ended (bridged / busy / no-answer →
- * fallback). Best-effort and noise-limited to transfer-relevant events.
- */
+/** Logs human-transfer events so a live transfer can be traced end to end. Best-effort, transfer-relevant events only. */
 function logTransferAction(
   eventType: unknown,
   message: Record<string, any>,
@@ -683,14 +584,7 @@ function logTransferAction(
   }
 }
 
-/**
- * Schedule the pre-cap wrap-up for a call that just went live.
- *
- * The cap is recomputed from the owner's entitlement + the platform ceiling
- * rather than read off the webhook, because Vapi's call payload doesn't carry
- * `maxDurationSeconds` — but it is the same function that stamped the assistant,
- * so the two agree.
- */
+/** Schedules the pre-cap wrap-up. The cap is recomputed (Vapi's payload doesn't carry maxDurationSeconds) with the same function that stamped the assistant, so they agree. */
 async function maybeScheduleWrapUp(call: Record<string, any>, status: string): Promise<void> {
   // Vapi reports several statuses per call; only the transition to a live call
   // starts the clock we're racing.
@@ -714,20 +608,8 @@ async function maybeScheduleWrapUp(call: Record<string, any>, status: string): P
   });
 }
 
-/**
- * Authenticate a Vapi webhook.
- *
- * This endpoint is public (Vapi has no IP allowlist) and, on the final
- * end-of-call report, it records billable usage and can auto-charge — so a
- * forged "call ended" POST could drain a customer's minutes or trigger a
- * charge. Vapi echoes the shared secret from the assistant's `server.secret`
- * (or the Vapi org-level Server URL secret) back in the `x-vapi-secret` header
- * on every message; we require it to match.
- *
- * Skips the check only when no secret is configured (local/dev), mirroring the
- * WhatsApp webhook — so set VAPI_WEBHOOK_SECRET (and the same value in Vapi) in
- * every real environment or this stays open. Constant-time compare.
- */
+/** Vapi webhook auth via the x-vapi-secret header. A forged "call ended" POST could drain minutes or trigger a charge.
+ *  Skipped only when no secret is configured (dev) — set VAPI_WEBHOOK_SECRET in every real environment or this stays open. */
 function vapiWebhookAuthorized(req: express.Request): boolean {
   const secret = getEffective("vapi.webhookSecret").trim();
   if (!secret) return true; // not configured — nothing to verify against
@@ -751,22 +633,13 @@ router.post(
       const message = (body.message ?? {}) as Record<string, any>;
       const call = (message.call ?? {}) as Record<string, any>;
 
-      // Vapi fires several events per call (status-update, transcript,
-      // conversation-update, end-of-call-report, hang…). Only the final report
-      // should produce a call log — otherwise one call becomes dozens of rows
-      // and minutes get counted many times over.
+      // Only the final end-of-call report may create a call log, or one call becomes dozens of rows and minutes get counted repeatedly.
       const eventType = message.type ?? body.type;
 
-      // Trace every human-transfer-related call action so an "it transferred
-      // immediately / didn't ring first" report can be diagnosed against what
-      // Vapi actually did. Logs status changes, the transfer request, and any
-      // transfer/forward outcome — but never the final report path below.
+      // Trace transfer actions so "it didn't ring first" reports can be checked against what Vapi did.
       logTransferAction(eventType, message, call);
 
-      // A call that will be hard-cut at its duration cap gets told to close
-      // itself a few seconds early, so the caller hears a goodbye instead of the
-      // line going dead. Scheduled the moment the call goes live; cancelled below
-      // if it ends on its own first. Never allowed to affect the webhook result.
+      // Tell a capped call to wrap up a few seconds early so the caller hears a goodbye, not a dead line. Never affects the webhook result.
       if (eventType === "status-update") {
         try {
           await maybeScheduleWrapUp(call, String(message.status ?? ""));
@@ -789,17 +662,13 @@ router.post(
         const conversion = (await conversionByAssistant(assistantId))?.conversion ?? null;
 
         if (conversion) {
-          // Owner notification preferences. Toggles gate each channel; the summary*
-          // overrides redirect summaries only (login/OTP always use the default).
-          // Legacy configs (pre-feature) default to on via normalizeAutomations.
+          // Notification prefs. summary* overrides redirect summaries only — login/OTP always use the default. Legacy configs default on.
           const automations = normalizeAutomations(
             (conversion.agentConfig as { automations?: unknown })?.automations,
           );
           const customer = (message.customer ?? body.customer ?? {}) as Record<string, any>;
           const analysis = (message.analysis ?? body.analysis ?? {}) as Record<string, any>;
-          // Vapi extracts the caller's details into structuredData (see the
-          // analysisPlan in services/vapi.ts). Inbound calls carry no
-          // customer.name, so the structured name is the primary source.
+          // Inbound calls carry no customer.name, so Vapi's structuredData is the primary source.
           const structured = (analysis.structuredData ?? {}) as Record<string, any>;
           const structuredName =
             typeof structured.name === "string" ? structured.name.trim() : "";
@@ -816,9 +685,7 @@ router.post(
               ? structured.requestedDepartment.trim()
               : "";
 
-          // A placeholder ("unknown", "n/a", …) is not a name — the extraction
-          // model writes those when the caller never said one, and storing them
-          // would put "Unknown" in front of the owner everywhere downstream.
+          // Placeholders ("unknown", "n/a") aren't names — storing them puts "Unknown" in front of the owner everywhere.
           const callerName =
             realCallerName(structuredName) ??
             realCallerName(typeof customer.name === "string" ? customer.name : "");
@@ -833,10 +700,7 @@ router.post(
             typeof durationRaw === "number" ? Math.round(durationRaw) : undefined;
           const endedReason = message.endedReason ?? call.endedReason ?? body.endedReason;
           const outcome = deriveOutcome(endedReason, durationSec);
-          // Transfer result: Vapi ends a bridged call with an "*-forwarded-*"
-          // reason. If the caller asked for a human (requestedDepartment set) but
-          // the call was NOT forwarded, the transfer didn't connect — flag it so
-          // the owner can call them back.
+          // Bridged calls end with a "*-forwarded-*" reason. Asked for a human but not forwarded = failed transfer, flag for callback.
           const transferForwarded = /forward/i.test(String(endedReason ?? ""));
           const wantedTransfer = requestedDepartment.length > 0 || transferForwarded;
           const transferOutcome = wantedTransfer
@@ -848,9 +712,7 @@ router.post(
             (typeof analysis.summary === "string" && analysis.summary) ||
             (typeof body.summary === "string" && body.summary) ||
             undefined;
-          // The stored summary stays in the call's own language (the source of
-          // truth); the portal translates it on view. For the OWNER's notifications
-          // we translate a copy into their report language (best-effort → English).
+          // Stored summary stays in the call's language (source of truth); the owner's copy is translated best-effort.
           let summaryForOwner = summary;
           if (summary && needsTranslation(automations.reportLanguage)) {
             const localized = await translateText(summary, automations.reportLanguage);
@@ -859,10 +721,7 @@ router.post(
           const analysisJson =
             message.analysis ?? body.analysis ?? undefined;
           const artifact = (message.artifact ?? body.artifact ?? {}) as Record<string, any>;
-          // Prefer Vapi's structured messages — they carry per-turn timing
-          // (secondsFromStart), so the stored transcript gets the same
-          // "Agent · 0:05" timestamps a web call has. Fall back to the plain
-          // string transcript (no timing) when the structured messages aren't sent.
+          // Prefer structured messages (per-turn timing); fall back to the plain string transcript.
           const transcript =
             turnsFromVapiMessages(
               artifact.messages ?? message.messages ?? body.messages,
@@ -874,24 +733,15 @@ router.post(
             (typeof artifact.recordingUrl === "string" && artifact.recordingUrl) ||
             (typeof body.recordingUrl === "string" && body.recordingUrl) ||
             undefined;
-          // The Vapi call id — needed to pull the recording from Vapi's
-          // authenticated download endpoint (storage.vapi.ai URLs are no longer
-          // publicly fetchable). Written to its own column so playback survives
-          // the transcript/analysis blobs being archived off to S3, and mirrored
-          // into `analysis` for anything still reading the old shape.
+          // Vapi call id, needed for the authenticated recording download. Own column so playback survives
+          // the analysis blob being archived to S3; mirrored into `analysis` for old readers.
           const vapiCallId =
             (typeof call.id === "string" && call.id) ||
             (typeof body.callId === "string" && body.callId) ||
             undefined;
 
-          // What the call was about (booking / lead / enquiry / support / spam) —
-          // drives the inbox badge + filter. The assistant already extracted it
-          // into structuredData during the call, so this costs nothing; the
-          // keyword heuristic only kicks in when it didn't. A successful Calendar
-          // booking upgrades this to "booking" further down.
-          // `structured` (not customer.number) is what feeds the lead rule: an
-          // inbound call always has caller ID, so only details the caller
-          // actually spoke count as "we captured them".
+          // Intent from structuredData (free), keyword heuristic as fallback. The lead rule reads `structured`, not
+          // customer.number — inbound calls always have caller ID, so only spoken details count as captured.
           const intent = resolveIntent({
             bookingConfirmed: await bookingConfirmedDuringCall(
               conversion.userId,
@@ -906,18 +756,13 @@ router.post(
             callerText: callerTranscriptText(transcript),
           });
 
-          // Public "More info" conversation page: unguessable slug + optional
-          // expiry (0 validity hours = never expires). Generated for every call so
-          // the link can be reused across channels; the SMS only includes it when
-          // the owner has the toggle on.
+          // Public conversation page: unguessable slug, 0 validity hours = never expires. Generated for every call; SMS includes it only if toggled on.
           const validityHours = automations.conversationLinkValidityHours;
           const publicId = newPublicId();
           const shareExpiresAt =
             validityHours > 0 ? new Date(Date.now() + validityHours * 3_600_000) : null;
 
-          // Resolved before the write: it decides which database this call's
-          // transcript is allowed to be written to, so it cannot be an inline
-          // await inside the payload.
+          // Resolved first: it decides which DB the transcript may be written to.
           const callBrandId = await brandIdForOwner(conversion.userId);
           const callLog = await createCall(callBrandId, {
             conversionId: conversion.id,
@@ -935,13 +780,9 @@ router.post(
             ...(summary !== undefined ? { summary } : {}),
             ...(recordingUrl !== undefined ? { recordingUrl } : {}),
             ...(transcript !== undefined ? { transcript: transcript as TenantPrisma.InputJsonValue } : {}),
-            // The call id goes in its own column: `analysis` is archivable, so
-            // a recording that could only be found through it would stop
-            // playing the day the blob moved to S3.
+            // Own column: `analysis` is archivable, and a recording only reachable through it would stop playing.
             ...(vapiCallId ? { vapiCallId } : {}),
-            // Still folded into the analysis JSON as well — harmless, and it
-            // keeps the stored shape identical for anything reading a call
-            // straight out of the DB.
+            // Also folded into the analysis JSON so the stored shape stays identical for old readers.
             ...(analysisJson !== undefined || vapiCallId
               ? {
                   analysis: {
@@ -952,14 +793,8 @@ router.post(
               : {}),
           });
 
-          // Junk is logged (so it's auditable and the inbox count is honest) but
-          // never pushed as business: no interruption for the owner, and nothing
-          // filed into their CRM. Filtering the noise out of the pipeline is the
-          // point of classifying calls in the first place.
-          // "" here means the caller never spoke — there is no lead to file, so
-          // it gets the same treatment as spam for the CRM. The owner is still
-          // notified: on a real call they have the number and may want to ring
-          // back, which is exactly the opportunity this product exists to catch.
+          // Junk is logged but never pushed as business (no notification, no CRM). "" = caller never spoke: no
+          // CRM lead either, but the owner is still notified — they have the number and may want to ring back.
           const isJunk = intent === "spam";
           const nothingToFile = isJunk || intent === "";
           if (!isJunk) notifyOwnerOfCall(conversion.userId, callLog);
@@ -971,11 +806,7 @@ router.post(
               `[intent] call ${callLog.id} (${intent || "silent"}) — CRM push suppressed`,
             );
           }
-          // Post-call Google Calendar booking: if the AI captured a concrete
-          // appointment (bookingRequested + preferredTimeISO) and the owner has
-          // Calendar connected + booking on, create the event and invite the
-          // caller. Fire-and-forget — never affects the call log or lead. The
-          // transcript is passed as an LLM fallback when structuredData is absent.
+          // Post-call Calendar booking, fire-and-forget. Transcript is the LLM fallback when structuredData is absent.
           void maybeCreateCalendarBooking(conversion.userId, structured as BookingSignals, {
             transcript: Array.isArray(transcript)
               ? (transcript as { role?: unknown; text?: unknown }[])
@@ -992,9 +823,7 @@ router.post(
           // Track trial usage + recompute status, then enforce the Stripe-billed
           // trial (legacy card-on-file path). Both are best-effort.
           if (durationSec !== undefined) {
-            // Record usage, then settle: auto-charge the onboarding plan if the
-            // trial just ended and re-sync the assistant cap. Order matters; all
-            // best-effort.
+            // Record usage, then settle (auto-charge if the trial just ended, re-sync the cap). Order matters; all best-effort.
             void recordUsage(conversion.userId, durationSec).then(() =>
               settleAfterCall(conversion.userId),
             );
@@ -1004,10 +833,7 @@ router.post(
           // Readable transcript text (Vapi sends a string; handle arrays too).
           const transcriptText = transcriptToPlainText(transcript);
 
-          // The owner's EMAIL carries the full transcript. When they read reports
-          // in another language, translate it now (best-effort) and CACHE it so the
-          // portal view reuses it for free. Gated to when an email will actually
-          // send, so we don't pay for a translation nobody sees.
+          // Translate + cache the transcript for the owner's email, only when an email will actually send.
           let ownerTranscriptText = transcriptText;
           if (
             transcriptText &&
@@ -1080,18 +906,11 @@ router.post(
       (agentConfig as { automations?: unknown })?.automations,
     );
 
-    // Classify web/test calls the same way real phone calls are classified, so a
-    // test call produces a real-looking record in the inbox — that's the whole
-    // point of the tester: see exactly what a customer call will look like.
-    // No Vapi structuredData here, so we ask OpenAI (cheap, and only on the
-    // handful of test calls a user makes) and fall back to the keyword heuristic.
+    // Classify test calls like real ones. No Vapi structuredData here, so ask the LLM (cheap, few calls) with the keyword heuristic as fallback.
     const transcriptText = transcriptToPlainText(body.transcript);
     const bodyStructured = ((body.analysis as { structuredData?: unknown } | undefined)
       ?.structuredData ?? {}) as Record<string, unknown>;
-    // Web calls carry NO Vapi structuredData (see the null structuredData on
-    // every Web row), so without this read the lead rule could never fire on a
-    // test call however much the AI collected. One request answers both "what
-    // kind of call?" and "did we get a way to contact them?".
+    // Without this read the lead rule could never fire on a test call. One request answers intent and contact-captured.
     const llmRead = await classifyCallIntent(normalizeTranscript(body.transcript)).catch(() => ({
       category: "",
       contactCaptured: false,
@@ -1112,17 +931,13 @@ router.post(
       callerText: callerTranscriptText(body.transcript),
     });
 
-    // Public "More info" conversation page, same as a phone call gets — without
-    // one the "More info" link in a summary SMS/WhatsApp has nowhere to point.
-    // 0 validity hours = never expires.
+    // Conversation page, same as a phone call — the summary SMS "More info" link needs it. 0 validity hours = never expires.
     const validityHours = automations.conversationLinkValidityHours;
     const publicId = newPublicId();
     const shareExpiresAt =
       validityHours > 0 ? new Date(Date.now() + validityHours * 3_600_000) : null;
 
-    // Pulled out of the posted analysis before the write so it can go in its own
-    // column: `analysis` is archivable, and a recording reachable only through
-    // it would stop playing the day that blob moved to S3.
+    // Own column: `analysis` is archivable, and a recording only reachable through it would stop playing.
     const vapiCallId =
       typeof (body.analysis as { vapiCallId?: unknown } | undefined)?.vapiCallId === "string"
         ? (body.analysis as { vapiCallId: string }).vapiCallId
@@ -1152,13 +967,8 @@ router.post(
         : {}),
     });
 
-    // Web calls now go through the SAME lead pipeline as real calls — inbox
-    // record, intent badge, notification and CRM push — so the tester is an
-    // honest end-to-end rehearsal instead of a half-wired preview. The only
-    // difference is labelling: the notification says "Test call", and the CRM
-    // lead is prefixed "[TEST]" (see deliverCallToCrm) so it's obvious in the
-    // owner's real pipeline and trivial to delete.
-    // Junk is the one thing that never propagates, test or not.
+    // Web calls run the SAME lead pipeline as real calls, only labelled ("Test call", "[TEST]" CRM prefix).
+    // Junk never propagates, test or not.
     const isTestCall = call.type === CallType.Web;
     if (intent !== "spam") notifyOwnerOfCall(req.user!.sub, call, { test: isTestCall });
     if (intent !== "spam" && intent !== "") {
@@ -1167,21 +977,14 @@ router.post(
       console.log(`[intent] call ${call.id} (${intent || "silent"}) — CRM push suppressed`);
     }
 
-    // ...and the post-call summary on every channel the owner has enabled. This
-    // is the other half of that rehearsal: a browser call runs on an INLINE
-    // assistant (no assistantId), so Vapi never fires an end-of-call report for
-    // it and the webhook path above never runs — the summary has to be sent from
-    // here or it is never sent at all.
-    // The stored summary stays in the call's own language (the source of truth);
-    // the owner's copy is translated into their report language, best-effort.
+    // Summary must be sent from HERE: a browser call uses an inline assistant, so Vapi never fires a report.
+    // Stored summary stays in the call's language; the owner's copy is translated best-effort.
     let summaryForOwner = body.summary;
     if (body.summary && needsTranslation(automations.reportLanguage)) {
       const localized = await translateText(body.summary, automations.reportLanguage);
       if (localized) summaryForOwner = localized;
     }
-    // The email carries the full transcript, so translate + cache it too — but
-    // only when an email will actually send, so we don't pay for a translation
-    // nobody sees.
+    // Translate + cache the transcript too, only when an email will actually send.
     let ownerTranscriptText = transcriptText;
     if (
       transcriptText &&
@@ -1216,10 +1019,7 @@ router.post(
       automations,
     );
 
-    // Booking works on test calls too (the owner explicitly wants to verify it end
-    // to end on their calendar). Web calls carry no Vapi structuredData, so pass the
-    // transcript as a fallback — the booking service extracts the appointment from
-    // it with the LLM when structured data is absent.
+    // Booking works on test calls too. No structuredData on web calls, so the transcript is the LLM fallback.
     const structured = ((body.analysis as { structuredData?: unknown } | undefined)
       ?.structuredData ?? {}) as BookingSignals;
     const transcriptTurns: Turn[] = Array.isArray(body.transcript)
@@ -1234,12 +1034,8 @@ router.post(
       },
     );
 
-    // Track trial usage (atomic) + recompute status for every call, including
-    // web calls — those minutes count against the trial/plan just like a real
-    // call. If the trial just ran out this also auto-charges the onboarding plan
-    // (via settleAfterCall → reconcileSubscription) and re-syncs the assistant's
-    // per-call cap. The legacy Stripe enforcement stays as a fallback (no-op once
-    // converted).
+    // Web-call minutes count against the trial/plan like real ones. settleAfterCall may auto-charge and re-sync the cap;
+    // legacy Stripe enforcement stays as a fallback (no-op once converted).
     if (body.durationSec !== undefined) {
       await recordUsage(req.user!.sub, body.durationSec);
       await settleAfterCall(req.user!.sub);
@@ -1267,10 +1063,7 @@ router.post(
   }),
 );
 
-/** Translate a call's transcript into the owner's report language, lazily and
- *  cached: the first request translates + stores it, later ones return the cache.
- *  Falls back to the original transcript when no report language is set (or the
- *  translation fails). Returns `{ lang, transcript }`. */
+/** Lazily translates a transcript into the owner's report language and caches it. Falls back to the original. Returns `{ lang, transcript }`. */
 router.post(
   "/:id/translate",
   requireAuth,
@@ -1303,9 +1096,7 @@ router.post(
       },
     });
     if (!found) throw notFound("Call not found");
-    // Both the cache check and the translation itself read the transcript, so
-    // it is pulled back from cold storage first if archived. Otherwise this
-    // would translate an empty transcript and cache the result.
+    // Hydrate first, or an archived call would translate an empty transcript and cache it.
     const call = await hydrateCall(found);
 
     // No report language → nothing to translate; return the originals as-is.
@@ -1343,17 +1134,11 @@ router.post(
     // Only persist the cache when the transcript actually translated (so a transient
     // failure doesn't lock in a bad marker); the summary rides along with it.
     if (translated) {
-      // For an archived call the S3 object is the source of truth for the JSON
-      // fields, so the cache goes there — written to the column it would just be
-      // masked by the next hydrate, and every view would re-translate (and
-      // re-bill) the same call. The two small scalar markers stay on the row
-      // either way: they are never archived, and the cache check reads them
-      // before anything touches storage.
+      // Archived: the S3 object is the source of truth, so cache there — on the column it'd be masked by the next
+      // hydrate and every view would re-bill the translation. The scalar markers stay on the row either way.
       if (call.blobKey) await cacheArchivedTranslation(call.blobKey, transcriptOut);
       const key = { id: call.id, createdAt: call.createdAt };
-      // The translated transcript and summary are personal data, so they follow
-      // the same rule as the originals — a blob that has been archived is the
-      // source of truth, otherwise the brand's own database, otherwise here.
+      // Translations are personal data and follow the originals: archived blob, else the brand DB, else here.
       await db.callLog.update({
         where: { id_createdAt: key },
         data: {
@@ -1391,9 +1176,7 @@ router.patch(
     const conversionId = await getConversionId(req.user!.sub);
     const brandId = brandOf(req);
     const db = await callDb(brandId);
-    // The ownership check already reads the row, so it also carries back the
-    // second half of the partitioned primary key — the update below then hits
-    // one partition rather than probing all of them.
+    // The ownership read also returns createdAt (other half of the partitioned key) so the update hits one partition.
     const existing = await db.callLog.findFirst({
       where: { id: req.params.id, conversionId },
       select: { id: true, createdAt: true },
@@ -1409,9 +1192,7 @@ router.patch(
   }),
 );
 
-/** Owner correction of a call's category. Stamps intentSource="user" so no later
- *  AI pass can undo it — a badge the owner can't fix is a badge they stop
- *  trusting, and every correction is a labelled example for tuning the prompt. */
+/** Owner correction of a call's category. Stamps intentSource="user" so no later AI pass can undo it. */
 const intentSchema = z.object({ intent: z.enum(CALL_INTENTS) });
 
 router.patch(
@@ -1450,14 +1231,7 @@ router.get(
   }),
 );
 
-/**
- * Owner playback URL for a call recording. The dashboard's <audio> element can't
- * send a bearer token, so it can't hit the proxy directly with the raw id
- * anymore — it asks here (authenticated + scoped to the caller's own calls) for
- * a freshly-signed proxy URL. A short TTL is fine because a new one is minted
- * every time the owner opens the call, so their access never actually lapses.
- * Returns { url: null } when there's nothing to stream.
- */
+/** Owner playback URL. <audio> can't send a bearer token, so this authed, own-calls-only route mints a freshly signed proxy URL. { url: null } when nothing to stream. */
 router.get(
   "/:id/recording-url",
   requireAuth,
@@ -1473,9 +1247,7 @@ router.get(
     if (!call) throw notFound("Call not found");
     const vapiCallId = vapiCallIdOf(call);
     const canServe = Boolean(call.recordingUrl) || Boolean(vapiCallId);
-    // `?share=1` is the owner copying a link to send to someone else, so it gets
-    // a longer life than the dashboard's own player token — which is re-minted
-    // every time they open a call and therefore never needs to outlive a session.
+    // `?share=1` is a link the owner is sending to someone, so it outlives the re-minted player token.
     const share = req.query.share === "1";
     res.json({
       url: canServe
@@ -1491,44 +1263,21 @@ router.get(
   }),
 );
 
-/**
- * Public recording proxy — streams a call's audio through our own domain so
- * links don't expose storage.vapi.ai. Reached without a login (a plain <audio>
- * element and email/CRM links can't send a bearer token), so access is gated by
- * a SIGNED, expiring token in the path — NOT the raw call-log id. The id is a
- * database key that appears in API responses, logs and browser history, so it
- * was never a secret; anyone who saw it could stream the audio forever. The
- * token carries the id, is signed with our key, and expires, so a leaked link
- * dies and the id alone is useless.
- *
- * As of Vapi's 2026 recording-auth change, the stored storage.vapi.ai URL is no
- * longer publicly fetchable — the audio must be pulled from Vapi's authenticated
- * endpoint using the call id we stash on the call's analysis. We try that first,
- * then fall back to the legacy stored URL (with our API key attached) for any old
- * call logged before we captured the call id.
- *
- * Byte ranges are honoured (`Accept-Ranges: bytes`): a player seeking mid-file
- * asks for a range, and answering 200-from-byte-0 makes the browser treat the
- * source as unseekable and restart playback at 0:00. We forward the client's
- * Range upstream and pass a 206 straight through; when the upstream ignores it
- * we slice the body ourselves, so seeking works either way.
- */
+/** Public recording proxy, no login (<audio> and email links can't send a bearer). Gated by a SIGNED expiring token in the
+ *  path — the call-log id was never a secret. Pulls from Vapi's authenticated endpoint (storage URLs stopped being public in
+ *  2026), legacy stored URL as fallback. Byte ranges honoured, else the browser treats the source as unseekable. */
 router.get(
   "/recording-file/:token",
   asyncHandler(async (req, res) => {
-    // The path segment is a signed recording token, not the id. A bad/expired
-    // token is a 404 (same as an unknown recording) — we don't distinguish, so
-    // a probe learns nothing about which recordings exist.
+    // Bad/expired token is a 404, same as unknown — a probe learns nothing about which recordings exist.
     let claim: { callLogId: string; brandId: string };
     try {
       claim = verifyRecording(req.params.token);
     } catch {
       throw notFound("Recording not found");
     }
-    // The token also names the brand: this route is served from the platform's
-    // host for every brand, and the call is in that brand's own database.
-    // `findFirst`, not `findUnique`: the id is half a primary key on a
-    // partitioned table. Still at most one row — the id is a cuid.
+    // The token names the brand (this route serves every brand from the platform host). findFirst because the
+    // id is half a partitioned primary key; still at most one row.
     const db = await callDb(claim.brandId).catch(() => null);
     const call = db
       ? await db.callLog.findFirst({
@@ -1548,9 +1297,7 @@ router.get(
     const vapiCallId = vapiCallIdOf(call);
     const rangeHeader = typeof req.headers.range === "string" ? req.headers.range : undefined;
 
-    /** Preferred source is Vapi's authenticated download endpoint; older rows
-     *  without a stored call id fall back to the saved URL, with our API key
-     *  attached in case it points at Vapi storage. */
+    /** Vapi's authenticated download first; rows without a call id fall back to the saved URL with our API key attached. */
     const fetchUpstream = async (withRange: boolean): Promise<Response | null> => {
       const extra = withRange && rangeHeader ? { Range: rangeHeader } : undefined;
       let res: Response | null =
@@ -1567,18 +1314,14 @@ router.get(
 
     let upstream = await fetchUpstream(true);
 
-    // Some sources reject a ranged request outright (400/416) instead of just
-    // ignoring the header. Retry plain so playback never breaks — the range is
-    // then satisfied below by slicing the full body ourselves.
+    // Some sources 400/416 a ranged request. Retry plain; the range is then satisfied by slicing the body ourselves.
     if (rangeHeader && (!upstream || !upstream.ok)) upstream = await fetchUpstream(false);
 
     if (!upstream || !upstream.ok || !upstream.body) throw notFound("Recording not available");
 
     const contentType = upstream.headers.get("content-type") || "audio/wav";
     res.setHeader("Content-Type", contentType);
-    // `?download=1` is the download button; everything else is the in-page player.
-    // The player MUST stay `inline` — `attachment` makes the browser download
-    // instead of streaming, which breaks the waveform and seeking.
+    // The player MUST stay `inline` — `attachment` makes the browser download instead of stream, breaking seeking.
     res.setHeader(
       "Content-Disposition",
       req.query.download === "1"
@@ -1640,10 +1383,7 @@ router.get(
       where: { id: req.params.id, conversionId },
     });
     if (!call) throw notFound("Call not found");
-    // Single-call reads are the one path that must always carry the full
-    // transcript — it's what the detail panel opens on — so an archived call
-    // costs one S3 GET here rather than showing an empty conversation. The
-    // bucket key itself stays server-side, same as in the list.
+    // The one path that must carry the full transcript, so an archived call costs one S3 GET here. Bucket key stays server-side.
     const { blobKey, blobArchivedAt, ...hydrated } = await hydrateCall(call);
     res.json({ ...hydrated, blobArchived: false });
   }),

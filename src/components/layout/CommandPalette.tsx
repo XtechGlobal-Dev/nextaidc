@@ -63,24 +63,14 @@ interface Destination {
   customer?: boolean;
   /** Hidden from ADMINs (they don't own a subscription of their own). */
   hideForAdmin?: boolean;
-  /** Show a Crown when the plan doesn't include this module — the row stays
-   *  listed on purpose, exactly like the sidebar item, so an upgrade stays
-   *  discoverable rather than invisible. */
+  /** Crown when the plan lacks this module; the row stays listed (like the sidebar) so the upgrade is discoverable. */
   premiumWhenLocked?: boolean;
   /** The brand module this page belongs to — hidden when the brand switched it off. */
   module?: BrandModuleId;
 }
 
-// Mirrors the sidebar routes so the palette jumps to the same real pages — every
-// item the sidebar can show is listed here, gated by the SAME role/permission
-// rules (see the filter in `results`), so search can never offer a page the
-// person can't open. The `keywords` make in-page content discoverable — e.g.
-// "whatsapp" or "smtp" resolves to Platform Settings even though that word isn't
-// in the title.
-//
-// Deliberately absent: the sidebar's `hidden` admin entries (System Health,
-// Webhook Logs, Reports) — they stay routable but out of the UI, so surfacing
-// them in search would undo that.
+// Mirrors the sidebar routes under the same role/permission gates (see `results`), so search never offers
+// a page the person can't open. The sidebar's `hidden` admin entries are deliberately left out.
 const DESTINATIONS: Destination[] = [
   { to: "/dashboard", label: "Dashboard", group: "Workspace", icon: LayoutDashboard, customer: true, keywords: ["home", "analytics", "overview", "calls", "leads", "stats", "metrics"] },
   { to: "/dashboard/calls", label: "Call Inbox", group: "Workspace", icon: Inbox, customer: true, keywords: ["calls", "recordings", "transcripts", "voicemail", "missed", "history", "messages"] },
@@ -119,9 +109,7 @@ const DESTINATIONS: Destination[] = [
     label: "Platform Settings",
     group: "Admin",
     icon: Settings,
-    // Admins reach this page, but not its Integrations tab — that one holds the
-    // platform's provider credentials and stays super-admin-only, on the page
-    // and on the API. Not staff-assignable either, hence adminOnly.
+    // Admins reach the page but not its Integrations tab (super-admin-only, on the page and the API).
     adminOnly: true,
     keywords: [
       "integrations", "api keys", "api key", "secrets", "keys",
@@ -170,9 +158,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const brandModules = useBrandingStore((s) => s.brand?.modules ?? null);
 
   const email = user?.email?.toLowerCase();
-  // Read-only, same as the sidebar badge: whichever screen last fetched
-  // entitlements cached them. A stale read only affects the Crown decoration —
-  // the module's own page re-checks before unlocking anything.
+  // Cached entitlement read; a stale value only affects the Crown, the module's page re-checks before unlocking.
   const smsToCallerIncluded = cachedSmsToCallerEntitlement();
 
   const results = useMemo(() => {
@@ -183,9 +169,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       // Brand-scoped sections (Overview, Customers, Subscriptions, Voice
       // Library) are refused to the super admin — don't offer a dead end.
       if (!canUseSection(role, d.permission, user?.brandId)) return false;
-      // hasPermission is true for every key when the user is an ADMIN and false
-      // for USER/RESELLER — so this one line gates staff by their role's grants
-      // *and* keeps the whole admin section out of a customer's results.
+      // hasPermission is true for all keys as ADMIN and false for USER/RESELLER, so this gates staff and customers at once.
       if (d.permission && !hasPermission(d.permission)) return false;
       // RequireCustomer bounces STAFF and the SUPER_ADMIN off these routes, so
       // offering them here would only ever produce a redirect.

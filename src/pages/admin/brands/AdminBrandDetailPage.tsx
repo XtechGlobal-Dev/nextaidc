@@ -85,13 +85,7 @@ function draftFrom(b: Brand): Draft {
 
 type SlugState = { checking: boolean; available: boolean | null; reason: string; url: string };
 
-/**
- * Edit one white-label brand.
- *
- * Tabs, because by the time a brand exists its pieces — domain, theme, plans,
- * team — move independently. Creating one is a single scrolling form instead,
- * and lives in AdminBrandCreatePage.
- */
+/** Edit one white-label brand. Tabbed because the pieces move independently once it exists; creation is AdminBrandCreatePage. */
 export default function AdminBrandDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();

@@ -28,21 +28,11 @@ import {
   type TicketRatingsPage,
 } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Ratings — what requesters thought of the help they got.
- *
- *  Scoped by the API exactly like the inbox: a staff member sees the
- *  scores for the queues they work, a brand admin their whole tenant's,
- *  the platform owner the brands'. Which lane that is never appears
- *  here — it is already decided by who is asking.
- * ------------------------------------------------------------------ */
+// Ticket ratings. Scoped by the API like the inbox (staff: their queues, brand admin: tenant, platform: brands) — the lane never appears here.
 
 const ANY_DEPARTMENT = "__any__";
 
-/**
- * One colour per score so the breakdown reads at a glance: greens are good,
- * amber is "fine", and the two that trigger a follow-up email are warm-to-red.
- */
+// One colour per score; the two that trigger a follow-up email are warm-to-red.
 const SCORE_TONE: Record<number, { star: string; fill: string; track: string }> = {
   5: { star: "fill-success text-success", fill: "bg-success", track: "bg-success/12" },
   4: { star: "fill-success/80 text-success/80", fill: "bg-success/80", track: "bg-success/10" },
@@ -275,9 +265,7 @@ export default function AdminTicketRatingsPage() {
             </SelectContent>
           </Select>
 
-          {/* Only worth showing once someone has actually left a poor score — a
-              zero-count filter on a fresh account is just noise. Stays while
-              it's switched on so it can always be switched off again. */}
+          {/* Only shown once a poor score exists, but stays while on so it can be switched off. */}
           {((summary?.poor ?? 0) > 0 || poorOnly) && (
             <button
               type="button"

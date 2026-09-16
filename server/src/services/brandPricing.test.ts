@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Brand pricing: which Stripe Price a customer lands on, how an addon
- *  change keeps Stripe in step without touching anyone already
- *  subscribed, and how price changes are lived with afterwards — the
- *  base moving, existing subscribers being migrated, and the customer's
- *  own dashboard telling the truth about what they pay.
- * ------------------------------------------------------------------ */
+// Brand pricing: which Stripe Price a customer lands on, addon changes that leave existing
+// subscribers alone, base-price moves, migration, and the customer dashboard telling the truth.
 
 const h = vi.hoisted(() => ({
   brandFindUnique: vi.fn(),

@@ -7,13 +7,7 @@ const BAR_COUNT = 44;
 const TICK_MS = 100;
 const SPEEDS = [0.5, 1, 2, 3] as const;
 
-/**
- * Audio player with a CSS-bar "waveform".
- *  - When `recordingUrl` is present, it plays the real recording via a hidden
- *    <audio> element (real play/pause/seek/elapsed).
- *  - Otherwise there is no audio file, so playback is *simulated* with a timer
- *    that advances an elapsed position across `durationSec`.
- */
+/** Audio player with a CSS-bar "waveform". Plays a hidden <audio> when `recordingUrl` is set; otherwise playback is simulated with a timer across `durationSec`. */
 export function Waveform({
   durationSec,
   seed,
@@ -31,10 +25,7 @@ export function Waveform({
   onShare?: () => void;
   /** A share link is being minted — the button waits rather than firing twice. */
   sharing?: boolean;
-  /**
-   * When this value changes, playback (re)starts from the beginning. Lets a
-   * caller (e.g. the row "Play Recording" action) trigger playback externally.
-   */
+  /** Changing this value (re)starts playback from the beginning — lets a row action trigger play externally. */
   autoPlayKey?: number;
   /** Real recording URL — when set, actual audio plays instead of a simulation. */
   recordingUrl?: string;
@@ -103,10 +94,7 @@ export function Waveform({
     }
   }, [seed]);
 
-  // Stop playback when the player unmounts (e.g. the call panel closes). A
-  // <audio> element that's still playing keeps decoding in the background after
-  // React detaches it from the DOM — the audio was heard until a full page
-  // reload. Pausing and releasing the source on cleanup stops it immediately.
+  // Pause + release the source on unmount — a detached <audio> keeps playing in the background until a full reload.
   useEffect(() => {
     return () => {
       const a = audioRef.current;
@@ -293,11 +281,7 @@ export function Waveform({
             {speed}x
           </Button>
 
-          {/* Labelled, not an icon on its own: a bare chain-link beside a
-              download arrow reads as "open the file somewhere", and nobody
-              guessed it copied a shareable link. The label drops on very narrow
-              screens, where the share arrow at least isn't competing with a
-              second link-shaped glyph. */}
+          {/* Labelled on purpose — a bare link icon beside the download arrow read as "open the file" and nobody guessed it copied a share link. */}
           {onShare && hasAudio && (
             <Button
               type="button"
@@ -325,11 +309,8 @@ export function Waveform({
                 onDownload();
                 return;
               }
-              // `?download=1` makes the server send Content-Disposition:
-              // attachment with a readable filename. Driving a hidden <a>
-              // instead of window.open keeps it a download — opening a tab left
-              // the user staring at a bare audio player on a black page, and
-              // saving from there named the file after the signed token.
+              // `?download=1` → Content-Disposition: attachment with a readable filename. A hidden <a> instead of
+              // window.open keeps it a download — a new tab showed a bare player and saved the file as the token.
               const a = document.createElement("a");
               a.href = recordingUrl + (recordingUrl.includes("?") ? "&" : "?") + "download=1";
               a.rel = "noopener";

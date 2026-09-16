@@ -8,39 +8,13 @@ import {
 } from "./storage.js";
 import type { TenantClient } from "./tenantDb.js";
 
-/* ------------------------------------------------------------------ *
- *  Call log tiering — hot in Postgres, cold in S3, then gone.
- *
- *  `call_logs` is the largest table in the schema and three JSON columns are
- *  nearly all of its weight: `transcript`, `analysis` and the cached
- *  `transcriptTranslated`. A ten-minute call's transcript dwarfs every scalar
- *  on the row put together, and none of it is ever aggregated, filtered or
- *  sorted on — it is read only when a human opens that one call.
- *
- *  So the blobs age out. Past CALL_ARCHIVE_AFTER_DAYS they move to a single S3
- *  object per call and the columns are emptied; `blobKey` records where they
- *  went. THE ROW STAYS. Every field reports and billing touch — durationSec,
- *  outcome, intent, summary, createdAt — lives in Postgres forever, so
- *  archiving can never change a number the owner sees. Reads rehydrate through
- *  `hydrateCall`, so an archived call still opens exactly as it did before,
- *  one S3 GET slower.
- *
- *  Deliberately NOT done on write. The Vapi webhook is latency-critical and
- *  currently has no storage dependency at all; putting a synchronous S3 PUT in
- *  that path would mean an S3 outage loses call data. Archiving is a nightly
- *  sweep over calls nobody is looking at.
- *
- *  Calls live in each brand's own database, so every sweep here takes the
- *  brand's client and the scheduler runs it once per tenant. A sweep with a
- *  default client would quietly maintain one database and forget the rest.
- * ------------------------------------------------------------------ */
+// Call log tiering: past CALL_ARCHIVE_AFTER_DAYS the three JSON blobs move to one S3 object per call and the columns
+// empty; THE ROW STAYS so billing numbers never change. Nightly sweep per tenant, never on the latency-critical Vapi webhook path.
 
 /** Bucket prefix for archived blobs. One object per call, stable key. */
 const PREFIX = "call-blobs";
 
-/** Rows per batch. Small on purpose: each row carries a full transcript, so a
- *  large batch is a large heap spike for no throughput gain — the S3 PUTs, not
- *  the query, are the slow part. */
+// Small on purpose: each row carries a full transcript, and the S3 PUTs, not the query, are the slow part.
 const BATCH = 100;
 
 /** Batches per sweep, i.e. at most 5,000 calls a night. A backlog drains over
@@ -76,18 +50,7 @@ export interface ArchivableCall {
   transcriptTranslated?: unknown;
 }
 
-/**
- * A call's Vapi id.
- *
- * Reads the promoted column first and falls back to `analysis.vapiCallId` for
- * rows logged before that column existed and not yet backfilled. The fallback
- * is what makes the column safe to introduce: no row loses playback while the
- * backfill is pending. Once `npm run backfill-call-ids` has run everywhere, the
- * fallback simply stops being reached.
- *
- * Every recording path must go through this rather than reading `analysis`
- * directly — `analysis` is archivable, the column is not.
- */
+/** A call's Vapi id: the column first, then analysis.vapiCallId for un-backfilled rows. Every recording path must use this — `analysis` is archivable, the column is not. */
 export function vapiCallIdOf(
   call: { vapiCallId?: string | null; analysis?: unknown } | null | undefined,
 ): string | null {
@@ -99,14 +62,7 @@ export function vapiCallIdOf(
 
 /* ---------------------------- Rehydration -------------------------- */
 
-/**
- * Fill an archived call's JSON columns back in from S3.
- *
- * A no-op for a call that was never archived, which is the overwhelming
- * majority — so this is safe to drop in front of any read path. When the blob
- * can't be fetched the call is returned as-is (empty transcript) rather than
- * throwing: a missing object should degrade one panel, not fail the request.
- */
+/** Refills an archived call's JSON columns from S3. No-op when never archived; a missing blob returns the call as-is rather than failing the request. */
 export async function hydrateCall<T extends ArchivableCall>(call: T): Promise<T> {
   if (!call.blobKey) return call;
   const blobs = await getJsonObject<CallBlobs>(call.blobKey);
@@ -121,23 +77,10 @@ export async function hydrateCall<T extends ArchivableCall>(call: T): Promise<T>
   };
 }
 
-/* There is deliberately no batch `hydrateCalls`. The only place tempted to use
- * one is the inbox list, where a page can be 500 rows — and paying 500 cold
- * reads to fill fields the table never renders would trade one slow query for
- * something far worse. The list flags archived rows instead and the client
- * fetches the single call it opens. */
+// Deliberately no batch hydrateCalls: a 500-row inbox page would pay 500 cold reads for fields
+// it never renders. The list flags archived rows and the client fetches the one it opens.
 
-/**
- * Persist a lazily-translated transcript for a call that has already been
- * archived.
- *
- * For an archived call the S3 object — not the column — is the source of truth
- * for the three JSON fields, because `hydrateCall` overwrites the columns from
- * it on every read. So a translation written to `transcriptTranslated` would be
- * silently masked the next time anyone opened the call, and re-translated (and
- * re-billed) forever. Rewriting the object keeps one source of truth; the
- * transcript and analysis inside it are carried over untouched.
- */
+/** Saves a translation into an archived call's S3 object. hydrateCall overwrites the columns from it on every read, so writing the column instead would be masked and re-billed forever. */
 export async function cacheArchivedTranslation(
   blobKey: string,
   transcriptTranslated: unknown,
@@ -156,16 +99,7 @@ export interface SweepResult {
   more: boolean;
 }
 
-/**
- * Move aged-out call blobs to S3.
- *
- * Idempotent and safe to run on several instances at once: the candidate filter
- * excludes anything already carrying a `blobKey`, and because the key is derived
- * from the call id, the worst a race can do is write identical bytes twice.
- *
- * The order matters — PUT first, and only null the columns once it resolved.
- * Nulling first would mean an S3 failure destroys the transcript.
- */
+/** Moves aged-out blobs to S3. Idempotent across instances (derived key, blobKey filter). PUT first, null the columns only after — the other order destroys transcripts on S3 failure. */
 export async function archiveCallBlobs(
   db: TenantClient,
   days = env.CALL_ARCHIVE_AFTER_DAYS,
@@ -180,9 +114,7 @@ export async function archiveCallBlobs(
       where: {
         createdAt: { lt: cutoff },
         blobKey: null,
-        // Rows whose blobs are already empty gain nothing from an S3 object and
-        // a wasted PUT — skip them, or every sweep would re-scan the same
-        // never-archivable rows forever.
+        // Skip rows with already-empty blobs, or every sweep re-scans the same never-archivable rows forever.
         OR: [
           { NOT: { transcript: { equals: [] } } },
           { NOT: { analysis: { equals: {} } } },
@@ -245,17 +177,7 @@ export async function archiveCallBlobs(
 
 /* ----------------------------- Retention --------------------------- */
 
-/**
- * Delete call logs past the retention window, blob and all.
- *
- * Off by default (CALL_RETENTION_DAYS = 0) and it should stay off unless an
- * operator has decided otherwise: these rows carry billed minutes and feed
- * reports, so deleting them silently would quietly rewrite history.
- *
- * The bucket object goes first. Deleting the row first would strand the blob
- * with nothing left pointing at it — a leak that only ever grows, and the exact
- * thing this whole file exists to avoid.
- */
+/** Deletes call logs past retention, blob and all. Off by default — these rows carry billed minutes. Blob goes first; deleting the row first strands the object forever. */
 export async function pruneCallLogs(db: TenantClient, days = env.CALL_RETENTION_DAYS): Promise<number> {
   if (days <= 0) return 0;
   const cutoff = new Date(Date.now() - days * DAY_MS);

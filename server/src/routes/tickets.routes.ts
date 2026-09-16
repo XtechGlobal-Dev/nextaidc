@@ -51,27 +51,9 @@ import {
 } from "../services/tickets.js";
 import { cachedBrand } from "../services/brands.js";
 
-/* ------------------------------------------------------------------ *
- *  The requester's own page — "my requests".
- *
- *  ONE router for both lanes, because which lane you are on is not a
- *  choice you make: it is who you are.
- *
- *    a customer (USER / RESELLER) asks their brand's team    → support
- *    a brand ADMIN asks the platform                          → brand
- *
- *  Nobody else has a tier above them to ask — STAFF take it up with
- *  their own admin, and the platform owner is the top of the ladder —
- *  so for them this whole surface 403s rather than showing an empty
- *  list. See lib/ticketLanes.ts.
- *
- *  Where the thread lives follows the lane (phase 4): a customer's in
- *  their brand's own database, a brand admin's platform request in the
- *  control plane. `laneDb` picks, once per request, and every read below
- *  is scoped to `requesterId = the caller`, so a requester can only ever
- *  reach their own threads; internal handler notes are filtered out of
- *  every one of them.
- * ------------------------------------------------------------------ */
+// "My requests" for both lanes — lane is decided by role (customer → brand's team,
+// brand admin → platform; everyone else 403s). `laneDb` picks the DB (tenant vs Main);
+// every read is scoped to requesterId = caller and internal notes are filtered out.
 
 const router = express.Router();
 
@@ -97,14 +79,8 @@ declare global {
   }
 }
 
-/**
- * Resolve the caller's lane, or refuse the surface outright.
- *
- * Deliberately a 403 rather than an empty list: a staff member or the platform
- * owner asking for "my requests" has not hit an empty state, they have hit
- * something that does not apply to them, and saying so is how the UI knows to
- * hide the nav item rather than render a page that can never fill.
- */
+// Resolve the lane or 403. Deliberately not an empty list — the 403 is how the UI
+// knows to hide the nav item for staff / the platform owner.
 async function requireRequesterLane(req: Request, _res: Response, next: NextFunction) {
   const lane = requesterLane(req.user!.role);
   if (!lane) {
@@ -134,13 +110,7 @@ const attachmentSchema = z.object({
   sig: z.string().min(1),
 });
 
-/**
- * Who the caller is asking, in the words their own screen should use.
- *
- * The client needs this before it renders a heading: the same page is a
- * customer's "Support" and a brand admin's "Platform Support", and guessing
- * from the role in two places is how the two drift apart.
- */
+// Lane + heading copy for the client, so it doesn't guess from the role and drift.
 router.get("/lane", (req, res) => {
   const lane = req.ticketLane!;
   res.json({ lane, copy: laneCopy(lane) });
@@ -154,9 +124,7 @@ router.get(
     const departments = await req.ticketDb!.ticketDepartment.findMany({
       where: {
         lane: req.ticketLane!,
-        // Whose queues these are depends on the lane, not just on the caller:
-        // a customer picks from their own brand's, a brand admin from the
-        // platform's. See departmentTenant.
+        // Queues belong to whoever answers: the brand on support, the platform on brand.
         brandId: departmentTenant(req.ticketLane!, req.user!.brandId),
         enabled: true,
         requesterVisible: true,
@@ -206,9 +174,7 @@ router.get(
             attachments: { select: { mime: true }, take: 1 },
           },
         },
-        // Internal notes are invisible here, so they must not be counted either
-        // — a thread showing "6 messages" of which the requester can see three
-        // is worse than no count at all.
+        // Internal notes are hidden here, so don't count them either.
         _count: { select: { messages: { where: { internal: false } } } },
       },
     });
@@ -377,9 +343,8 @@ router.post(
     void notifyTicketStaff(db, ticket, {
       title: `Reply on ${ticket.reference}`,
       message: `${myName}: ${preview(data.body, attachments.length > 0, 120)}`,
-      // `ticket` was read BEFORE appendMessage moved lastMessageAt, so it says
-      // when the thread last spoke. Mail only once it has been quiet for an
-      // hour — a live conversation is read on screen, and the bell rings anyway.
+      // `ticket` predates appendMessage, so lastMessageAt is the previous activity.
+      // Only mail after an hour of quiet; a live conversation is read on screen.
       ...(shouldEmailForMessage(ticket)
         ? {
             templateKey: "ticket_staff_reply",
@@ -431,11 +396,8 @@ router.post(
   }),
 );
 
-/* --------------------------- Acting on a message -------------------------- *
- *  Replying lives on POST /:id/messages above; these are the things a chat
- *  does to a message that has already been sent. All of them are scoped to my
- *  own ticket, and the service decides whether I may touch that message.
- * ------------------------------------------------------------------------- */
+// Acting on an already-sent message. Scoped to my own ticket; the service decides
+// whether I may touch that message.
 
 function requesterActor(ticket: { requester: { fullName: string; email: string } }, id: string): MessageActor {
   return {
@@ -520,11 +482,7 @@ router.post(
   }),
 );
 
-/**
- * "…is typing". Deliberately a no-content ping: it writes nothing, publishes a
- * tag to the handler's tabs and expires on its own in the client, so a chatty
- * keyboard can't cost anything but a socket write.
- */
+/** "…is typing" ping. Writes nothing and expires client-side, so a chatty keyboard costs only a socket write. */
 router.post(
   "/:id/typing",
   asyncHandler(async (req, res) => {

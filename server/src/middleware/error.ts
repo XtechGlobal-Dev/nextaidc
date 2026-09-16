@@ -21,10 +21,8 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
   }
   if (err instanceof ZodError) {
     const flat = err.flatten();
-    // An object-level `.refine()` carries no path, so its message lands in
-    // `formErrors` — which the old code dropped, leaving the client with a bare
-    // "Validation failed" and an empty details object. Surface the first real
-    // message instead: a refine exists precisely to explain what's wrong.
+    // An object-level `.refine()` has no path, so its message lands in `formErrors` — dropping it left
+    // the client with a bare "Validation failed".
     const firstMessage =
       flat.formErrors[0] ?? Object.values(flat.fieldErrors).flat().find((m): m is string => !!m);
     return res.status(400).json({

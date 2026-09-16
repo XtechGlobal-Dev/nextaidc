@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// reconcileSubscription's active-plan renewal path is where a "cancelled but
-// still auto-recharged" bug lived: the early minutes-exhausted renewal must NOT
-// fire once the user has cancelled — whether the local autoRenew flag caught up
-// (via the webhook) or is stale (webhook not yet landed → live Stripe says so).
+// Past bug: "cancelled but still auto-recharged". The early renewal must NOT fire
+// once cancelled, whether the local autoRenew flag caught up or is stale (live Stripe says so).
 
 vi.mock("../prisma.js", () => ({
   prisma: { profile: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() } },

@@ -5,15 +5,8 @@ import {
   type AppNotification,
 } from "@/stores/useNotificationStore";
 
-/* ------------------------------------------------------------------ *
- *  Where a ticket notification rings.
- *
- *  Three ticket surfaces, and one account can hold two of them at once
- *  — a brand admin answers their customers AND asks the platform. So
- *  "which bell does this belong to?" is a real question with a wrong
- *  answer available, and the split is decided purely by the link the
- *  server wrote.
- * ------------------------------------------------------------------ */
+// Which bell a ticket notification rings. A brand admin holds two surfaces at once
+// (answers customers, asks the platform), so the split is decided purely by the server-written link.
 
 const REQUESTER = (id: string) => `/dashboard/support?ticket=${id}`;
 const SUPPORT_INBOX = (id: string) => `/dashboard/admin/tickets?ticket=${id}`;

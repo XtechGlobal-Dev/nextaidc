@@ -29,9 +29,7 @@ describe("resolveBusinessTimeZone", () => {
   });
 
   it("uses the address city even when the owner signs up from overseas", () => {
-    // The exact reported bug: AU business, Indian personal mobile, offshore
-    // browser. The business number + address must win over the mobile, and the
-    // Perth address must beat the (disagreeing, ignored) Indian browser zone.
+    // The reported bug: AU business, Indian personal mobile, offshore browser — address must win.
     expect(
       resolveBusinessTimeZone({
         businessNumber: AU_LANDLINE,

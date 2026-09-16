@@ -4,10 +4,7 @@ import { currentBrandId } from "../lib/brandContext.js";
 
 export interface AuditEvent {
   actorId?: string;
-  /** The plane the actor lives in: a brand's id, or null for the platform's
-   *  own people. Defaults to the brand the request is running as, which
-   *  `requireAuth` sets from the session — so a caller only passes it when
-   *  it knows better. */
+  /** Brand id, or null for platform staff. Defaults to the request's ambient brand, so only pass it when you know better. */
   actorBrandId?: string | null;
   actorEmail?: string;
   action: string;
@@ -17,10 +14,7 @@ export interface AuditEvent {
   ip?: string;
 }
 
-/**
- * Record an admin/ops action. Best-effort — never throws, so callers can fire
- * it with `void audit({...})` without wrapping it in their own try/catch.
- */
+/** Records an admin/ops action. Never throws, so `void audit({...})` is safe without a try/catch. */
 export async function audit(e: AuditEvent): Promise<void> {
   try {
     await prisma.auditLog.create({
@@ -43,9 +37,7 @@ export async function audit(e: AuditEvent): Promise<void> {
 
 export interface ListAuditOpts {
   action?: string;
-  /** Restrict to entries recorded by one brand's operators. Set for a brand
-   *  admin, whose audit trail must not include what another brand's operators
-   *  did. Undefined = no restriction (the platform's own people). */
+  /** Set for a brand admin — they must never see another brand's trail. Undefined = platform staff, no restriction. */
   actorBrandId?: string;
   search?: string;
   from?: Date;
@@ -102,9 +94,7 @@ export async function listAudit(opts: ListAuditOpts = {}): Promise<ListAuditResu
   return { rows, total, page, pageSize };
 }
 
-/** Distinct action names, for populating the filter dropdown. Scoped the same
- *  way as the rows themselves — an option nobody can select would only invite
- *  the question of what it belongs to. */
+/** Distinct action names for the filter dropdown, scoped the same way as the rows so a brand admin never sees another brand's actions. */
 export async function listAuditActions(actorBrandId?: string): Promise<string[]> {
   const rows = await prisma.auditLog.findMany({
     ...(actorBrandId ? { where: { actorBrandId } } : {}),

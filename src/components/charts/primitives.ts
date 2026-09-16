@@ -1,11 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Shared geometry + formatting for the chart kit.
- *
- *  The charts are hand-rolled SVG rather than a charting library: they render a
- *  handful of shapes, need to follow the app's CSS custom properties in both
- *  themes, and live on an admin screen where a 100kB dependency for six sparklines
- *  would be the single heaviest thing on the page.
- * ------------------------------------------------------------------ */
+// Geometry + formatting for the chart kit. Hand-rolled SVG because a 100kB chart lib for six sparklines
+// would be the heaviest thing on the admin page, and these need to follow the CSS theme variables.
 
 export interface Padding {
   top: number;
@@ -34,11 +28,7 @@ export function seriesColor(i: number): string {
   return SERIES_VARS[i] ?? OTHER_COLOR;
 }
 
-/**
- * Keep the largest `n` items and roll the rest into a single "Other" row.
- * A ninth series is never a generated hue — past the palette we stop colouring
- * and start aggregating.
- */
+/** Keep the largest `n`, fold the rest into "Other". Past the palette we aggregate, never generate hues. */
 export function topNWithOther<T extends { value: number }>(
   items: T[],
   n: number,
@@ -54,10 +44,7 @@ export function topNWithOther<T extends { value: number }>(
 
 /* ---------------------------- Scales ------------------------------- */
 
-/**
- * A "nice" upper bound for a y-axis — the next 1/2/5×10ⁿ above the data.
- * Keeps gridlines on round numbers so the axis reads without arithmetic.
- */
+/** Nice y-axis upper bound: the next 1/2/5×10ⁿ above the data, so gridlines land on round numbers. */
 export function niceMax(max: number): number {
   if (max <= 0) return 1;
   const exp = Math.floor(Math.log10(max));
@@ -132,13 +119,7 @@ export function formatMs(ms: number): string {
   return `${Math.round(ms)}ms`;
 }
 
-/**
- * USD, with enough precision to be useful at API prices.
- *
- * Sub-cent totals are real here — a day of cheap calls genuinely costs $0.0043 —
- * and rounding those to "$0.00" reads as "free", which is the one thing a cost
- * screen must never imply.
- */
+/** USD at API-price precision. Sub-cent totals are real ($0.0043) and rounding them to $0.00 reads as "free". */
 export function formatUsd(usd: number, opts: { compact?: boolean } = {}): string {
   if (!Number.isFinite(usd)) return "—";
   if (usd === 0) return "$0.00";
@@ -153,11 +134,7 @@ export function formatPct(pct: number | null): string {
   return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
 }
 
-/**
- * Axis label for a bucket timestamp. The bucket width decides the format:
- * showing a date on an hourly chart, or a clock time on a 30-day chart, is
- * noise either way.
- */
+/** Axis label for a bucket; the bucket width picks the format (a date on an hourly chart is noise). */
 export function formatBucket(iso: string, bucketSec: number): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";

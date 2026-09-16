@@ -1,10 +1,7 @@
 import type { ChatMessage, CrmIntegration, Profile } from "@/types";
 import { env } from "@/lib/env";
 
-/* ------------------------------------------------------------------ *
- *  Default initial state for the data stores before they hydrate from
- *  the backend. These are empty/neutral defaults — not sample data.
- * ------------------------------------------------------------------ */
+// Neutral initial state for the data stores before they hydrate — not sample data.
 
 export const CONVERSION_ID = "conv_local";
 

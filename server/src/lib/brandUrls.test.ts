@@ -1,14 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Where a brand's links point.
- *
- *  The rule under test: a brand's domain serves the APP, and only the
- *  app. Login links, portal returns and OAuth bounces go to the brand;
- *  the conversation link in a call-summary SMS — a page the API serves —
- *  stays on the platform's share host for every tenant, and the API
- *  origin is one host for all of them.
- * ------------------------------------------------------------------ */
+// Rule under test: a brand's domain serves the APP only. App links go to the brand; the SMS conversation
+// page and the API stay on the platform's hosts for every tenant.
 
 const h = vi.hoisted(() => ({ findMany: vi.fn() }));
 

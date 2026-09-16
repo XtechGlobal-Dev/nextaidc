@@ -45,11 +45,7 @@ export function QuickSetupModal() {
     subscriptionStatus === "past_due";
   const needsBilling = !hasBilling;
 
-  // This is the CUSTOMER onboarding wizard (claim a number → go live). Admins and
-  // resellers are never onboarded this way — they configure the platform globally
-  // and have no number to claim (and on a fresh install nothing is even wired up,
-  // so a Vapi assistant / Twilio number can't be provisioned). So it only ever
-  // shows for the customer ("USER") role.
+  // Customer-only wizard; admins/resellers have no number to claim.
   const isCustomer = role === "USER";
 
   // Claiming a number is OPTIONAL — the wizard is opened manually from the sidebar
@@ -65,22 +61,15 @@ export function QuickSetupModal() {
     0,
   );
 
-  // The number-setup wizard never auto-opens — it opens ONLY when the user clicks
-  // "Tap to set up" in the sidebar (which calls openSetup). Claiming a number is
-  // optional; nothing pops it up on its own.
+  // Never auto-opens; only "Tap to set up" in the sidebar calls openSetup.
 
-  // Already subscribed but no number yet → their only remaining task is claiming a
-  // number, so land them there (Plan/Payment show as done). This also carries the
-  // Card step forward the moment billing completes, and keeps a subscribed user
-  // from ever sitting on the billing steps.
+  // Subscribed but no number → land on the number step; also carries the Card step forward once billing completes.
   useEffect(() => {
     if (open && hasBilling && !hasNumber && step < QUICK_SETUP_NUMBER_STEP)
       goTo(QUICK_SETUP_NUMBER_STEP);
   }, [open, hasBilling, hasNumber, step, goTo]);
 
-  // A number is already assigned → the number step (incl. paid buy) is done. Pin
-  // the wizard to the final step so a refresh can't drop the user back onto the
-  // picker and have them buy a second number.
+  // Number already assigned → pin to the final step so a refresh can't land them back on the picker and buy a second one.
   useEffect(() => {
     if (hasNumber && open && step < QUICK_SETUP_STEPS) goTo(QUICK_SETUP_STEPS);
   }, [hasNumber, open, step, goTo]);

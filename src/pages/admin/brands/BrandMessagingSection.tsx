@@ -24,15 +24,7 @@ const ICONS: Record<string, LucideIcon> = {
   whatsapp: MessageCircle,
 };
 
-/**
- * A brand's own sending identity — the mail relay, SMS number and WhatsApp
- * sender its customers see.
- *
- * Each field either carries this brand's value or inherits the platform's. That
- * distinction is the whole point of the screen, so it's on every row: a brand
- * that looks white-labelled but is still emailing from the platform's address is
- * the failure this is here to make visible.
- */
+/** Brand sending identity (mail, SMS, WhatsApp). Every row shows own-value vs inherited — a "white-label" brand still mailing from the platform address is the failure to surface. */
 export function BrandMessagingSection({ brandId }: { brandId: string }) {
   const [views, setViews] = useState<BrandIntegrationView[] | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});

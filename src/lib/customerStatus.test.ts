@@ -2,10 +2,8 @@ import { describe, it, expect } from "vitest";
 import type { Customer } from "@/lib/api";
 import { statusKey, planLabel, STATUS_META, STATUS_ORDER } from "./customerStatus";
 
-/* Three different customers all carry subscriptionStatus "none": someone who
- * never finished signing up, someone on the card-less free trial, and someone
- * whose trial ran out without ever buying. Telling them apart is the whole
- * point of this — and it's what the admin means by "dead" users. */
+// Three different customers carry subscriptionStatus "none" (never finished signup, card-less trial,
+// trial ran out); telling them apart is the whole point and what the admin means by "dead" users.
 
 const customer = (over: Partial<Customer> = {}): Customer =>
   ({

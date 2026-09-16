@@ -7,16 +7,8 @@ import { asyncHandler, forbidden } from "../lib/http.js";
 import { listBrandPricing, setBrandAddon } from "../services/brandPricing.js";
 import { listWalletEntries, walletBalances } from "../services/brandWallet.js";
 
-/* ------------------------------------------------------------------ *
- *  A brand admin's own pricing and wallet.
- *
- *  Everything here is scoped to the signed-in account's brand and only
- *  that brand: the routes never take a brand id. "pricing" and "wallet"
- *  are brand-scoped sections (see lib/permissions.ts), so the super
- *  admin is refused here — the platform owner manages a brand's pricing
- *  from the brand's own page under /api/super — and STAFF need the
- *  section granted on their role.
- * ------------------------------------------------------------------ */
+// A brand admin's own pricing and wallet. Always the signed-in account's brand — routes never take a brand id.
+// Super admin is refused (they use /api/super); STAFF need the section on their role.
 
 const router = express.Router();
 router.use(requireAuth);

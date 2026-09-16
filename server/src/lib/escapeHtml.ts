@@ -20,12 +20,7 @@ const NAMED_DECODE: Record<string, string> = {
   nbsp: " ",
 };
 
-/**
- * Decode the common HTML entities that survive when text is pulled straight out
- * of scraped markup (meta descriptions, titles). Handles named entities plus
- * decimal (`&#39;`) and hex (`&#x27;`) numeric refs. Leaves unknown entities
- * untouched. Use on scraped copy before storing/displaying it as plain text.
- */
+/** Decode common HTML entities (named, decimal, hex) left in scraped copy; unknown ones pass through. */
 export function decodeHtml(s: string): string {
   return String(s).replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (whole, code: string) => {
     const c = code.toLowerCase();

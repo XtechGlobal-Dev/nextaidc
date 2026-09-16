@@ -45,19 +45,9 @@ export function AdvancedSection({ onNavigate }: { onNavigate: (key: AgentSection
   const [builderText, setBuilderText] = useState("");
   const [syncing, setSyncing] = useState(false);
 
-  /**
-   * Who may still write the prompt by hand.
-   *
-   * MIRRORS THE SERVER RULE in `lockMasterPrompt` (`role !== "USER" || imp`) and
-   * must keep mirroring it. The server is what actually enforces this — nothing
-   * here is a security control, since the whole config round-trips through the
-   * browser — so the only job of this flag is to stop the UI offering an edit
-   * the save would silently discard.
-   *
-   * Impersonation is included because "Login as Customer" mints a token carrying
-   * the CUSTOMER's role: checking the role alone would lock support out of the
-   * account they were sent to fix, on both sides at once.
-   */
+  // Mirrors the server rule in `lockMasterPrompt` (`role !== "USER" || imp`) — keep them in sync. Not a
+  // security control (the server enforces it); this only stops the UI offering an edit the save would drop.
+  // Impersonation counts because "Login as Customer" mints a token with the CUSTOMER's role.
   const canEditPrompt = !!user && (user.role !== "USER" || impersonating);
 
   async function syncTemplate() {
@@ -101,14 +91,8 @@ export function AdvancedSection({ onNavigate }: { onNavigate: (key: AgentSection
     </div>
   );
 
-  /**
-   * The prompt editor, read-only for customers.
-   *
-   * The copy guards (no selection, no copy/cut/context-menu) are a speed bump,
-   * NOT a control: the prompt is in the DOM and in the API response, so anyone
-   * who opens devtools can still read it. They only stop it being lifted
-   * casually. The edit lock does not depend on them — that lives on the server.
-   */
+  // Read-only for customers. The copy guards are a speed bump, not a control — the prompt is in
+  // the DOM and the API response anyway. The real edit lock lives on the server.
   const promptEditor = (className: string) =>
     canEditPrompt ? (
       <Textarea
@@ -200,9 +184,7 @@ export function AdvancedSection({ onNavigate }: { onNavigate: (key: AgentSection
               </Button>
             </div>
           ) : (
-            // Same fact, minus the Regenerate button the server would ignore. The
-            // notice stays, because a customer whose settings no longer reach
-            // their prompt deserves to know why.
+            // Same notice minus the Regenerate button the server would ignore — the customer should still know why settings stopped flowing.
             <div className="mb-3 flex items-center gap-2 rounded-lg bg-warning-tint p-3 text-sm text-foreground/80">
               <AlertTriangle className="size-4 shrink-0 text-warning" />
               This prompt was customised for you, so it no longer updates automatically from your

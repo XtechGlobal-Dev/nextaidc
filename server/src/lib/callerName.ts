@@ -1,17 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Caller display name
- *
- *  `CallLog.callerName` is NOT safe to show raw. It defaults to "Unknown"
- *  (schema.prisma) for every call where the caller never gave a name, and the
- *  extraction model writes "unknown" / "n/a" / "" into structuredData.name for
- *  the same reason. Left alone, that placeholder travels all the way into an
- *  owner's CRM, where a whole page of leads reads "Unknown".
- *
- *  So anything that puts a caller in front of a human — CRM leads, owner
- *  notifications, the public call page — goes through callerLabel, and write
- *  paths use realCallerName so a placeholder is never stored as if it were a
- *  name the caller actually said.
- * ------------------------------------------------------------------ */
+// `CallLog.callerName` isn't safe to show raw — it defaults to "Unknown" and the extraction model writes
+// "n/a"/"" too, which used to fill CRM pages with "Unknown". Read via callerLabel, write via realCallerName.
 
 /** Shown wherever we have no real name. Neutral and true: it was a caller. */
 export const CALLER_FALLBACK = "Caller";
@@ -49,9 +37,7 @@ export function callerLabel(raw?: string | null): string {
   return isPlaceholderCallerName(raw) ? CALLER_FALLBACK : raw!.trim();
 }
 
-/** The name only when it's real, else undefined — for write paths that should
- *  leave the column at its default rather than store a placeholder, and for
- *  fallback chains (`realCallerName(x) || number || CALLER_FALLBACK`). */
+/** The name only when real, else undefined — so write paths never store a placeholder as a name. */
 export function realCallerName(raw?: string | null): string | undefined {
   return isPlaceholderCallerName(raw) ? undefined : raw!.trim();
 }

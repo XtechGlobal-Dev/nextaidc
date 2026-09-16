@@ -4,11 +4,8 @@ import { buildChatBody, openAiTokenUnits } from "../lib/openai.js";
 import { traceFetch } from "./apiTrace.js";
 import { prisma } from "../prisma.js";
 
-/* Persisted summary cache (prompt_cache table). The Prisma client is regenerated
- * at deploy (render:build runs `prisma generate`), so `prisma.promptCache` exists
- * at runtime; the cast lets this typecheck locally before the client is
- * regenerated. All access is best-effort — a DB hiccup must never break prompt
- * building, so failures fall through to the (in-memory cache →) LLM path. */
+// Persisted summary cache. The cast lets this typecheck before `prisma generate`
+// runs; all access is best-effort so a DB hiccup never breaks prompt building.
 const promptCacheStore = (
   prisma as unknown as {
     promptCache: {
@@ -31,24 +28,14 @@ async function dbCacheGet(hash: string): Promise<string | null> {
 }
 
 function dbCacheSet(hash: string, summary: string): void {
-  // Fire-and-forget: persisting the summary must not add latency to (or fail) the
-  // response that just computed it. The in-memory cache already covers this
-  // instance; the DB write is what survives a cold start / helps other instances.
+  // Fire-and-forget: persisting must not add latency to or fail the response.
   void promptCacheStore
     .upsert({ where: { hash }, create: { hash, summary }, update: { summary } })
     .catch(() => {});
 }
 
-/* ------------------------------------------------------------------ *
- *  LLM compression of a receptionist system prompt before it's pushed
- *  to the live agent (Vapi / web test calls). Invisible to customers —
- *  their AI Brain keeps showing the full prompt; only the wire copy is
- *  compressed to save tokens on every call.
- *
- *  Best-effort by design: no OpenAI key, an API error, a timeout, or a
- *  suspicious result (empty / longer / gutted) all fall back to the
- *  original prompt, so a save or provision is NEVER blocked.
- * ------------------------------------------------------------------ */
+// LLM compression of the system prompt for the wire copy only (customers still see
+// the full prompt). Any failure or suspicious result falls back to the original — never blocks a save.
 
 const SUMMARIZER_INSTRUCTIONS = [
   "You compress a phone-receptionist system prompt to the minimum length that keeps EXACTLY the same behaviour.",
@@ -84,11 +71,7 @@ function unfence(s: string): string {
   return m ? m[1].trim() : s;
 }
 
-/**
- * Compress `prompt` for the live agent. Returns the original prompt whenever
- * summarizing isn't possible or the result looks unsafe — callers can always
- * trust the return value to be a usable system prompt.
- */
+/** Compresses `prompt` for the live agent; always returns a usable prompt (the original on any doubt). */
 export async function summarizePromptForVapi(prompt: string): Promise<string> {
   const original = (prompt ?? "").trim();
   if (!original || original.length < MIN_CHARS_TO_SUMMARIZE) return original;
@@ -98,9 +81,7 @@ export async function summarizePromptForVapi(prompt: string): Promise<string> {
   const hit = cache.get(key);
   if (hit) return hit;
 
-  // Persisted cache — survives restarts / cold starts, so an unchanged prompt
-  // skips the slow LLM summarization even on a freshly-woken instance (the main
-  // cause of the 15-20s test-call connect on staging).
+  // DB cache survives cold starts — the main cause of the 15-20s test-call connect on staging.
   const dbHit = await dbCacheGet(key);
   if (dbHit) {
     cache.set(key, dbHit);

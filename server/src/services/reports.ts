@@ -34,10 +34,7 @@ function extractIntent(analysis: unknown): string | null {
   return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 }
 
-/**
- * Build a 7-day digest for one user. Returns null when the user has no profile
- * (e.g. an admin or reseller account) so callers can skip them.
- */
+/** 7-day digest for one user; null when they have no profile so callers can skip. */
 export async function buildUserDigest(userId: string): Promise<UserDigest | null> {
   const brandId = await brandIdForOwner(userId);
   if (!brandId) return null; // the platform's own people have no receptionist
@@ -94,10 +91,7 @@ export async function buildUserDigest(userId: string): Promise<UserDigest | null
   return { subject: `Your weekly ${appName} digest — ${callsHandled} calls`, html, stats };
 }
 
-/**
- * Build and send the weekly digest to every customer with a profile.
- * Best-effort per user; emails only go out when SMTP is configured.
- */
+/** Sends the weekly digest to every customer with a profile. Best-effort per user; needs SMTP. */
 export async function sendDigests(): Promise<{ sent: number; skipped: number }> {
   // Every brand's customers, from each brand's own database.
   const users: { id: string; email: string }[] = [];

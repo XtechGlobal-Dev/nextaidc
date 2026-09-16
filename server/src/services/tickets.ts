@@ -27,44 +27,15 @@ import {
   type TenantClient,
 } from "./tenantDb.js";
 
-/* ------------------------------------------------------------------ *
- *  Support tickets — everything the two lanes share.
- *
- *  The lanes (see lib/ticketLanes.ts):
- *    support — a brand's customer asks that brand's admin team.
- *    brand   — a brand admin asks the platform (the super admin).
- *
- *  WHERE A LANE LIVES (phase 4). A customer's ticket never leaves the
- *  brand's own database; a brand admin's request to the platform lives
- *  in the control plane. The two tables have exactly the same shape, so
- *  every function here takes the lane's database — `laneDb()` in
- *  services/tenantDb.ts — and reads or writes nothing else. The one
- *  thing that crosses the line is an escalation, which is a pair of
- *  tickets in two databases linked by plain ids (attachEscalationPairs).
- *
- *  A handler's reach is the intersection of three things:
- *
- *    LANE        — decided by their role. A brand admin answers `support`
- *                  and can never see another tier's queue.
- *    TENANT      — a handler who belongs to a brand works in that brand's
- *                  database and sees nothing else; one who belongs to no
- *                  brand works the platform's inbox in the control plane.
- *    DEPARTMENT  — full admins hold every queue in their lane; STAFF hold
- *                  the ones their role (or a direct grant) was given, and
- *                  within those, only what nobody else has taken.
- *
- *  All three are applied in ONE place — `scopeFilter` — and every read
- *  path goes through it, so there is no query that quietly widens.
- * ------------------------------------------------------------------ */
+// Support tickets, both lanes: `support` lives in the brand's DB, `brand` in the control plane, and
+// every function takes the lane's DB. A handler's reach = lane x tenant x department, applied once in `scopeFilter`.
 
 export const TICKET_STATUSES = ["open", "pending", "resolved", "closed"] as const;
 export const TICKET_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 
 /* ------------------------------ First run -------------------------------- */
 
-/** Queues a brand's customer support starts with, so support works on day one.
- *  The platform gives every brand these two; anything more, the brand asks the
- *  platform for (see services/ticketDepartments.ts). */
+// Starter customer queues; anything more, the brand asks the platform for.
 const DEFAULT_SUPPORT_DEPARTMENTS = [
   { name: "General", description: "Anything else — we'll route it to the right team.", order: 0 },
   { name: "Sales", description: "Plans, upgrades and what's included.", order: 1 },
@@ -78,16 +49,7 @@ const DEFAULT_BRAND_DEPARTMENTS = [
   { name: "Account", description: "Your brand's settings, staff and access.", order: 3 },
 ];
 
-/**
- * Create a lane's starter departments — but ONLY when that lane has none.
- *
- * Without at least one department nobody can raise a ticket, so an install with
- * none looks broken. Emptiness is the whole condition on purpose: an admin who
- * deletes "Sales" must not find it back after the next deploy.
- *
- * `db` may be handed in for a database that isn't routable yet (provisioning
- * seeds a brand's queues before its door opens); otherwise the lane's own.
- */
+/** Seeds starter departments ONLY when the lane has none — a deleted "Sales" must not come back. `db` lets provisioning seed a not-yet-routable DB. */
 export async function seedTicketDepartments(
   lane: TicketLane,
   brandId: string | null,
@@ -106,11 +68,7 @@ export async function seedTicketDepartments(
   }
 }
 
-/**
- * Seed the platform's own queues (lane `brand`) at boot, and every active
- * brand's customer queues (lane `support`, in the brand's database) for the
- * brands that have none.
- */
+/** Boot seed: the platform's own queues, then every active brand's customer queues. */
 export async function seedAllTicketDepartments(): Promise<void> {
   await seedTicketDepartments("brand", null);
   try {
@@ -147,14 +105,7 @@ export async function nextReference(db: TenantClient): Promise<string> {
 
 /* ----------------------------- Attachments ------------------------------- */
 
-/**
- * A file uploaded to S3 but not yet attached to a message.
- *
- * The upload endpoint hands one of these back and the client replays it when it
- * sends the message. Because the client controls what it replays, the descriptor
- * is SIGNED: without `sig` anyone could claim an arbitrary S3 key (or an
- * arbitrary URL) as "their attachment" and have us render it inside a ticket.
- */
+/** An uploaded-but-unattached file the client replays. SIGNED, or anyone could claim an arbitrary S3 key or URL as "their attachment". */
 export interface AttachmentDescriptor {
   name: string;
   mime: string;
@@ -187,10 +138,7 @@ function isValidAttachment(a: AttachmentDescriptor): boolean {
   return got.length === want.length && crypto.timingSafeEqual(got, want);
 }
 
-/**
- * Validate what the client claims it is attaching. Rejects a forged or tampered
- * descriptor, a type that isn't on the allow-list, and an over-long list.
- */
+/** Rejects forged/tampered descriptors, disallowed types, and over-long lists. */
 export function verifyAttachments(
   list: AttachmentDescriptor[] | undefined,
 ): AttachmentDescriptor[] {
@@ -212,12 +160,7 @@ export function verifyAttachments(
 
 /* ------------------------------- Scoping --------------------------------- */
 
-/**
- * Who is acting on the handler side, and in which lane.
- *
- * `lane` is derived from `role` by the route (see handlerLane) and never read
- * from the request, so an actor can only ever be built for a lane they hold.
- */
+/** The handler acting. `lane` is derived from `role` by the route, never read from the request. */
 export interface TicketActor {
   id: string;
   role: Role | string;
@@ -227,33 +170,15 @@ export interface TicketActor {
   lane: TicketLane;
 }
 
-/**
- * Each staff member's department grants, remembered for a few seconds.
- *
- * The scope is re-derived per request so a grant change applies at once, but one
- * screen load asks five or six times within a second and each answer is a round
- * trip. Anything that edits grants calls {@link forgetDepartmentScopes}, so the
- * TTL only ever bounds staleness that nobody caused.
- */
+// Department grants, cached a few seconds (one screen load asks ~6 times). Grant edits
+// call forgetDepartmentScopes, so the TTL only bounds staleness nobody caused.
 const scopeCache = new TtlCache<string[]>(10_000);
 
 export function forgetDepartmentScopes(): void {
   scopeCache.clear();
 }
 
-/**
- * Which departments this actor may work in.
- *
- * `null` means "every queue in their lane, including tickets whose department
- * was deleted" — full admins only (a brand ADMIN over their tenant, the
- * SUPER_ADMIN over the platform). A STAFF member gets the UNION of two grants:
- * the departments their StaffRole holds, and the ones granted to them
- * personally. Empty until an admin grants at least one — closed by default.
- *
- * Two reads rather than one join: `users.staffRoleId` is a plain id in both
- * planes (the role lives wherever the account does), so the role's grants are
- * fetched by that id.
- */
+/** Departments the actor may work. Null = every queue (full admins). Staff get role grants UNION personal grants, empty by default. Two reads because staffRoleId is a plain id, not a relation. */
 export async function departmentScope(db: TenantClient, actor: TicketActor): Promise<string[] | null> {
   if (holdsEveryQueue(actor.role)) return null;
   const cacheKey = `${actor.lane}:${actor.id}`;
@@ -281,23 +206,14 @@ export async function departmentScope(db: TenantClient, actor: TicketActor): Pro
   return [...scopeCache.set(cacheKey, [...ids])];
 }
 
-/**
- * The `where` fragment that limits a handler query to what they may see — lane,
- * tenant, department and ownership, together, in one place.
- *
- * Ownership: within a granted department a ticket is the whole team's only while
- * nobody holds it. The moment someone takes it (or answers it, which takes it)
- * it is theirs alone, and colleagues in the same department no longer see it in
- * their list. Full admins are exempt — they are the oversight.
- */
+/** The one `where` that limits a handler to lane, tenant, department and ownership. A held ticket is the holder's alone; full admins see everything. */
 export function scopeFilter(
   actor: TicketActor,
   scope: string[] | null,
 ): Prisma.TicketWhereInput {
   const where: Prisma.TicketWhereInput = { lane: actor.lane };
-  // A handler who belongs to a brand sees only that brand's tickets. The
-  // database already is the brand's; the column is the same wall said twice,
-  // and it is what lets the platform's inbox filter by brand.
+  // The DB already is the brand's; the column is the same wall said twice, and
+  // what lets the platform inbox filter by brand.
   if (actor.brandId) where.brandId = actor.brandId;
   if (scope !== null) {
     // `in: []` matches nothing, which is exactly right for a role with no
@@ -369,12 +285,8 @@ function staffHolding(
   };
 }
 
-/**
- * Who works the platform's inbox: the super admin, and the platform's own
- * staff — accounts with no brand; the super admin's support team — holding
- * `brand_tickets.*` and a grant on the queue in question. With no queue named,
- * the owner alone: the same "full admins only" narrowing the support lane makes.
- */
+// Platform inbox handlers: the super admin plus brand-less staff holding brand_tickets.*
+// and a grant on the queue. No queue named = the owner alone.
 async function platformHandlerWhere(
   db: TenantClient,
   match: Prisma.TicketDepartmentWhereInput | null,
@@ -387,19 +299,7 @@ async function platformHandlerWhere(
   };
 }
 
-/**
- * The `where` matching every account that answers tickets in a lane — and, when
- * a department is named, that department's team specifically.
- *
- * One definition, used by the assignee picker AND by the notification fan-out,
- * so "who can be assigned this" and "who hears about it" can never drift.
- *
- *   brand   — the platform owner and the platform's own staff, in the control plane.
- *   support — the brand's ADMINs, plus the STAFF whose role or personal grant
- *             covers the department — all in the brand's own database, which
- *             is the whole tenant wall. The SUPER_ADMIN never appears: a
- *             tenant's customer conversations are the tenant's business.
- */
+/** Who answers a lane's tickets (or a department's). One definition for the assignee picker AND the notification fan-out so they can't drift. SUPER_ADMIN never appears on support — a tenant's customers are the tenant's business. */
 export async function handlerWhere(
   db: TenantClient,
   lane: TicketLane,
@@ -416,13 +316,7 @@ export async function handlerWhere(
   };
 }
 
-/**
- * Like {@link handlerWhere}, but across several departments at once: everyone who
- * works ANY of `departmentIds` (null = any department at all).
- *
- * Feeds the inbox's assignee filter when no department is chosen — the options
- * are the people who could actually be holding one of the listed tickets.
- */
+/** handlerWhere across several departments (null = any) — the inbox's assignee filter. */
 export async function handlersWhere(
   db: TenantClient,
   lane: TicketLane,
@@ -443,9 +337,7 @@ export function assertCan(
   capability: "view" | "create" | "edit" | "delete",
 ): void {
   if (actor.lane === "brand") {
-    // The platform's own inbox: the owner, and the platform's own staff by
-    // their `brand_tickets.*` keys. A brand's staff never land on this lane
-    // (see handlerLane), so the brandId check is belt and braces.
+    // Owner, or brand-less staff with brand_tickets.*; the brandId check is belt and braces.
     if (isSuperAdminRole(actor.role)) return;
     if (
       actor.role === "STAFF" &&
@@ -491,13 +383,8 @@ export interface EscalationPair {
   status: string;
 }
 
-/**
- * Everything a bubble needs in one read: its files, the emoji on it, and a thin
- * snapshot of whatever it is replying to. `replyTo` is deliberately a SELECT of
- * a few columns rather than the whole message — the quote above a reply shows a
- * name and a line of text, and pulling the quoted message's own attachments and
- * reactions would fan a thread of replies out into a tree of full messages.
- */
+// Everything a bubble needs. `replyTo` is a thin SELECT, not the whole message, or a
+// reply thread fans out into a tree of full messages.
 export const messageInclude = {
   attachments: true,
   reactions: true,
@@ -514,13 +401,7 @@ export const messageInclude = {
   },
 } satisfies Prisma.TicketMessageInclude;
 
-/** A ticket as the routes read it, plus — once `attachEscalationPairs` has
- *  run — the other half of an escalation, from the other database. */
-/** Who raised a ticket, from the snapshot every row carries. In a brand's
- *  database the requester is a real account; in the control plane it is a
- *  brand admin who lives in the brand's database (phase 6). Either way the
- *  name and email were written on the ticket when it was raised, and that is
- *  what every reader shows. */
+/** Who raised a ticket, from the snapshot on the row — on the brand lane the requester lives in another DB, so the name/email written at creation is what every reader shows. */
 export interface RequesterRef {
   id: string;
   fullName: string;
@@ -552,15 +433,7 @@ export type TicketRow = Prisma.TicketGetPayload<{ include: typeof ticketInclude 
 type MessageRow = Prisma.TicketMessageGetPayload<{ include: typeof messageInclude }>;
 type ReactionRow = MessageRow["reactions"][number];
 
-/**
- * Fill in the other half of every escalation among `rows`.
- *
- * The pair lives in two databases: a customer ticket in the brand's, the
- * platform ticket it was raised into in the control plane. Each side holds the
- * other's id (and, going down, its brand), so this is one read per direction —
- * batched, however many rows — never a join. A brand's database that cannot be
- * reached leaves that pair absent rather than failing the list.
- */
+/** Fills in the other half of each escalation from the other database: one batched read per direction, never a join. An unreachable brand DB leaves its half absent rather than failing the list. */
 export async function attachEscalationPairs<
   T extends {
     escalationId: string | null;
@@ -684,9 +557,7 @@ export function serializeMessage(m: MessageRow, viewerKey: string | null = null)
     authorType: m.authorType,
     authorId: m.authorId,
     authorName: m.authorName,
-    // A deleted bubble keeps its place in the conversation but carries nothing:
-    // clearing here (not just in the UI) means the text never reaches a client
-    // that could show it anyway.
+    // Cleared server-side, not just in the UI, so deleted text never reaches a client.
     body: deleted ? "" : m.body,
     internal: m.internal,
     createdAt: m.createdAt,
@@ -698,11 +569,7 @@ export function serializeMessage(m: MessageRow, viewerKey: string | null = null)
   };
 }
 
-/**
- * The requester's own view. Internal notes are filtered out by the query before
- * this; individual handler names collapse to the lane's one label, so the
- * requester sees a team rather than a rota.
- */
+/** Requester's view: handler names collapse to the lane label (a team, not a rota). Internal notes are filtered by the query. */
 export function serializeMessageForRequester(
   m: MessageRow,
   lane: TicketLane,
@@ -747,11 +614,7 @@ export function serializeTicket(
     priority: t.priority,
     source: t.source,
     department: t.department,
-    /**
-     * Who is asking. On lane `brand` the handler cares as much about WHICH
-     * BRAND as which person, so the tenant travels with the ticket rather than
-     * having the inbox join it back on afterwards.
-     */
+    /** On lane `brand` WHICH BRAND matters as much as who, so the tenant travels with the ticket. */
     requester: {
       id: t.requester.id,
       name: t.requester.fullName || t.requester.email,
@@ -774,9 +637,7 @@ export function serializeTicket(
     rating: t.rating,
     ratingComment: t.ratingComment,
     ratedAt: t.ratedAt,
-    // Computed here rather than left to each client to re-derive from the
-    // status — three surfaces asking the same question must not answer it three
-    // different ways.
+    // Computed once here — three client surfaces must not answer it three ways.
     rateable: isRateable(t.status),
     /** The customer ticket this platform ticket was raised FROM — set only on
      *  an escalation (see escalateTicket), filled by attachEscalationPairs. */
@@ -787,19 +648,7 @@ export function serializeTicket(
   };
 }
 
-/**
- * The requester's own view of a ticket.
- *
- * Same shape, with one field masked: whoever the ticket is ASSIGNED to. The
- * transcript already collapses every handler to the lane's single label — see
- * serializeMessageForRequester — and leaving the assignee's real name on the
- * ticket would undo that from the side panel, which is where it actually leaked:
- * a brand admin's screen read "Super Admin is looking after this."
- *
- * The fact of assignment is kept, because it tells the requester something true
- * and useful (somebody has picked this up). Only the identity goes. `id` is
- * nulled with it, so no client can pair the label back to an account.
- */
+/** Requester's view: the assignee is masked to the lane label (the side panel once read "Super Admin is looking after this"). Assignment itself is kept; only the identity goes, id included. */
 export function serializeTicketForRequester(
   t: TicketRow,
   extra: { lastMessage?: string; messageCount?: number } = {},
@@ -808,10 +657,8 @@ export function serializeTicketForRequester(
   return {
     ...base,
     assignedTo: base.assignedTo ? { id: null, name: laneCopy(t.lane as TicketLane).handlerLabel } : null,
-    // A customer is never shown that their brand took the matter up with the
-    // platform — that is between the brand and the platform. The brand admin,
-    // as requester of the escalation, still sees which of their tickets it is
-    // for (`escalatedFrom` is untouched).
+    // A customer never sees that their brand escalated to the platform — that's
+    // between the brand and the platform.
     escalation: t.lane === "support" ? null : base.escalation,
   };
 }
@@ -865,34 +712,19 @@ export function preview(body: string, hadAttachments = false, max = 300): string
 
 /* --------------------------------- URLs ---------------------------------- */
 
-/**
- * Where the requester picks the conversation back up.
- *
- * One page for both lanes — which lane it shows is decided by who is signed in
- * (see requesterLane), so there is exactly one "my requests" URL to remember.
- */
+/** One "my requests" page for both lanes; who's signed in decides which lane it shows. */
 export function requesterTicketPath(ticketId: string): string {
   return `/dashboard/support?ticket=${ticketId}`;
 }
 
-/**
- * Where a handler opens the ticket. The two inboxes live in different URL
- * spaces, because they are different jobs: a brand admin works at
- * /dashboard/admin, the platform owner at /superadmin.
- */
+/** Handler inbox path — brand admins at /dashboard/admin, the platform owner at /superadmin. */
 export function handlerTicketPath(lane: TicketLane, ticketId: string): string {
   const base = lane === "brand" ? "/superadmin/tickets" : "/dashboard/admin/tickets";
   return `${base}?ticket=${ticketId}`;
 }
 
-/**
- * Which tenant's look and links a notification email should wear.
- *
- * The recipient always sees the world they live in: a customer and their brand's
- * team both get the brand's name and its app origin. Mail to the PLATFORM owner
- * about a brand's query is the one exception — it comes from the platform, or
- * the super admin's inbox would fill with mail wearing tenants' names.
- */
+// Mail wears the recipient's own brand. The exception: mail to the platform owner about a
+// brand's query comes from the platform, or the super admin's inbox fills with tenant-branded mail.
 function mailBrandFor(ticket: TicketRow, side: "requester" | "handler"): string | null {
   if (side === "handler" && ticket.lane === "brand") return null;
   return ticket.brandId ?? null;
@@ -900,14 +732,7 @@ function mailBrandFor(ticket: TicketRow, side: "requester" | "handler"): string 
 
 /* ------------------------------ Departments ------------------------------ */
 
-/**
- * Resolve and validate the department a ticket is being filed into.
- *
- * Lane and tenant are checked here, not just existence: a department id is a
- * plain cuid that shows up in API responses, so without this a caller could
- * name another brand's queue and have their ticket filed where that brand's
- * team would answer it.
- */
+/** Validates the department by lane AND tenant, not just existence — otherwise a caller could file a ticket into another brand's queue by id. */
 export async function resolveDepartment(
   db: TenantClient,
   departmentId: string | null | undefined,
@@ -949,14 +774,7 @@ export interface AppendMessageInput {
   canQuoteInternal?: boolean;
 }
 
-/**
- * The message being replied to, or null.
- *
- * Two things are checked, and both matter: it has to live in THIS ticket (a
- * client that sent someone else's message id would otherwise get its text
- * quoted back at them, which is a read of a thread they can't open), and a
- * requester may not quote an internal handler note.
- */
+/** The quoted message, or null. Must live in THIS ticket (or a foreign id reads a thread the client can't open), and a requester may not quote an internal note. */
 export async function resolveReplyTo(
   db: TenantClient,
   ticketId: string,
@@ -974,13 +792,7 @@ export async function resolveReplyTo(
   return target.id;
 }
 
-/**
- * Write one message (plus its attachment rows) and move the ticket's activity
- * markers. Returns the created message with everything the chat draws.
- *
- * A message with no text and no files is rejected here rather than in each
- * route — an empty bubble helps nobody, and every caller would need the check.
- */
+/** Writes a message + attachments and moves the ticket's activity markers. Empty messages are rejected here so no route has to. */
 export async function appendMessage(db: TenantClient, input: AppendMessageInput) {
   const body = input.body.trim();
   const attachments = input.attachments ?? [];
@@ -1031,17 +843,9 @@ export async function appendMessage(db: TenantClient, input: AppendMessageInput)
   return message;
 }
 
-/* -------------------------- Message-level actions ------------------------- *
- *  Edit, delete and react — the things a chat is expected to do to a message
- *  that has already been sent. All three are shared by both lanes and both
- *  sides; each route only decides WHO the actor is.
- * ------------------------------------------------------------------------- */
+// Message-level actions (edit, delete, react), shared by both lanes and sides.
 
-/**
- * How long the author has to fix a typo. Short on purpose: a support thread is a
- * record of what was said, and an hour-old message that quietly changes text a
- * colleague already replied to is worse than a visible correction.
- */
+/** Edit window. Short on purpose — a thread is a record, and silently changing replied-to text is worse than a visible correction. */
 export const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 /** Who is acting on a message — the same shape on both sides of both lanes. */
@@ -1102,10 +906,7 @@ export async function editMessage(
   });
 }
 
-/**
- * Soft-delete: the row stays (so replies quoting it still read sensibly) but the
- * text, the files and the reactions go — in the database and in the bucket.
- */
+/** Soft-delete: the row stays so quoting replies still read, but text, files and reactions go. */
 export async function deleteMessage(
   db: TenantClient,
   ticketId: string,
@@ -1179,15 +980,7 @@ export async function toggleReaction(
 
 /* ---------------------------- Read marks + live --------------------------- */
 
-/**
- * Mark the thread read for one side, and — only when that actually changes
- * something — nudge the other side so their "Seen" tick appears without a
- * reload.
- *
- * The guard is what stops a ping-pong: each side re-fetches on a nudge, and a
- * re-fetch marks it read again. Publishing only on the transition means the
- * second read is silent, so the two tabs can't keep waking each other.
- */
+/** Marks one side read and nudges the other — only on the transition, or the two tabs ping-pong forever (a nudge re-fetches, a re-fetch marks read). */
 export async function markThreadRead(
   db: TenantClient,
   ticket: Pick<
@@ -1214,13 +1007,7 @@ export async function markThreadRead(
   }
 }
 
-/**
- * Nudge the OTHER side after a message was edited, deleted or reacted to.
- *
- * These change a thread without adding to it, so `lastMessageAt` doesn't move
- * and nothing else would tell the other tab to re-read. The event carries only a
- * tag; the client re-fetches the thread it is showing.
- */
+/** Nudges the other side after an edit/delete/reaction — these don't move lastMessageAt, so nothing else would trigger a re-read. */
 export function publishThreadChanged(
   ticket: { id: string; requesterId: string },
   from: "staff" | "requester",
@@ -1250,17 +1037,8 @@ interface Recipient {
   fullName: string;
 }
 
-/**
- * Who hears about activity on this ticket, split by how loud the channel is.
- *
- * `inApp` is the whole team that can actually OPEN the thread, so the bell badge
- * matches what a click will show. `email` is narrower, because mail that always
- * goes to everyone gets filtered by everyone: while a ticket is unassigned
- * nobody owns it, so the team is mailed; once someone holds it, only they are.
- *
- * On lane `brand` both lists are the platform's own people — there is no
- * tenant admin who should hear about another brand's query.
- */
+// Recipients by channel: `inApp` is everyone who can OPEN the thread (bell matches the
+// click); `email` is the team while unassigned, then only the holder (mail to everyone gets filtered by everyone).
 async function ticketStaffRecipients(
   db: TenantClient,
   ticket: TicketRow,
@@ -1281,10 +1059,8 @@ async function ticketStaffRecipients(
     team.find((u) => u.id === ticket.assignedToId) ??
     (await db.user.findUnique({ where: { id: ticket.assignedToId }, select }));
 
-  // Once someone holds it, colleagues in the department can no longer open it,
-  // so a bell they can't follow would only mislead. The lane's full admins keep
-  // hearing — they see everything — and the holder hears by mail as well.
-  // Naming no department is what narrows handlerWhere to those admins alone.
+  // Once held, colleagues can't open it, so no bell for them; full admins still hear.
+  // No department = handlerWhere narrows to those admins alone.
   const admins = await db.user.findMany({
     where: await handlerWhere(db, lane, null),
     select,
@@ -1308,15 +1084,7 @@ function ticketVars(ticket: TicketRow, extra: Record<string, string> = {}) {
   };
 }
 
-/**
- * Tell the handler side something happened: an in-app notification to everyone
- * who can open the thread, a live nudge to every open handler tab, and — when
- * `templateKey` is given — an email to whoever owns it.
- *
- * `db` is the lane's database — where the handlers live, and so where their
- * notifications go. `excludeUserId` keeps the person who caused the event off
- * both lists; nobody needs a bell badge or an email about their own click.
- */
+/** Notifies the handler side: bell for everyone who can open it, email (when `templateKey`) for the owner. `excludeUserId` keeps the actor off both lists. */
 export async function notifyTicketStaff(
   db: TenantClient,
   ticket: TicketRow,
@@ -1350,9 +1118,8 @@ export async function notifyTicketStaff(
         ticket_url: brandAppUrl(handlerTicketPath(lane, ticket.id), mailBrand),
       };
       for (const r of recipients) {
-        // Fire-and-forget, per recipient. The try/catch is not belt-and-braces:
-        // without it a mailer that throws on the way OUT (rather than rejecting)
-        // would abort the loop and silently skip everyone after a bad address.
+        // The try/catch matters: a mailer that throws synchronously would abort the
+        // loop and skip everyone after a bad address.
         try {
           runWithBrand(mailBrand, () => {
             void sendTemplate(n.templateKey!, r.email, {
@@ -1371,12 +1138,7 @@ export async function notifyTicketStaff(
   }
 }
 
-/**
- * Nudge and notify the requester — in-app always, email when a template is
- * given. The requester lives in their brand's database on both lanes (a
- * customer, or the brand admin who asked the platform), so that is where the
- * notification goes — whichever database the ticket itself is in.
- */
+/** Notifies the requester. On both lanes they live in their brand's DB, so the bell goes there — whichever DB holds the ticket. */
 export async function notifyRequester(
   ticket: TicketRow,
   opts: {
@@ -1421,26 +1183,12 @@ export async function notifyRequester(
 /** How long a thread has to sit quiet before a new message also goes out as mail. */
 export const IDLE_BEFORE_EMAIL_MS = 60 * 60 * 1000;
 
-/**
- * Whether a message on this ticket should be emailed as well as shown.
- *
- * A live conversation — replies going back and forth — is read on screen, and an
- * email for every line would be noise on top of the in-app nudge. Once the
- * thread has been quiet for an hour the other side has probably moved on, and
- * mail is what brings them back.
- *
- * `lastMessageAt` must be the ticket's value from BEFORE the new message landed,
- * i.e. when the thread last spoke.
- */
+/** Email as well as bell only once the thread has been quiet an hour — a live conversation is read on screen. `lastMessageAt` must be the value from BEFORE the new message. */
 export function shouldEmailForMessage(ticket: { lastMessageAt: Date }): boolean {
   return Date.now() - ticket.lastMessageAt.getTime() >= IDLE_BEFORE_EMAIL_MS;
 }
 
-/**
- * The one line a hand-over leaves in the thread — internal, so the requester
- * never sees the team's routing — with the handler's note, if they wrote one.
- * Pure, so the wording is testable without a database.
- */
+/** The internal one-liner a hand-over leaves in the thread. Pure, so the wording is testable. */
 export function handoffLine(
   actorName: string,
   change: {
@@ -1470,15 +1218,7 @@ export function handoffLine(
   return trimmed ? `${line}: “${trimmed}”` : `${line}.`;
 }
 
-/**
- * Who is told about a hand-over, and how.
- *
- * The person now holding the ticket hears about it, by mail and in-app — it just
- * became their job. When the change leaves NOBODY holding it, the lane's full
- * admins hear instead: a dropped ticket has to land on someone's desk or it
- * quietly ages. The handler is never told about their own action, and taking a
- * ticket yourself tells no one.
- */
+/** Hand-over notice: the new holder hears; if nobody holds it, the lane's admins hear (a dropped ticket must land on someone's desk). Taking it yourself tells no one. */
 export async function notifyTicketHandoff(
   db: TenantClient,
   ticket: TicketRow,
@@ -1556,21 +1296,7 @@ export async function notifyTicketHandoff(
 
 const ESCALATION_SUBJECT_MAX = 140;
 
-/**
- * Hand a customer's ticket up to the platform.
- *
- * The customer's thread stays exactly where it is — on the `support` lane, in
- * the brand's database, worked by the brand's team. What goes up is a NEW
- * ticket on the `brand` lane, in the control plane: raised by the brand admin
- * (the only account that can ask the platform anything), filed into one of the
- * platform's own queues, and linked back by id — each side holds the other's,
- * across the two databases — so both sides see the pair. The platform never
- * reaches the customer conversation itself; it reads the admin's account of
- * it, which the opening message carries by hand.
- *
- * One escalation per ticket: the link is unique, and a second attempt answers
- * 409 rather than opening a duplicate the platform would answer twice.
- */
+/** Escalates a customer ticket: a NEW brand-lane ticket in the control plane, linked by id across the two DBs. The platform never reads the customer thread — only the admin's account of it. One escalation per ticket (409 on a repeat). */
 export async function escalateTicket(
   db: TenantClient,
   ticket: TicketRow,
@@ -1655,31 +1381,15 @@ export async function escalateTicket(
 export const MIN_STARS = 1;
 export const MAX_STARS = 5;
 
-/**
- * Where a score stops being praise and starts being a complaint.
- *
- * 1–2 stars pages the team by email; 3 and up is a statistic. The line is here,
- * once, so the notification rule and any future reporting can't drift apart.
- */
+/** 1-2 stars pages the team by email; 3+ is a statistic. Defined once so reporting can't drift. */
 export const POOR_RATING_MAX = 2;
 
-/**
- * A ticket is only rateable once the work is finished. Rating an open thread
- * would score an unfinished job, and the number would say nothing useful.
- */
+/** Only finished work is rateable — scoring an open thread says nothing useful. */
 export function isRateable(status: TicketStatus | string): boolean {
   return status === "resolved" || status === "closed";
 }
 
-/**
- * Record the requester's score. Changing your mind is allowed while the ticket
- * stays resolved or closed — someone who fires off one star in frustration and
- * then sees the fix land should be able to say so.
- *
- * Handlers hear about it only when the score actually CHANGES, so re-submitting
- * the same answer is silent. A poor score also sends mail: that one is a request
- * for another look, not a statistic.
- */
+/** Records a rating. Re-rating is allowed while resolved/closed; handlers hear only when the score CHANGES, and a poor score also mails (it's a request for another look). */
 export async function rateTicket(
   db: TenantClient,
   ticket: TicketRow,
@@ -1738,16 +1448,7 @@ export async function deleteTicket(db: TenantClient, id: string): Promise<void> 
   for (const a of attachments) void deleteObject(a.key);
 }
 
-/**
- * Fold one ticket into another: every message and file of `sourceId` moves into
- * `targetId`, a system line records where they came from, and the source is
- * deleted. The target's number and reference are what survive — links and emails
- * that point at it keep working.
- *
- * Only two tickets from the SAME requester may be merged. Merging exists for the
- * duplicate someone raised twice; folding one person's thread into another's
- * would show each of them the other's messages.
- */
+/** Folds `sourceId` into `targetId` (target's reference survives) and deletes the source. SAME requester only — merging two people's threads would show each the other's messages. */
 export async function mergeTickets(
   db: TenantClient,
   targetId: string,

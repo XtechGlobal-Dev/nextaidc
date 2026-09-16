@@ -2,12 +2,8 @@ import "dotenv/config";
 import { loadSettings, getEffective, getPromptTemplate } from "../src/services/settings.js";
 import { compileMasterPrompt, type AgentConfig } from "../src/lib/agentConfig.js";
 
-/* ------------------------------------------------------------------ *
- *  READ-ONLY diagnostic: for every agent, compare the AI Brain config
- *  stored in the DB against the LIVE Vapi assistant's system prompt.
- *  Answers: "do FAQs / scenarios / services actually reach the call?"
- *  Prints no secrets. Makes no writes.
- * ------------------------------------------------------------------ */
+// READ-ONLY: compare each agent's stored config against the live Vapi prompt — do FAQs/scenarios/services
+// actually reach the call? Prints no secrets.
 
 // A brand's workspace lives in the brand's database (phase 6): BRAND=<slug> picks it.
 import { prisma } from "./_brandDb.js";

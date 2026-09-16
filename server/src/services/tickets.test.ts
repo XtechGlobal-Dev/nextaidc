@@ -2,23 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MAX_ATTACHMENTS_PER_MESSAGE } from "../lib/ticketFiles.js";
 import type { TicketActor } from "./tickets.js";
 
-/* ------------------------------------------------------------------ *
- *  What decides who can see and touch a ticket.
- *
- *  Four things here are load-bearing, and each is exercised directly
- *  rather than through a route:
- *
- *   - the SIGNATURE on a staged attachment — without it a client could
- *     claim any S3 key, or any URL, as "their upload";
- *   - the LANE + TENANT filter — the wall between a brand's customers,
- *     another brand's, and the platform;
- *   - DEPARTMENT + OWNERSHIP scoping for staff;
- *   - the notification fan-out, which must never reach across a lane.
- *
- *  Since phase 4 every function takes the lane's database; the stand-in
- *  below plays the brand's database and the control plane alike, and the
- *  escalation pair is read across the two.
- * ------------------------------------------------------------------ */
+// Who can see and touch a ticket: attachment signatures (or a client claims any S3 key), the
+// lane + tenant wall, staff scoping, and fan-out that must never cross a lane. One stand-in plays both planes.
 
 const h = vi.hoisted(() => ({
   findUniqueUser: vi.fn(),
@@ -368,9 +353,8 @@ describe("handlerWhere — who answers a queue", () => {
   });
 
   it("includes the brand's admins — and never the platform owner", async () => {
-    // The database IS the brand, so no tenant clause is needed to keep another
-    // brand out; SUPER_ADMIN is excluded by role, so a customer's thread can
-    // never land in the platform owner's bell.
+    // The database IS the brand, so no tenant clause; SUPER_ADMIN is excluded by role
+    // so a customer's thread never lands in the platform owner's bell.
     const where = await handlerWhere(db, "support", "d1");
     expect(where.OR?.[0]).toEqual({ role: "ADMIN" });
     expect(JSON.stringify(where)).not.toContain("SUPER_ADMIN");
@@ -684,9 +668,8 @@ describe("serializeTicketForRequester — the handler's name never crosses over"
   });
 
   it("hands the requester a team, not a person", () => {
-    // The regression this pins: the transcript already collapsed every handler
-    // to "Platform", and then the side panel said "Super Admin is looking after
-    // this." One masked surface is not a mask.
+    // The regression: the transcript masked handlers as "Platform" but the side
+    // panel still said "Super Admin is looking after this."
     expect(serializeTicketForRequester(assigned("brand")).assignedTo).toEqual({
       id: null,
       name: "Platform",

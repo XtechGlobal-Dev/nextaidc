@@ -38,19 +38,8 @@ import { ticketInitials } from "@/components/tickets/ticketUi";
 import { REACTION_EMOJI, type TicketAttachment, type TicketMessage } from "@/types/ticket";
 import { fileKind, formatBytes } from "@/lib/ticketFiles";
 
-/* ------------------------------------------------------------------ *
- *  The conversation itself, shared by every ticket surface.
- *
- *  `perspective` decides which side "mine" is on — a handler's reply
- *  sits right in the inbox and left in the requester's panel — and
- *  nothing else changes, so both ends read the same conversation.
- *
- *  Everything a chat is expected to do to a message that has already
- *  been sent lives here: reply-with-quote (tap the quote to jump back
- *  to what it quotes), react, edit, delete, copy, and the sent/seen
- *  mark under the newest thing you said. The page above supplies the
- *  handlers; any it leaves out simply doesn't appear.
- * ------------------------------------------------------------------ */
+// Ticket conversation shared by every surface. `perspective` only decides which side is "mine".
+// Handlers the page leaves out simply don't appear.
 
 const KIND_ICON = {
   image: ImageIcon,
@@ -87,18 +76,11 @@ function timeLabel(iso: string): string {
 /* ------------------------------ Message text ------------------------------ */
 
 const URL_SOURCE = "(?:https?://[^\\s<]+[^\\s<.,:;\"')\\]}]|www\\.[^\\s<]+[^\\s<.,:;\"')\\]}])";
-// Two copies on purpose. The splitter needs the /g flag to find every link, and
-// a /g regex carries `lastIndex` between calls — so testing a part with the SAME
-// object would skip every other link. The matcher below is deliberately unflagged.
+// Two regexes on purpose: a /g regex carries `lastIndex` between calls, so testing with the splitter would skip every other link.
 const URL_SPLIT = new RegExp(`(${URL_SOURCE})`, "gi");
 const URL_MATCH = new RegExp(`^${URL_SOURCE}$`, "i");
 
-/**
- * Message text with its links made clickable.
- *
- * Built by splitting on a URL pattern rather than by injecting HTML: the body is
- * whatever the other party typed, so it must never reach the DOM as markup.
- */
+/** Linkified message text. Split on a URL pattern, never injected as HTML: the body is untrusted input. */
 function MessageText({ body }: { body: string }) {
   const parts = useMemo(() => body.split(URL_SPLIT), [body]);
   return (
@@ -443,10 +425,7 @@ export interface TicketThreadProps {
   loading?: boolean;
   className?: string;
   emptyHint?: string;
-  /**
-   * When the OTHER side last opened this thread. Anything I sent before it has
-   * been seen — that is the second tick under my newest message.
-   */
+  /** When the other side last opened the thread; anything I sent before it gets the second tick. */
   otherReadAt?: string | null;
   /** e.g. "Support is typing…" — shown as a bubble at the foot of the thread. */
   typingLabel?: string | null;
@@ -524,9 +503,7 @@ export function TicketThread({
     if (atBottom) setUnseenCount(0);
   }, []);
 
-  // Stick to the newest message — but only when that's where we already were.
-  // Counting the DELTA (not just "one more") keeps the pill honest when a burst
-  // of messages lands while someone is reading further up.
+  // Stick to the newest only if already there. Count the delta so a burst of messages keeps the pill honest.
   const seenCount = useRef(messages.length);
   useEffect(() => {
     const arrived = messages.length - seenCount.current;
@@ -544,12 +521,8 @@ export function TicketThread({
     scrollToBottom();
   }, [loading, scrollToBottom]);
 
-  // Stay pinned while the content is still settling.
-  //
-  // A screenshot takes up its real height only once it has loaded, and every one
-  // of them pushes the newest message further down. With nothing watching for
-  // that, opening a thread full of images leaves you a few hundred pixels short
-  // of the message you came to read.
+  // Stay pinned while images load: each one grows to its real height and pushes the newest message down,
+  // leaving you a few hundred pixels short without this.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -614,12 +587,13 @@ export function TicketThread({
 
   let lastDay = "";
 
+  // Wallpaper on the wrapper, not the scroller: it stays put while the messages scroll over it.
   return (
-    <div className={cn("relative flex min-h-0 flex-col", className)}>
+    <div className={cn("ticket-wallpaper relative flex min-h-0 flex-col", className)}>
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="ticket-wallpaper min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-4 sm:px-6"
+        className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-4 sm:px-6"
       >
         {messages.map((m, index) => {
           const day = dayLabel(m.createdAt);
@@ -655,9 +629,7 @@ export function TicketThread({
           const isAuthor = mine && (!m.authorId || !meId || m.authorId === meId);
           const withinEditWindow = Date.now() - new Date(m.createdAt).getTime() < editWindowMs;
           const canEditThis = !!onEdit && isAuthor && !m.deleted && !m.pending && withinEditWindow;
-          // Your own message is always yours to take back; a moderator may pull
-          // anyone's — a card number in the thread has to be removable by
-          // whoever is looking at it.
+          // Own messages are always deletable; a moderator may pull anyone's (a card number in the thread must be removable).
           const canDeleteThis =
             !!onDelete && !m.deleted && !m.pending && (isAuthor || canModerate);
 
@@ -801,9 +773,7 @@ function MessageRow({
           <p className="px-1 text-[11px] font-medium text-muted-foreground">{m.authorName}</p>
         )}
 
-        {/* The actions sit on the OUTSIDE of the bubble — left of mine, right of
-            theirs — so they never cover the text they act on. Ordering does the
-            work rather than a reversed row, which would also flip the bubble. */}
+        {/* Actions sit outside the bubble via ordering, not a reversed row (which would also flip the bubble). */}
         <div className="flex items-end gap-1">
           {!m.deleted && (
             <MessageActions
@@ -852,9 +822,7 @@ function MessageRow({
               </p>
             ) : (
               <>
-                {/* Attachment first, text under it — the caption order every
-                    chat app uses. The picture is what the message IS; the words
-                    are about it. */}
+                {/* Attachment first, text under it as the caption, like every chat app. */}
                 {m.attachments.length > 0 && (
                   <Attachments
                     attachments={m.attachments}

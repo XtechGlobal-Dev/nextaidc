@@ -1,15 +1,7 @@
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 
-/**
- * Responsive toast host.
- *
- * On phones/tablets (< 640px) toasts drop in as a centered, full-width banner
- * from the top — the way native OS notifications appear — with generous edge
- * insets and rounded, elevated cards. On desktop they return to the compact
- * top-right corner. `richColors` gives every type (success / info / warning /
- * error·failed / loading·pending) its own native-looking colour treatment.
- */
+/** Toast host: top-center banner below 640px (like native notifications), compact top-right on desktop. */
 export function AppToaster() {
   const [isMobile, setIsMobile] = useState(false);
 

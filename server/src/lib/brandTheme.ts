@@ -1,10 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Brand theme catalog — the colours and typefaces a brand can be set
- *  to, defined ONCE here and served to the admin UI via
- *  GET /api/super/brands/catalog. The picker never carries its own copy,
- *  so a palette added here appears in the UI and validates on save with
- *  no second edit and no chance of the two lists drifting apart.
- * ------------------------------------------------------------------ */
+// Brand theme catalog (colours + typefaces). Single source — the admin picker fetches this rather than
+// carrying its own copy, so the lists can't drift.
 
 export interface ColorPreset {
   id: string;
@@ -53,11 +48,7 @@ export interface FontOption {
   note: string;
 }
 
-/**
- * Two families of typeface, because the two read very differently to a
- * customer: **Business** is the geometric/grotesque sans a software product
- * wears, **Classic** is the serif a law firm, clinic or established trade wears.
- */
+/** Two groups: Business (sans, software feel) and Classic (serif, law firm / clinic feel). */
 export const FONTS: FontOption[] = [
   {
     id: "inter",
@@ -162,11 +153,7 @@ export function isHexColor(v: string): boolean {
 
 /* --------------------------------- Slugs --------------------------------- */
 
-/**
- * Subdomain labels the platform needs for itself. A brand claiming one of these
- * would take over the marketing site, the API or the mail domain's well-known
- * hosts — so they're refused at create time rather than discovered later.
- */
+/** Subdomains the platform needs itself — a brand claiming one would hijack the API or mail hosts. */
 export const RESERVED_SLUGS = new Set([
   "www", "api", "app", "admin", "dashboard", "portal", "mail", "smtp", "imap",
   "ftp", "cdn", "static", "assets", "status", "help", "support", "docs", "blog",

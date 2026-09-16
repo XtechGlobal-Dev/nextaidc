@@ -33,9 +33,7 @@ function transcriptToText(call: CallLog): string {
 }
 
 async function copyTranscript(call: CallLog) {
-  // An archived call arrives from the list without its transcript, so fetch it
-  // before copying — otherwise the owner silently gets "No transcript
-  // available" for a call that has one.
+  // Archived calls come without a transcript — fetch first or the copy silently says "No transcript available".
   const full = (await useCallsStore.getState().ensureTranscript(call.id)) ?? call;
   const text = transcriptToText(full);
   try {

@@ -36,10 +36,7 @@ import {
 import type { SmsInfoItem } from "@/types";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
-/*  Text Info to Callers — the catalogue of details the AI may text a  */
-/*  caller who asks for one mid-call.                                  */
-/* ------------------------------------------------------------------ */
+// Text Info to Callers — the catalogue of details the AI may text a caller mid-call.
 
 /** Card: the master switch plus one editable row per textable detail. */
 export function CallerInfoSmsCard({ locked = false }: { locked?: boolean }) {
@@ -52,9 +49,7 @@ export function CallerInfoSmsCard({ locked = false }: { locked?: boolean }) {
 
   const list = items ?? [];
 
-  // The real business details the templates interpolate — so the counter and
-  // preview below show the message the caller will actually receive, not a
-  // placeholder-shaped approximation of it.
+  // Real business details for interpolation, so the counter/preview show the message the caller actually gets.
   const values: SmsInfoValues = useMemo(
     () => ({
       business: profile.businessName ?? "",
@@ -75,9 +70,7 @@ export function CallerInfoSmsCard({ locked = false }: { locked?: boolean }) {
 
   const removeItem = (id: string) => setItems(list.filter((i) => i.id !== id));
 
-  // The limit is on how many details are ENABLED, not how many exist: a business
-  // can keep spare drafts switched off. A newly added detail starts OFF, so it's
-  // clearly a draft the owner is writing — never an active default.
+  // The limit counts ENABLED details, not rows — spare drafts can stay switched off.
   const enabledCount = list.filter((i) => i.enabled).length;
   const atEnableLimit = enabledCount >= MAX_ENABLED_SMS_INFO_ITEMS;
   const atRowLimit = list.length >= MAX_SMS_INFO_ITEMS;
@@ -130,13 +123,9 @@ export function CallerInfoSmsCard({ locked = false }: { locked?: boolean }) {
       {
         id: `sms_${key}_${list.length + 1}`,
         key,
-        // A clear default name so a fresh row never shows the internal key
-        // ("new_detail"); the owner renames it. Kept non-empty so the server's
-        // blank-label backfill never turns it into the raw key.
+        // Non-empty so the server's blank-label backfill never shows the raw key ("new_detail").
         label: "New detail",
-        // Off by default — a new row is a draft the owner writes and then switches
-        // on when ready, never an active default. Switching it on is still gated by
-        // the "up to 3 on" limit.
+        // Off by default — a new row is a draft, never an active default.
         enabled: false,
         whenToUse: "",
         template: "",
@@ -146,9 +135,7 @@ export function CallerInfoSmsCard({ locked = false }: { locked?: boolean }) {
     ]);
   };
 
-  // How many rows will actually be offered on a call — enabled AND able to
-  // render. Surfacing this stops the "it's on but nothing happens" support ticket
-  // when the profile is missing the detail a template needs.
+  // Enabled AND renderable — surfacing this heads off the "it's on but nothing happens" ticket when a profile detail is missing.
   const liveCount = availableSmsInfoItems(list, values).length;
 
   return (
@@ -285,10 +272,8 @@ function SmsInfoRow({
   // template is blank, or it needs a business detail that isn't filled in.
   const preview = buildSmsInfoBody(item, values);
   const missing = requiredPlaceholders(item.template).filter((k) => !values[k]?.trim());
-  // The counter + limit track the MESSAGE the owner types (with its placeholders),
-  // capped at one SMS segment. The rendered send is clamped to the same ceiling
-  // server-side, so a placeholder that expands can't break the single-segment
-  // guarantee either.
+  // Counter tracks the typed template (one SMS segment). The server clamps the rendered send to the
+  // same ceiling, so an expanding placeholder can't break the single-segment guarantee.
   const length = item.template.length;
   const atLimit = length >= SMS_MAX_LENGTH;
   // All three fields are required. Name only appears for custom rows (seeded rows

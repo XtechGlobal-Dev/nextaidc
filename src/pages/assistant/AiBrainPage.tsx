@@ -70,11 +70,8 @@ export default function AiBrainPage() {
   const setTester = useUiStore((s) => s.setAssistantTester);
   const [saving, setSaving] = useState(false);
 
-  // Highlight "Test Call" until the user has actually heard their agent —
-  // it reads as just another toolbar action otherwise. Gated on "never tested"
-  // rather than on the trial, so it nudges admins (who are unlimited, never
-  // "trialing") the same way. Opening the tester clears it for good; so does any
-  // recorded usage, covering a test made on another browser.
+  // Nudge "Test Call" until they've heard the agent. Gated on "never tested", not the trial,
+  // so admins get it too; any recorded usage also clears it (test made on another browser).
   const trial = useTrialStore((s) => s.trial);
   const [testerSeen, setTesterSeen] = useState(false);
   useEffect(() => {
@@ -123,10 +120,7 @@ export default function AiBrainPage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
-  // Refuse to save/deploy while a Notifications field is invalid — a summary
-  // channel with a bad number/email, or an incomplete "Text Info" detail. Surfaces
-  // the first problem, jumps to the Notifications tab so the highlighted field is
-  // visible, and returns false so the caller aborts.
+  // Block save/deploy on an invalid Notifications field; jump to that tab so the highlighted field is visible.
   const guardContactDetails = useCallback((): boolean => {
     const errs = automationContactErrors(config.automations);
     if (errs.length === 0) return true;
@@ -173,14 +167,11 @@ export default function AiBrainPage() {
     proceed();
   }
 
-  // "Save changes" — deploy the edits to the live agent, then continue what the
-  // user was doing. save() swallows failures (toasts + keeps dirty), so gate the
-  // proceed on the flag clearing: if it's still dirty the save failed, so stay
-  // on the prompt and don't navigate away with unsaved edits.
+  // "Save changes" then continue. save() swallows failures (toast + stays dirty), so only
+  // proceed once dirty clears — otherwise we'd navigate away with unsaved edits.
   async function saveThenProceed() {
     if (saving) return;
-    // Invalid contact details block the save: close the prompt and surface the
-    // problem on the Notifications tab instead of deploying a bad number.
+    // Invalid contact details: close the prompt and surface the problem instead of deploying a bad number.
     if (!guardContactDetails()) {
       cancelPrompt();
       return;
@@ -217,9 +208,7 @@ export default function AiBrainPage() {
 
   const currentSection = SECTIONS[activeIndex];
 
-  // Compact progress stepper for tablet & phone (below lg): tappable numbered
-  // nodes + a connecting progress track, the active section title, and
-  // Prev/Next. Replaces the desktop vertical rail on small screens.
+  // Compact stepper that replaces the vertical rail below lg.
   const mobileNav = (
     <div className="rounded-2xl border border-border bg-card p-3 shadow-[var(--shadow-soft)] lg:hidden">
       <div role="tablist" aria-label="AI Brain sections" className="flex items-center">
@@ -311,12 +300,8 @@ export default function AiBrainPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header — sticky so the Save Changes / status bar stays reachable while the
-          user scrolls a long section, instead of forcing a scroll back to the top.
-          Sits just below the global AppHeader (h-16) on desktop; pins to the top on
-          mobile where that header is hidden. --chrome-top adds the impersonation
-          banner's height (0 when absent) so it clears the banner too — without it
-          the bar tucked behind the banner + header stack. */}
+      {/* Sticky header so Save stays reachable. --chrome-top is the impersonation banner height
+          (0 when absent) — without it the bar tucked behind the banner + AppHeader stack. */}
       <div className="sticky top-[var(--chrome-top,0px)] z-30 -mx-4 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background/90 px-4 py-3 backdrop-blur md:-mx-8 md:top-[calc(var(--chrome-top,0px)+4rem)] md:px-8">
         <div className="min-w-0">
           {/* Icon + heading share one aligned row; the description sits full-width
@@ -377,9 +362,7 @@ export default function AiBrainPage() {
       {mobileNav}
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[232px_minmax(0,1fr)]">
-        {/* Pins below both the global AppHeader and the now-sticky page header so
-            the rail never tucks behind them when the canvas scrolls. --chrome-top
-            adds the impersonation banner's height (0 when absent) so it clears that too. */}
+        {/* Pins below AppHeader + sticky page header (+ --chrome-top banner) so the rail never tucks behind them. */}
         <aside className="hidden min-w-0 lg:block lg:sticky lg:top-[calc(var(--chrome-top,0px)+164px)] lg:self-start">
           <div
             role="tablist"

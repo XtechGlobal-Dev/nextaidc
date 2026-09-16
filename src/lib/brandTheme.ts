@@ -1,15 +1,7 @@
 import type { PublicBrand } from "@/lib/api";
 
-/* ------------------------------------------------------------------ *
- *  Painting the app as a white-label brand.
- *
- *  The design tokens in index.css are plain CSS custom properties on
- *  :root, and every utility in the app reads them through var(). So a
- *  brand's palette and typeface are applied by overriding those same
- *  properties inline on <html> — an inline style beats the stylesheet,
- *  and one write re-themes every button, badge, chart and nav item at
- *  once. No re-render, no theme-aware components, no prop drilling.
- * ------------------------------------------------------------------ */
+// White-label theming: override the index.css custom properties inline on <html>. Inline beats the
+// stylesheet, so one write re-themes everything with no re-render or prop drilling.
 
 /** #RGB or #RRGGBB → {h, s, l}. Returns null for anything else. */
 export function hexToHsl(hex: string): { h: number; s: number; l: number } | null {
@@ -69,9 +61,7 @@ function applyFont(stack: string, googleFamily: string) {
   const existing = document.getElementById(FONT_LINK_ID) as HTMLLinkElement | null;
 
   if (googleFamily) {
-    // Weights the UI actually uses (body, medium, semibold, bold). `display=swap`
-    // so text paints in the fallback immediately rather than staying invisible
-    // while the face downloads.
+    // Only the weights the UI uses; `display=swap` so text isn't invisible while the face downloads.
     const family = googleFamily.replace(/ /g, "+");
     const href = `https://fonts.googleapis.com/css2?family=${family}:wght@400;500;600;700&display=swap`;
     if (existing) {
@@ -101,12 +91,7 @@ function setIconLink(rel: string, url: string) {
   link.href = url;
 }
 
-/**
- * Repaint the app as `brand`. Passing null restores the platform's own theme
- * (every property this module set is removed, so index.css takes over again).
- *
- * Safe to call repeatedly and safe outside a browser (SSR/tests no-op).
- */
+/** Repaint the app as `brand`; null removes everything this module set so index.css takes over. No-op outside a browser. */
 export function applyBrandTheme(brand: PublicBrand | null): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;

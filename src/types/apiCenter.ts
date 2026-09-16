@@ -1,11 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Admin → API Center types.
- *
- *  Mirrors the shapes returned by server/src/services/apiCenter.ts and
- *  apiAlerts.ts. Kept in its own module (rather than types/index.ts) because
- *  this is an admin-only surface with a lot of vocabulary, and nothing in the
- *  customer app should have to load it.
- * ------------------------------------------------------------------ */
+// API Center types — mirror server/src/services/apiCenter.ts + apiAlerts.ts. Own module so the
+// customer app never loads this admin-only vocabulary.
 
 export type ApiCategory =
   | "ai"
@@ -23,15 +17,8 @@ export type ApiCategory =
 /** Time window the whole dashboard is scoped to. */
 export type RangeKey = "1h" | "24h" | "7d" | "30d";
 
-/**
- * How a provider is behaving.
- *  - `healthy`        — connected, taking traffic, nothing tripped
- *  - `degraded`       — working, but something is worth knowing about
- *  - `failed`         — actively broken
- *  - `disconnected`   — wired into the platform, but we hold no credentials
- *  - `idle`           — connected and fine, just no traffic in this window
- *  - `not_configured` — a roadmap provider the platform doesn't call yet
- */
+/** Provider health. `disconnected` = wired but no credentials; `idle` = fine, no traffic in window;
+ *  `not_configured` = roadmap provider the platform doesn't call yet. */
 export type HealthState = "healthy" | "degraded" | "failed" | "disconnected" | "idle" | "not_configured";
 
 export type AuthStatus = "ok" | "missing" | "expiring" | "expired" | "failing";
@@ -75,11 +62,7 @@ export interface ProviderRow {
 
   wired: boolean;
   connected: boolean;
-  /**
-   * Whether this deployment actually uses the provider — the code can call it,
-   * and we either hold credentials or have already recorded traffic. Derived at
-   * runtime, so local, staging and production each show their own set.
-   */
+  /** Wired AND (credentials held or traffic recorded). Runtime-derived, so each environment shows its own set. */
   inUse: boolean;
   authMethod: string;
   authLabel: string;
@@ -144,11 +127,7 @@ export interface ProviderRow {
   webhookFailed: number;
   webhookSuccessRate: number | null;
 
-  /**
-   * This provider's own numbers per time bucket, on the same x-axis as every
-   * other provider. Sent per provider so the browser can rebuild the charts and
-   * headline figures for any filtered subset — see `useApiCenter().view`.
-   */
+  /** Per-bucket numbers on the shared x-axis, so the browser can rebuild charts for any filtered subset. */
   trend: {
     requests: number[];
     errors: number[];

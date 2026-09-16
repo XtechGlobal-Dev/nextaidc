@@ -1,15 +1,5 @@
-/**
- * Human Call Transfer service — persistence for the owner's single-number
- * transfer settings, plus a best-effort live-assistant resync so changes reach
- * real inbound calls immediately.
- *
- * The settings and departments live in the brand's own database (phase 2b),
- * so every function here starts by finding the owner's tenant. The agent record
- * the resync reads is still the control plane's until phase 3.
- *
- * The actual in-call transfer is performed by Vapi's `transferCall` tool, which
- * is built from these settings in services/vapi.ts (`buildTransferTool`).
- */
+// Human transfer settings + departments (in the brand's own DB), with a best-effort
+// live-assistant resync so changes reach inbound calls right away.
 import type { Prisma as TenantPrisma } from "@prisma/tenant-client";
 import { tenantForUser } from "./tenantDb.js";
 import { upsertAssistant } from "./vapi.js";
@@ -100,11 +90,7 @@ export async function deleteDepartment(userId: string, id: string) {
   return count > 0;
 }
 
-/**
- * Replace the owner's entire department list in one atomic transaction, then
- * resync the live assistant once. Used by the single "Save Changes" button so
- * adds/edits/removes all commit together (no per-row API churn, one resync).
- */
+/** Replaces the whole department list in one transaction and resyncs once. */
 export async function replaceDepartments(
   userId: string,
   list: {
@@ -140,12 +126,7 @@ export async function replaceDepartments(
   return listDepartments(userId);
 }
 
-/**
- * Re-push the owner's live Vapi assistant so a transfer-settings change (enable,
- * number, timeout, message, departments) reaches real inbound calls immediately —
- * otherwise the tool only refreshes on the next AI-Brain save. Best-effort,
- * fire-and-forget.
- */
+/** Re-pushes the live Vapi assistant so a transfer change lands now, not on the next AI-Brain save. Fire-and-forget. */
 export function resyncAssistant(userId: string): void {
   void (async () => {
     if (!integrationsStatus().vapi) return;
@@ -173,9 +154,7 @@ export function resyncAssistant(userId: string): void {
       await markVapiSynced(db, conversion.id);
     } catch (e) {
       console.error("[transfer] assistant resync failed:", e instanceof Error ? e.message : e);
-      // Fire-and-forget means nobody is watching this promise, so a failure here
-      // is invisible — queue it rather than leaving callers unable to reach a
-      // human because the old transfer config is still live.
+      // Nobody awaits this, so queue the retry or the stale transfer config stays live.
       await markVapiSyncPending(db, conversion.id, e);
     }
   })();

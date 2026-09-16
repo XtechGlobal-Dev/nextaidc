@@ -10,26 +10,8 @@ import {
 } from "../src/lib/agentConfig.js";
 import { upsertAssistant } from "../src/services/vapi.js";
 
-/* ------------------------------------------------------------------ *
- *  One-off heal: sweep a PREVIOUS business name out of a config's
- *  generated free text.
- *
- *  Onboarding writes scenarios, FAQs and quick facts that name the
- *  business ("The caller is an existing customer of Acme"). Renaming
- *  the business didn't rewrite them, so those agents kept talking about
- *  the old business on every live call. The code fix keeps them in sync
- *  from now on — but a config already renamed has lost the old name, so
- *  healing it needs that name supplied here.
- *
- *  Run with:
- *    npm run rename-business -- --from "Acme" [--to "Zenith"] \
- *      [--user someone@example.com] [--dry-run] [--skip-sync]
- *
- *  --to defaults to the config's CURRENT business name (the usual case:
- *  the rename already happened, the text just didn't follow).
- *  --user limits the sweep to one account (email or user id); without it
- *  every agent config is scanned.
- * ------------------------------------------------------------------ */
+// One-off heal: sweep a previous business name out of generated text (the config has lost it, so pass --from).
+// npm run rename-business -- --from "Acme" [--to "Zenith"] [--user email|id] [--dry-run] [--skip-sync]
 
 const argv = process.argv.slice(2);
 const flag = (name: string): string | undefined => {

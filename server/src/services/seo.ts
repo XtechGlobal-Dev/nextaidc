@@ -1,12 +1,7 @@
 import { prisma } from "../prisma.js";
 
-/* ------------------------------------------------------------------ *
- *  Admin-managed custom scripts/tags (SEO & tracking) — raw HTML
- *  snippets (Google Analytics, GTM, Meta Pixel, verification metas…)
- *  pasted in Admin → Settings and injected by the frontend into the
- *  chosen slot on every page load: <head>, start of <body>, or the
- *  footer (end of <body>). No code deploy needed to change them.
- * ------------------------------------------------------------------ */
+// Admin-pasted raw HTML snippets (GA, GTM, pixels) the frontend injects into
+// <head>, body start, or footer — changeable without a deploy.
 
 const SCRIPTS_KEY = "seo.scripts";
 /** Generous per-slot cap — GTM + a couple of pixels fit well within this. */

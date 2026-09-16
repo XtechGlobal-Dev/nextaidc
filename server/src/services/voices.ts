@@ -5,17 +5,8 @@ import { getEffective, type VoiceProvider } from "./settings.js";
 import { traceFetch } from "./apiTrace.js";
 import { isAdminRole } from "../lib/roles.js";
 
-/* ------------------------------------------------------------------ *
- *  Voice catalog + plan entitlement.
- *
- *  The AI-Brain voice picker is driven by a static catalog of Deepgram
- *  Aura-2 voices (Deepgram has no public "list voices" API to fetch). Each
- *  voice id is a Deepgram short name (e.g. "theia"), stored verbatim in
- *  agent_config and sent both to Vapi's "deepgram" provider (model "aura-2")
- *  and to /api/tts for the spoken preview. Each plan unlocks a subset
- *  (`allowedVoices`); callers can preview any voice but only *select* an
- *  entitled one. Voices span Australian (brand default), British and American.
- * ------------------------------------------------------------------ */
+// Voice catalog + plan entitlement. Deepgram voices are a static list (no list API);
+// ids are stored verbatim in agent_config. Anyone can preview a voice, only entitled ones can be selected.
 
 export interface CatalogVoice {
   id: string; // Deepgram voice short name — stored in agent_config + sent to Vapi/TTS
@@ -24,9 +15,7 @@ export interface CatalogVoice {
   region: string; // accent bucket, e.g. "Australian"
   previewUrl: string | null; // null — Deepgram has no per-voice CDN; preview synthesised via /api/tts
   gender?: "male" | "female" | null; // from ElevenLabs labels; drives gender-matched default names
-  /** ISO 639-1 code of the language this voice was curated for (see
-   *  CURATED_VOICE_SPECS) — only set on curated voices. Absent on
-   *  premade/Deepgram voices, which aren't tied to one language. */
+  /** ISO 639-1 code, curated voices only — premade/Deepgram voices aren't tied to one language. */
   language?: string;
 }
 
@@ -34,10 +23,7 @@ export interface CatalogVoice {
  *  even on a plan the admin hasn't assigned any voices to. Australian female. */
 export const DEFAULT_VOICE_ID = "theia"; // Emma — Deepgram aura-2-theia-en (Australian female)
 
-/** The Deepgram Aura-2 voices we offer, across accents. Australian leads (the
- *  brand's accent + free default); British/American give the picker real choice
- *  and let admins gate premium voices per plan. Keep this in sync with the client
- *  (src/data/voices.ts) — both sides resolve/validate voiceIds against it. */
+// Deepgram Aura-2 catalog. Keep in sync with src/data/voices.ts — both sides validate voiceIds against it.
 const CATALOG: CatalogVoice[] = [
   // Australian (brand default leads)
   { id: "theia", name: "Theia", descriptor: "Warm & Friendly", region: "Australian", previewUrl: null, gender: "female" },
@@ -89,9 +75,7 @@ const CATALOG: CatalogVoice[] = [
 /** Valid Deepgram voice ids (the catalog) — used to validate/resolve a stored voiceId. */
 export const CATALOG_VOICE_IDS = new Set(CATALOG.map((v) => v.id));
 
-/** Resolve a stored voiceId to a valid Deepgram voice short name: pass current
- *  catalog ids through, else fall back to the default (guards empty/unknown ids).
- *  Sent to Vapi's "deepgram" provider + /api/tts. */
+/** Stored voiceId -> valid Deepgram short name, defaulting on empty/unknown. */
 export function deepgramVoiceFor(voiceId: string | undefined | null): string {
   if (voiceId && CATALOG_VOICE_IDS.has(voiceId)) return voiceId;
   return DEFAULT_VOICE_ID;
@@ -103,36 +87,23 @@ export async function getVoiceCatalogFor(provider: VoiceProvider): Promise<Catal
   return provider === "elevenlabs" ? getElevenLabsCatalog() : CATALOG;
 }
 
-/** The universal default agent voice — a warm female ElevenLabs voice (Sarah). Every
- *  new agent starts here and stays here until the owner changes it in the AI Brain.
- *  (Same id as DEFAULT_ELEVENLABS_VOICE, inlined to avoid a forward reference.) */
+/** Default agent voice (Sarah, ElevenLabs). Same id as DEFAULT_ELEVENLABS_VOICE, inlined to avoid a forward reference. */
 export const DEFAULT_AGENT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"; // Sarah (ElevenLabs premade)
 
-/** Which provider a voiceId belongs to — a Deepgram catalog name → "deepgram"; any
- *  other non-empty id is an ElevenLabs voice_id → "elevenlabs"; empty → ElevenLabs
- *  (the default voice's provider). Both providers run side-by-side via Vapi; the id
- *  itself decides which engine plays it, so no toggle is needed. */
+/** Provider for a voiceId: Deepgram catalog name -> "deepgram", anything else (or empty) -> "elevenlabs". The id decides the engine, so there's no toggle. */
 export function providerForVoiceId(voiceId: string | undefined | null): VoiceProvider {
   const v = (voiceId ?? "").trim();
   if (!v) return "elevenlabs";
   return CATALOG_VOICE_IDS.has(v) ? "deepgram" : "elevenlabs";
 }
 
-/* ------------------------------ ElevenLabs voices ------------------------- *
- *  When the admin flips the global voice-provider toggle to ElevenLabs, we drive
- *  the picker from ElevenLabs' *premade* voice library (fetched live from their
- *  API, cached) — exactly as the app did before the Deepgram migration. Premade
- *  ids are account-stable, so the same id plays both in our preview (our
- *  ElevenLabs key) and on the live agent (Vapi's "11labs" provider). Voices the
- *  user picks in this mode store the real ElevenLabs voice_id verbatim.
- * -------------------------------------------------------------------------- */
+// ElevenLabs voices: the premade library, fetched live and cached. Premade ids are
+// account-stable, so the same id plays in our preview and on Vapi's "11labs" provider.
 
 /** The voice used when nothing else resolves in ElevenLabs mode (a premade id). */
 export const DEFAULT_ELEVENLABS_VOICE = "EXAVITQu4vr4xnSDxMaL"; // Sarah (ElevenLabs premade)
 
-/** Legacy map: a *stored Deepgram* voiceId (from a config saved in Deepgram mode)
- *  → a close ElevenLabs premade, so an agent that hasn't re-picked in ElevenLabs
- *  mode still speaks a sensible voice instead of the default for everyone. */
+// Legacy: stored Deepgram id -> a close ElevenLabs premade, so old configs don't all collapse to the default.
 const LEGACY_DEEPGRAM_TO_ELEVEN: Record<string, string> = {
   theia: "EXAVITQu4vr4xnSDxMaL", // Sarah
   hyperion: "JBFqnCBsd6RMkjVDRZzb", // George
@@ -142,10 +113,7 @@ const LEGACY_DEEPGRAM_TO_ELEVEN: Record<string, string> = {
   apollo: "CwhRBWXzGAHq8TQ4Fs17", // Roger
 };
 
-/** Resolve a stored voiceId to an ElevenLabs voice_id for the "11labs" provider +
- *  /api/tts. Three cases: (1) empty → default; (2) a legacy Deepgram catalog name
- *  → its mapped premade (or default); (3) anything else is already a real
- *  ElevenLabs voice_id (picked from the ElevenLabs catalog) → passed through. */
+/** Stored voiceId -> ElevenLabs voice_id: empty -> default, legacy Deepgram name -> mapped premade, else passed through. */
 export function elevenLabsVoiceFor(voiceId: string | undefined | null): string {
   const v = (voiceId ?? "").trim();
   if (!v) return DEFAULT_ELEVENLABS_VOICE;
@@ -179,21 +147,8 @@ let elevenCache: { at: number; voices: CatalogVoice[] } | null = null;
 /** The in-flight refresh, so concurrent callers share one ElevenLabs request. */
 let elevenInflight: Promise<CatalogVoice[]> | null = null;
 
-/* --------------------------- Curated extra voices ------------------------- *
- *  ElevenLabs' *premade* library (what /v1/voices returns, above) carries no
- *  Chinese and no Punjabi voice, and only one Australian — so those groups are
- *  pinned here by voice_id.
- *  Every id is already in our ElevenLabs account and verified on Vapi, so it plays
- *  in /api/tts and on the live agent exactly like a premade id does.
- *
- *  Pinned, not discovered, on purpose: the ids are stable, nothing is imported into
- *  the ElevenLabs account at runtime, and the catalog can't drift between boots.
- *  Each voice's name/description/preview is read from the live /v1/voices response
- *  when present — we never invent a persona name for a voice we can't see.
- *
- *  To add a voice: drop its id in the right group. To add a language: add a spec and
- *  a preview line in src/hooks/useVoicePreview.ts (PREVIEW_LINES).
- * -------------------------------------------------------------------------- */
+// Curated voices pinned by id (premade lacks Chinese/Punjabi, has one Australian). Pinned, not
+// discovered, so the catalog can't drift between boots. New language = a spec here + a PREVIEW_LINES entry.
 
 interface CuratedVoiceSpec {
   /** ISO 639-1 code — tags the voice so the picker can preview it in its own
@@ -203,15 +158,7 @@ interface CuratedVoiceSpec {
   region: string;
   /** Human name of the language, used only for a fallback display label. */
   label: string;
-  /** Pinned ElevenLabs voice ids. `name` is the display name — pinned voices
-   *  aren't always visible in /v1/voices, so relying on the account lookup can
-   *  leave them with "Hindi Female 1"-style fallbacks. `gender` is optional —
-   *  when omitted it's read from the account's own label. `descriptor` overrides
-   *  the account's description label — some account voices carry a paragraph-long
-   *  description that would flood the picker. `language` overrides the spec
-   *  language for one voice — used in the Indian group, where ElevenLabs
-   *  verifies some voices as English-India ("en") and others as Hindi ("hi"),
-   *  so each previews in the language it actually carries. */
+  /** Pinned ids. `name` because pinned voices aren't always in /v1/voices; `descriptor` because some account descriptions are paragraph-long; per-voice `language` for the Indian group where ElevenLabs verifies some as "en" and some as "hi". */
   voiceIds: {
     id: string;
     name?: string;
@@ -225,9 +172,7 @@ interface CuratedVoiceSpec {
 }
 
 const CURATED_VOICE_SPECS: CuratedVoiceSpec[] = [
-  // Extra AUSTRALIAN voices (the brand accent) joining premade Charlie. All are
-  // professional Voice-Library voices added to our ElevenLabs account, so their
-  // ids play in /api/tts and on Vapi exactly like premade ids do.
+  // Extra Australian voices (the brand accent) joining premade Charlie.
   {
     language: "en",
     region: "Australian",
@@ -249,12 +194,8 @@ const CURATED_VOICE_SPECS: CuratedVoiceSpec[] = [
       { id: "bZtjnyJAFD0Cp3lfNG5g", gender: "male" },
     ],
   },
-  // Hindi + Indian-English voices head the INDIAN group. All are Voice-Library
-  // voices added to our account, and all speak BOTH Hindi and Indian-accented
-  // English on the default turbo v2.5 model — no special model routing needed.
-  // Per-voice `language` mirrors what ElevenLabs verified each voice as
-  // (verified_languages): "en" → English-India voices preview in English;
-  // the rest inherit the spec's "hi" and preview with the Hinglish line.
+  // Indian group: all speak Hindi and Indian English on turbo v2.5, no model routing.
+  // Per-voice `language` mirrors ElevenLabs' verified_languages so each previews in its own.
   {
     language: "hi",
     region: "Indian",
@@ -272,11 +213,8 @@ const CURATED_VOICE_SPECS: CuratedVoiceSpec[] = [
       { id: "SV61h9yhBg4i91KIBwdz", name: "Amit", gender: "male", language: "en" },
     ],
   },
-  // Punjabi joins the existing INDIAN group rather than forming a group of one.
-  // Ids verified working — they resolve as Jaskirat / Pind Waali Desi Punjabi Voice.
-  // Hidden for now (kept fully configured) — remove `hidden` to bring the Punjabi
-  // voices back in the picker + admin Voice Bank. Pairs with the Punjabi language
-  // being commented out in agentConfig.ts SUPPORTED_AGENT_LANGUAGES.
+  // Punjabi sits in the Indian group. Hidden for now — pairs with Punjabi being
+  // commented out in agentConfig.ts SUPPORTED_AGENT_LANGUAGES; drop `hidden` to re-enable.
   {
     language: "pa",
     region: "Indian",
@@ -287,9 +225,7 @@ const CURATED_VOICE_SPECS: CuratedVoiceSpec[] = [
       { id: "RxnH5jCRKb1ez2lcmQC1", gender: "male" },
     ],
   },
-  // Nepali gets its own group — it's a separate country and language, not an
-  // Indian regional accent, and grouping it under "Indian" would mislabel it in
-  // the picker.
+  // Nepali is its own group — filing it under "Indian" would mislabel it.
   {
     language: "ne",
     region: "Nepali",
@@ -298,11 +234,7 @@ const CURATED_VOICE_SPECS: CuratedVoiceSpec[] = [
   },
 ];
 
-/** Voices that only sound right on Eleven v3, keyed by the ISO code of the
- *  language they carry. Turbo v2.5 doesn't render these convincingly.
- *
- *  Static (derived from the specs above), so the model routing is correct
- *  immediately — no catalog fetch has to have happened first. */
+// Languages whose voices only sound right on Eleven v3. Static so routing is correct before any catalog fetch.
 const V3_VOICE_LANGUAGES: readonly string[] = ["pa", "ne"];
 
 const V3_VOICE_IDS = new Set(
@@ -311,11 +243,8 @@ const V3_VOICE_IDS = new Set(
   ),
 );
 
-/** The curated Chinese + Punjabi voices, enriched from our ElevenLabs account.
- *  `accountVoices` is the raw /v1/voices list (all categories — these come back as
- *  "generated"/"cloned", not "premade", which is why they need pinning at all).
- *  A voice missing from that list still appears, under a plain fallback label — a
- *  visible signal that the id isn't reachable with the configured API key. */
+// Curated voices enriched from the account list. One missing from the account still
+// shows under a plain fallback label — a visible sign the id isn't reachable with this key.
 function getCuratedExtraVoices(accountVoices: ElevenVoice[]): CatalogVoice[] {
   const byId = new Map(accountVoices.map((v) => [v.voice_id, v]));
 
@@ -391,19 +320,7 @@ function describeEleven(
   return { name, descriptor, region };
 }
 
-/** The ElevenLabs premade voice library, normalised for the picker.
- *
- *  Fast path by design — this sits in front of the AI-Brain voice picker, so it must
- *  never make a user wait on ElevenLabs:
- *   - fresh cache → returned immediately;
- *   - STALE cache → returned immediately AND refreshed in the background, so only
- *     the very first caller after a boot ever pays the network cost (previously
- *     every request that crossed the 10-minute expiry blocked on a full fetch);
- *   - concurrent cold calls share ONE in-flight fetch. /api/voices resolves the
- *     catalog three times per request (entitlement + current voice + the list), which
- *     on a cold cache fired three simultaneous ElevenLabs requests.
- *
- *  Falls back to a small stable set when the key is missing or the API is unreachable. */
+/** ElevenLabs catalog for the picker. Stale cache is served immediately and refreshed in the background (only the first caller after boot waits); concurrent cold calls share one fetch. */
 export async function getElevenLabsCatalog(): Promise<CatalogVoice[]> {
   if (elevenCache) {
     const stale = Date.now() - elevenCache.at >= ELEVEN_CACHE_TTL_MS;
@@ -471,13 +388,8 @@ async function fetchElevenLabsCatalog(): Promise<CatalogVoice[]> {
   }
 }
 
-/* ------------------------- Eleven v3 model routing ------------------------- *
- *  Turbo v2.5 doesn't carry every language convincingly. The voices that need a
- *  different TTS model are listed above (V3_VOICE_LANGUAGES); a call switches to
- *  Eleven v3 only when the agent is on one of those voices AND has the matching
- *  language enabled. Every other voice/language pair keeps eleven_turbo_v2_5
- *  (cheaper + lower latency) exactly as before.
- * -------------------------------------------------------------------------- */
+// Eleven v3 routing: only when a V3_VOICE_LANGUAGES voice is paired with its language.
+// Everything else stays on turbo v2.5 (cheaper, lower latency).
 
 export const ELEVEN_DEFAULT_MODEL = "eleven_turbo_v2_5";
 export const ELEVEN_V3_MODEL = "eleven_v3";
@@ -495,9 +407,7 @@ export function needsElevenV3Voice(voiceId: string | undefined | null): boolean 
   return V3_VOICE_IDS.has((voiceId ?? "").trim());
 }
 
-/** The ElevenLabs TTS model for a voice + the agent's enabled languages. Eleven v3
- *  only when a v3 voice is paired with the language it was pinned for; everything
- *  else stays on turbo. */
+/** TTS model for a voice + enabled languages: v3 only when a v3 voice meets its pinned language. */
 export function elevenLabsModelFor(
   voiceId: string | undefined | null,
   languages: readonly string[] = [],
@@ -517,13 +427,8 @@ export async function elevenLabsVoiceIds(): Promise<Set<string>> {
   return new Set((await getElevenLabsCatalog()).map((v) => v.id));
 }
 
-/* ------------------------------ Voice gender ----------------------------- *
- *  Used to pick a gender-matched default assistant name at onboarding (e.g. a
- *  male voice → "Mark", a female voice → "Jessica"; the two names are
- *  admin-configurable). Covers the headline onboarding voices (LANDING_VOICES),
- *  the always-on default (Sarah), and the offline fallback catalog. A voice not
- *  listed here returns null → the caller keeps its existing default name.
- *  NOTE: when adding a new landing/onboarding voice, add its gender here too. */
+// Voice gender for gender-matched default assistant names at onboarding. Unknown -> null
+// (caller keeps its name). Add a new landing/onboarding voice's gender here too.
 const VOICE_GENDER: Record<string, "male" | "female"> = {
   // Headline landing voices (see src/data/voices.ts → LANDING_VOICES).
   XrExE9yKIg1WjnnlVkGX: "female", // Matilda
@@ -554,9 +459,7 @@ export function voiceGender(voiceId: string | undefined | null): "male" | "femal
   return VOICE_GENDER[voiceId] ?? null;
 }
 
-/** Like voiceGender, but also consults the live ElevenLabs catalog's gender
- *  labels — so Voice Bank picks (any premade voice, not just the headline set)
- *  can drive a gender-matched default name. Null when still unknown. */
+/** voiceGender plus the live ElevenLabs gender labels, so any Voice Bank pick can drive a default name. */
 export async function voiceGenderResolved(
   voiceId: string | undefined | null,
 ): Promise<"male" | "female" | null> {
@@ -569,9 +472,7 @@ export async function voiceGenderResolved(
   return voice?.gender ?? null;
 }
 
-/** Validate + resolve a voiceId against the *live* ElevenLabs catalog. A valid
- *  ElevenLabs id passes through; a legacy Deepgram name is mapped; anything
- *  unknown → the default premade. Used at save time so stored configs self-heal. */
+/** Resolves a voiceId against the live ElevenLabs catalog (unknown -> default). Used at save time so stored configs self-heal. */
 export async function resolveElevenLabsVoiceId(voiceId: string | undefined | null): Promise<string> {
   const v = (voiceId ?? "").trim();
   if (v && (await elevenLabsVoiceIds()).has(v)) return v;
@@ -584,14 +485,8 @@ export function voiceIdList(value: unknown): string[] {
   return value.filter((x): x is string => typeof x === "string");
 }
 
-/* ------------------------------ Voice Bank -------------------------------- *
- *  Voices are curated into admin-defined categories (VoiceCategory). A plan points
- *  at one category; its customers may pick any voice in that category from the AI
- *  Brain. There's no per-voice lock UI — a user simply sees the voices they can use.
- *  Everyone starts on the default voice (Sarah) and can change it once they're on a
- *  plan (trialing or active) whose plan has a category. Admins can pick any voice
- *  from either provider.
- * -------------------------------------------------------------------------- */
+// Voice Bank: a plan points at one admin-defined VoiceCategory; its customers pick from
+// that category only. No per-voice lock UI — users just see what they can use.
 
 export interface VoiceAccess {
   /** AI-Brain voice picker unlocked? (plan with a category — trialing or active — or admin) */
@@ -604,15 +499,10 @@ export interface VoiceAccess {
   planName: string | null;
 }
 
-/** Resolve what voices a user may choose. No-plan / plan-without-category → locked
- *  (canChange:false, empty list) so they stay on the default voice. A plan with a
- *  category, whether trialing or active, unlocks that category's voices — a trial
- *  is a faithful preview of the plan it's trialing, voices included. Admin → every
- *  voice. */
+/** What voices a user may choose. No category -> locked on the default; a plan's category (trialing or active — a trial is a faithful preview) unlocks it; admins get everything. */
 export async function getUserVoiceAccess(userId: string): Promise<VoiceAccess> {
-  // The platform's own people have no workspace: an admin among them gets
-  // every voice. A brand account is read from its brand's database; the plan
-  // it names is the platform's catalogue.
+  // Platform staff have no workspace (role read from Main); a brand account is read
+  // from its brand's DB, and the plan it names is the platform's catalogue.
   const brandId = await brandIdForOwner(userId);
   const tenantProfile = brandId
     ? await (await tenantFor(brandId)).profile.findUnique({
@@ -645,10 +535,8 @@ export async function getUserVoiceAccess(userId: string): Promise<VoiceAccess> {
     };
   }
 
-  // NO restrictions through the whole trial/setup — until the user goes live by
-  // claiming a dedicated number, they can pick ANY voice as a full taste of the
-  // product. Once a number is assigned they're committed to their chosen plan, so
-  // that plan's voice category applies from then on.
+  // No restrictions until a number is claimed — the trial is a full taste of the
+  // product. Once live, the plan's category applies.
   const hasNumber = Boolean(profile?.receptionistNumber?.trim());
   if (!hasNumber) {
     const [dg, el] = await Promise.all([

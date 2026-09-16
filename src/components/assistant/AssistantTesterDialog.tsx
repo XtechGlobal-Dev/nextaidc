@@ -33,9 +33,7 @@ import { toast } from "sonner";
 interface Line {
   role: "agent" | "caller";
   text: string;
-  /** Seconds into the call when this line was spoken. Stamped as the line
-   *  arrives — the saved transcript used to number lines 0s, 5s, 10s… by index,
-   *  which drifted past the call's own duration and matched nothing real. */
+  /** Seconds into the call, stamped on arrival; index-based times used to drift past the call's real duration. */
   at: number;
 }
 
@@ -48,10 +46,7 @@ export function AssistantTesterDialog() {
   const subscriptionStatus = useAuthStore((s) => s.user?.profile?.subscriptionStatus);
   const navigate = useNavigate();
 
-  // A browser test call runs off the CURRENT AI Brain config (built inline in
-  // begin()), so it needs no live assistant / assigned number — a trial user can
-  // test freely, gated only by their remaining trial minutes. Real inbound calls
-  // still need a provisioned number, set up separately via the number wizard.
+  // Test calls run off the current AI Brain config, so no live assistant/number needed; only trial minutes gate them.
 
   const [state, setState] = useState<VapiCallState>("idle");
   const [elapsed, setElapsed] = useState(0);
@@ -65,31 +60,21 @@ export function AssistantTesterDialog() {
   const vapiCallIdRef = useRef<string | null>(null);
   /** Per-call duration cap (seconds) snapshotted when the call starts; null = uncapped. */
   const capSecondsRef = useRef<number | null>(null);
-  /** Same value, rendered. The ref alone can't drive the label — a ref change
-   *  doesn't re-render, so the limit shown during "connecting" only refreshed
-   *  when the state happened to flip, which is how a stale number stayed on
-   *  screen until the call connected and then jumped. */
+  /** Same value as state, because a ref change doesn't re-render and the label went stale during "connecting". */
   const [capSeconds, setCapSeconds] = useState<number | null>(null);
   const applyCap = (v: number | null) => {
     capSecondsRef.current = v;
     setCapSeconds(v);
   };
-  /** The platform's per-call ceiling (seconds), read from the warmed-up payload
-   *  the server builds. It lives ONLY there — an admin can cap every call at, say,
-   *  2 minutes while the account still has 200 plan minutes — so until this lands
-   *  we genuinely don't know what will cut the call. */
+  /** Platform per-call ceiling from the server payload. Only the server knows it (an admin can cap calls at
+   *  2 min on an account with 200 plan minutes), so until it lands we don't know what will cut the call. */
   const [serverCapSeconds, setServerCapSeconds] = useState<number | null>(null);
   /** Whether the 30s-left warning has fired for the current call. */
   const warnedRef = useRef(false);
-  /** The server-built assistant payload, requested as soon as the dialog opens.
-   *  /test-token compiles the wire prompt through the LLM summarizer, which takes
-   *  seconds — awaiting it on click left the button looking dead, so it's warmed
-   *  here and is normally already resolved by the time the user presses start. */
+  /** Server payload warmed on open: /test-token runs an LLM summarizer that takes seconds, and awaiting it on click looked dead. */
   const payloadRef = useRef<Promise<VapiAssistantPayload | null> | null>(null);
-  // Mirror the latest transcript + duration into refs so the deferred end-of-call
-  // save can read the FINAL values without re-subscribing the save effect to them.
-  // (Keying that effect on `lines`/`elapsed` made a late transcript line re-run it,
-  // whose cleanup cancelled the pending save — calls silently never recorded.)
+  // Refs so the end-of-call save reads final values without depending on them; keying the effect on
+  // `lines`/`elapsed` let a late transcript line cancel the pending save, and calls silently went unrecorded.
   const linesRef = useRef<Line[]>([]);
   const elapsedRef = useRef(0);
 
@@ -119,10 +104,7 @@ export function AssistantTesterDialog() {
       .config()
       .then((c) => setVapiKey(c.vapiPublicKey || ""))
       .catch(() => {});
-    // Warm the assistant payload while the user is still reading the dialog.
-    // Deliberately keyed on `open` only: it snapshots the config as opened, which
-    // is what the call will run on, and re-requesting on every keystroke would
-    // fire an LLM summarization per edit.
+    // Warm the payload. Keyed on `open` only: re-requesting per keystroke would fire an LLM summarization per edit.
     setServerCapSeconds(null);
     payloadRef.current = api.agent
       .testToken(config)
@@ -135,10 +117,8 @@ export function AssistantTesterDialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Reopening after a finished call: reset to a clean slate so the previous call's
-  // transcript/timer doesn't linger. close() intentionally leaves them intact on
-  // exit so the save effect can persist them, so we clear them here instead. Only
-  // runs on (re)open and never touches a live call.
+  // Reset on reopen after a finished call. close() leaves transcript/timer intact so the save effect
+  // can persist them, so the clearing has to happen here. Never touches a live call.
   useEffect(() => {
     if (open && state === "ended") {
       setState("idle");
@@ -161,10 +141,7 @@ export function AssistantTesterDialog() {
     };
   }, [state]);
 
-  // Client-side fallback: end the call the moment it reaches the user's remaining
-  // minutes, so the trial/plan allowance can't be overshot even if Vapi's own
-  // maxDurationSeconds cutoff lags. 30s before that, warn the user and cue the
-  // assistant to wrap up gracefully instead of getting cut off mid-sentence.
+  // Client-side cap in case Vapi's maxDurationSeconds cutoff lags; 30s before, warn and cue the assistant to wrap up.
   useEffect(() => {
     const cap = capSecondsRef.current;
     if (state !== "active" || cap == null) return;
@@ -189,19 +166,11 @@ export function AssistantTesterDialog() {
     elapsedRef.current = elapsed;
   }, [elapsed]);
 
-  // When a call ends, persist it so it appears in the Call Inbox + Dashboard and
-  // its minutes are recorded. We save IMMEDIATELY (with `keepalive` so an instant
-  // page refresh can't lose the call or its billed minutes), then enrich the AI
-  // summary + recording a moment later — those arrive via Vapi's end-of-call
-  // report seconds afterwards. The old flow waited ~2.5s and did summarize→create,
-  // so a refresh in that window aborted the request → no history, no deduction.
-  // Keyed on `state` ONLY (transcript/duration come from refs) so a late
-  // transcript line can't re-run this.
+  // Save immediately with keepalive (a refresh during the old 2.5s summarize-then-create window lost the
+  // call and its billed minutes), then enrich summary/recording after. Keyed on `state` only; see refs above.
   useEffect(() => {
     if (state !== "ended" || savedRef.current) return;
-    // Snapshot the duration + transcript NOW (begin()/close() reset the refs).
-    // A connected call (any transcript) bills at least 1 second → rounded up to a
-    // full minute server-side.
+    // Snapshot now (begin()/close() reset the refs). Any transcript bills at least 1s, rounded up to a minute server-side.
     const finalLines = linesRef.current;
     const finalElapsed = Math.max(elapsedRef.current, finalLines.length > 0 ? 1 : 0);
     if (finalElapsed <= 0) return;
@@ -210,9 +179,7 @@ export function AssistantTesterDialog() {
     const firstCaller = finalLines.find((l) => l.role === "caller");
     const transcript = finalLines.map((l) => ({ role: l.role, text: l.text, at: l.at }));
     const report = reportRef.current;
-    // A summary we can send right now, without waiting on a network round-trip —
-    // so the immediate save has something readable. Enriched with the AI summary
-    // below once the user is confirmed still here.
+    // Something readable for the immediate save; the AI summary replaces it below.
     const fallbackSummary =
       report?.summary?.trim() || firstCaller?.text?.slice(0, 140) || `Test call with ${assistantName}`;
 
@@ -266,11 +233,8 @@ export function AssistantTesterDialog() {
     })();
   }, [state, config.identity.assistantName]);
 
-  // Mid-call reload / tab close: the call never reaches "ended", so the save
-  // above never runs and the minutes used so far would be lost. On page hide,
-  // if a call is live and unsaved, persist what we have (elapsed + transcript so
-  // far) as a `missed` call via a keepalive request, so the minutes are still
-  // recorded. `savedRef` keeps this from racing/duplicating the normal end save.
+  // Mid-call reload/tab close never reaches "ended", so persist what we have as a `missed` call via
+  // keepalive so the minutes are still billed. `savedRef` stops it duplicating the normal save.
   useEffect(() => {
     if (state !== "active" && state !== "connecting") return;
     const savePartial = () => {
@@ -314,9 +278,7 @@ export function AssistantTesterDialog() {
       toast.error(blocked?.reason ?? "Your free trial has ended.");
       return;
     }
-    // Flip to "connecting" before any await. Everything below can take a moment,
-    // and without this the button sits idle looking broken until the call starts —
-    // long enough that people press it again and stack calls.
+    // Flip to "connecting" before any await, or the button looks dead and people double-press and stack calls.
     setState("connecting");
     setElapsed(0);
     setLines([]);
@@ -324,22 +286,11 @@ export function AssistantTesterDialog() {
     reportRef.current = null;
     vapiCallIdRef.current = null;
     warnedRef.current = false;
-    // Provisional cap, so an early failure can't leave the call uncapped: the
-    // minutes the user has left, ALREADY lowered to the platform's per-call
-    // ceiling if the warm-up told us one. Showing the bare allowance here was
-    // wrong twice over — it advertised 380:00 on an account capped at 2:00, and
-    // the number then jumped the moment the payload landed. Vapi enforces
-    // maxDurationSeconds server-side; the elapsed-watch effect is the UX fallback.
+    // Provisional cap so an early failure can't leave the call uncapped. Already lowered to the platform
+    // ceiling if known; showing the bare allowance advertised 380:00 on an account capped at 2:00.
     applyCap(plannedCapSeconds);
-    // Build the payload SERVER-side. Only the server can produce the prompt a real
-    // inbound call runs on — the compact wire scaffold, put through the LLM
-    // summarizer, with the REGIONAL STYLE block appended — and it returns the live
-    // booking + info-SMS tools with it. Compiling here instead (the fallback below)
-    // uses the FULL template, skips summarization and drops the regional block, so
-    // the test call would NOT match a real call. The current draft config goes with
-    // the request so unsaved AI Brain edits still apply.
-    // Normally already resolved from the warm-up when the dialog opened; awaiting
-    // it again here is what makes a very fast click still get the right payload.
+    // Server-built payload: only the server produces the prompt a real call runs on (summarized wire
+    // scaffold + regional block + live tools). The local fallback below won't match a real call.
     let payload: VapiAssistantPayload | undefined =
       (await payloadRef.current) ?? undefined;
     try {
@@ -358,10 +309,7 @@ export function AssistantTesterDialog() {
         ...(booking ? { booking } : {}),
       });
     }
-    // The server already stamps the authoritative cap (remaining minutes lowered
-    // to the platform's per-call ceiling). Only ever tighten it here — the local
-    // fallback path above compiles without a cap, so this still guards that case,
-    // but it must never hand the call a longer limit than the server allowed.
+    // Only ever tighten the server's cap (the local fallback compiles without one); never hand the call a longer limit.
     const serverCap = payload?.maxDurationSeconds ?? null;
     setServerCapSeconds(serverCap);
     const effectiveCap = tightest(serverCap, callCapSeconds);
@@ -395,13 +343,8 @@ export function AssistantTesterDialog() {
 
   function close(next: boolean) {
     if (!next && (state === "active" || state === "connecting")) {
-      // Closing via the X (or an outside click) mid-call must end it exactly like
-      // the "End call" button — otherwise the call is dropped without ever reaching
-      // the "ended" state, so the save effect never runs: no call log, no minutes
-      // recorded. Do NOT reset elapsed/lines here — the save effect reads them from
-      // refs on the state→"ended" transition, and clearing them in the same render
-      // would persist an empty, zero-duration call. The reopen effect resets for the
-      // next call.
+      // Closing mid-call must reach "ended" or the save effect never runs (no log, no minutes billed).
+      // Don't reset elapsed/lines here: clearing them in the same render would save an empty call.
       handleRef.current?.stop();
       setState("ended");
     }
@@ -412,26 +355,18 @@ export function AssistantTesterDialog() {
 
   const blocked = trial ? blockedCopy(trial) : null;
   const trialBlocked = Boolean(blocked);
-  // Send a blocked user straight to the in-dashboard plans page with ?renew=1,
-  // which auto-pops the plan confirmation modal (the chosen plan, pre-filled).
-  // A user seeing this modal is on the dashboard, so AppLayout hasn't gated them
-  // (status is trialing/active/past_due, never none/canceled/suspended) and they
-  // always have a subscription row — so the page + modal render in one hop, no
-  // bounce through /subscribe.
+  // ?renew=1 auto-pops the plan modal. Anyone seeing this dialog is already past AppLayout's gate and
+  // has a subscription row, so no bounce through /subscribe is needed.
   const hasPaidPlan = subscriptionStatus === "active" || subscriptionStatus === "past_due";
   const upgradePath = "/dashboard/plans?renew=1";
   const upgradeLabel = hasPaidPlan ? "Renew plan" : "Upgrade plan";
 
-  /** Seconds this call may run, from the live entitlement. `null` = uncapped
-   *  (unlimited plan, or admins/users without a trial). Mirrors the server's
-   *  remainingCallSeconds clamp (Vapi's floor is 10s). */
+  /** Seconds this call may run; null = uncapped. Mirrors the server's remainingCallSeconds clamp (Vapi floor is 10s). */
   const callCapSeconds = (() => {
     if (!trial || trial.unlimited) return null;
     if (trial.phase !== "trial" && trial.phase !== "active") return null;
-    // Auto-renew plan/trial: when minutes run out it auto-renews (paid plan) or
-    // auto-converts the trial to the paid plan, charging the saved card — so don't
-    // cut the live call at the boundary. Grant a full allowance of headroom on top
-    // of what's left (mirrors the server's remainingCallSeconds).
+    // Auto-renew charges the saved card when minutes run out, so don't cut the call at the boundary;
+    // grant a full allowance of headroom (mirrors the server).
     if (
       trial.autoRenew &&
       trial.minutesAllocated > 0 &&
@@ -445,23 +380,15 @@ export function AssistantTesterDialog() {
    *  whichever one isn't set. */
   const plannedCapSeconds = tightest(serverCapSeconds, callCapSeconds);
 
-  /** The cutoff to tell the user about before the call starts, and which of the
-   *  two it is — "your call is capped at 2:00" and "you have 2:00 of plan
-   *  minutes left" are very different messages and must not be worded alike.
-   *
-   *  The platform's per-call ceiling always applies, auto-renew or not. The
-   *  allowance is only worth showing when auto-renew is OFF: otherwise running
-   *  out just renews the plan mid-call, so a countdown is pure noise. */
+  /** Pre-call cutoff and which kind it is: "capped at 2:00" and "2:00 of minutes left" must not read alike.
+   *  The allowance is only shown when auto-renew is off, since otherwise running out just renews. */
   const preCall = preCallCap({
     serverCapSeconds,
     allowanceSeconds: callCapSeconds,
     autoRenew: Boolean(trial?.autoRenew),
   });
 
-  /** ONE rule for the whole lifecycle — idle, connecting and live — so the
-   *  number can't change under the user mid-connect, which is what made the old
-   *  label read 380:00 and then 2:00 seconds later. Once the call is running we
-   *  show the value actually stamped on it (same limit, just authoritative). */
+  /** One rule across idle/connecting/live so the number can't jump mid-connect (380:00 then 2:00). */
   const shownCapSeconds: number | null =
     preCall == null ? null : live ? (capSeconds ?? plannedCapSeconds ?? preCall.seconds) : preCall.seconds;
   const showsLimit = preCall?.kind === "limit";

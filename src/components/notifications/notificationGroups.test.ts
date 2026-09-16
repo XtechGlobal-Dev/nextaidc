@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  The rules behind the notifications slide-over: which chip a notification
- *  falls under, which day-group it lands in, and how its timestamp reads.
- * ------------------------------------------------------------------ */
+// Filter, day-group and timestamp rules for the notifications slide-over.
 
 import {
   filterNotifications,

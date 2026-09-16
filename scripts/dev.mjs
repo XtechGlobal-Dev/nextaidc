@@ -1,11 +1,6 @@
 #!/usr/bin/env node
-/* ------------------------------------------------------------------ *
- *  Root dev orchestrator — run with `npm run dev`.
- *  1. Installs/refreshes dependencies (frontend + backend)
- *  2. Generates the Prisma client + applies DB schema/migrations
- *     (only when a Postgres DATABASE_URL is configured in server/.env)
- *  3. Starts the backend (Express) and frontend (Vite) together
- * ------------------------------------------------------------------ */
+// Root dev orchestrator (`npm run dev`): install deps, sync the DB schema when DATABASE_URL is set,
+// then start backend + frontend together.
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -23,11 +18,8 @@ function run(label, cmd, cwd = root) {
   execSync(cmd, { cwd, stdio: "inherit" });
 }
 
-/** Kill whatever process is listening on the given TCP ports. Best-effort and
- *  cross-platform — on Windows, `concurrently`'s SIGTERM frequently fails to
- *  reap the vite/tsx grandchildren, leaving the port held so the next
- *  `npm run dev` dies with "Port already in use". Clearing them first makes
- *  startup self-healing. Never throws. */
+/** Kill listeners on the given ports. On Windows SIGTERM often fails to reap vite/tsx grandchildren,
+ *  so the next run would die with "Port already in use". Never throws. */
 function freePorts(ports) {
   const isWin = process.platform === "win32";
   const pids = new Set();
@@ -81,15 +73,8 @@ function upsertEnvVar(file, key, value) {
   writeFileSync(file, content);
 }
 
-/** Make sure DIRECT_URL exists, deriving it from DATABASE_URL when it doesn't.
- *  schema.prisma routes the Prisma CLI through `directUrl` because migrate /
- *  db push take a SESSION-level advisory lock (pg_advisory_lock), which a
- *  transaction-mode pooler can't hold — against a pooled host they die with
- *  `P1002 ... Timed out trying to acquire a postgres advisory lock`. Neon's
- *  direct host is the pooled one minus the `-pooler` suffix; anything else (a
- *  plain/local Postgres) is already direct, so the URL copies over unchanged.
- *  Without this, a .env written before `directUrl` was added would instead fail
- *  with "Environment variable not found: DIRECT_URL". */
+/** Derive DIRECT_URL from DATABASE_URL when missing. The Prisma CLI needs a session-level advisory
+ *  lock a transaction-mode pooler can't hold (P1002); Neon's direct host is the pooled one minus `-pooler`. */
 function ensureDirectUrl(envFile) {
   if (readEnvVar(envFile, "DIRECT_URL")) return;
   const pooled = readEnvVar(envFile, "DATABASE_URL");
@@ -139,10 +124,8 @@ try {
     run("Installing backend dependencies", "npm install", server);
   }
 
-  // 2) Database — apply schema/migrations, only if a DB is configured.
-  //    (npm install already (re)generates the Prisma client via postinstall.)
-  //    Soft-fail: a transient error or a locked engine (server already running)
-  //    must not block the servers from starting.
+  // 2) Database — only if configured. Soft-fail: a locked engine (server already running) must not
+  //    block startup.
   const envFile = join(server, ".env");
   const hasDb =
     existsSync(envFile) &&
@@ -156,13 +139,8 @@ try {
     const hasMigrations =
       existsSync(migrationsDir) && readdirSync(migrationsDir).some((f) => !f.startsWith("."));
 
-    // Bring the schema up to date. Prefer migrations, but the migration history
-    // isn't self-contained — it starts mid-stream (no baseline that creates
-    // `profiles`/`users`/etc) and assumes a base schema first laid down via
-    // `db push`. On a fresh/empty DB `migrate deploy` therefore fails (e.g.
-    // ALTER TABLE "profiles" before it exists). When that happens, fall back to
-    // `db push`, which syncs every table straight from schema.prisma regardless
-    // of migration history, so the DB ends up usable either way.
+    // Prefer migrations; the history isn't self-contained (starts mid-stream, assumes a `db push` base),
+    // so on a fresh DB `migrate deploy` fails and we fall back to `db push`.
     let schemaReady = false;
     if (hasMigrations) {
       try {
@@ -186,13 +164,8 @@ try {
       }
     }
 
-    // (Re)generate the Prisma client to match the just-synced schema. Both schema
-    // steps above skip generation (`--skip-generate`; `migrate deploy` never
-    // generates), and `npm install` only generates via postinstall when deps
-    // actually change — so pulling a schema change with unchanged deps would
-    // otherwise leave a STALE client that 500s at runtime (e.g. `prisma.notification`
-    // undefined). Soft-fail: a locked engine (a previous server still running)
-    // must not block startup — close the old server and rerun to pick it up.
+    // Neither schema step generates, and postinstall only runs when deps change — a pulled schema change
+    // would otherwise leave a stale client that 500s at runtime. Soft-fail on a locked engine.
     if (schemaReady) {
       try {
         run("Generating Prisma client", "npx prisma generate", server);
@@ -216,9 +189,7 @@ try {
         const msg = String(e?.message ?? e).split("\n")[0];
         console.log(yellow(`\n⚠ Admin seed skipped (${msg}).`));
       }
-      // Separate from the admin seed above: an existing dev DB already has an
-      // admin, so that step short-circuits and would never create the platform
-      // SUPER_ADMIN that the Brands and Platform Settings panels require.
+      // Separate step: an existing dev DB already has an admin, so the seed above would never create the SUPER_ADMIN.
       try {
         run("Ensuring the super admin exists", "npm run ensure-super-admin", server);
       } catch (e) {
@@ -239,9 +210,7 @@ try {
   //      Runs before the servers start so the API picks up the URL on boot.
   await startNgrok(envFile);
 
-  // 3) Start both servers together (Ctrl+C stops both). Free the ports first so a
-  //    stale process left by a previous run (common on Windows, where SIGTERM
-  //    doesn't reliably reap vite/tsx) doesn't block startup.
+  // 3) Free the ports first so a stale process from a previous run (common on Windows) doesn't block startup.
   freePorts([4000, 5174]);
   run("Starting backend + frontend (Ctrl+C to stop)", "npm run dev:servers", root);
 } catch (err) {

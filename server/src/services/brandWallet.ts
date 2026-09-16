@@ -4,17 +4,8 @@ import { emailsFor } from "./customerDirectory.js";
 import { badRequest, notFound } from "../lib/http.js";
 import { audit } from "./audit.js";
 
-/* ------------------------------------------------------------------ *
- *  Brand wallet — the ledger of what the platform owes a brand.
- *
- *  A customer of Acme pays the platform base + Acme's addon. On every
- *  paid invoice, Acme's share is CREDITED here — from the platform
- *  ledger's row for that payment, which is where the split is decided
- *  (services/platformLedger.ts). The platform owner pays
- *  Acme by hand (bank transfer today, Stripe Connect later) and records a
- *  PAYOUT, which is a negative entry. The balance is never stored — it is
- *  the sum of the ledger, per currency, so it can't drift.
- * ------------------------------------------------------------------ */
+// Brand wallet: what the platform owes a brand. Credits come from the platform ledger row (where the
+// split is decided); payouts are negative entries recorded by hand. Balance is never stored — always summed, so it can't drift.
 
 export type WalletEntryType = "credit" | "payout" | "reversal";
 
@@ -25,17 +16,7 @@ export interface WalletBalance {
   paidOutCents: number;
 }
 
-/**
- * Credit a brand's wallet from a platform-ledger row.
- *
- * The split was decided when the payment was written to the ledger
- * (services/platformLedger.ts): the brand's share is `brandCents`, already
- * proportional to what was actually paid. This only books it — once. The
- * unique invoice id turns every later attempt into a no-op, so whichever
- * path recorded the payment first credits the wallet and the rest find it
- * done. A row with no brand share (a subscription on the platform's own
- * Price) credits nothing.
- */
+/** Books a ledger row's brand share exactly once — the unique invoice id makes every later attempt a no-op. A row with no brand share credits nothing. */
 export async function creditWalletFromLedger(row: {
   brandId: string;
   userId: string;
@@ -46,9 +27,8 @@ export async function creditWalletFromLedger(row: {
 }): Promise<number> {
   if (row.brandCents <= 0) return 0;
   try {
-    // Every invoice-paid path offers the credit; all but the first find it
-    // booked. A read first keeps that common case quiet (no logged unique-
-    // constraint error); the constraint still settles a genuine race below.
+    // Read first so the common "already booked" case doesn't log a unique-constraint error;
+    // the constraint still settles a genuine race below.
     const booked = await prisma.brandWalletEntry.findUnique({
       where: { stripeInvoiceId: row.stripeInvoiceId },
       select: { id: true },
@@ -71,9 +51,8 @@ export async function creditWalletFromLedger(row: {
     });
     return row.brandCents;
   } catch (e) {
-    // P2002 = the invoice was already credited by another path. Anything else
-    // is logged and swallowed: a missed credit is visible against the ledger
-    // and can be reconciled; a failed webhook would be retried forever.
+    // P2002 = already credited elsewhere. Anything else is swallowed: a missed credit is
+    // reconcilable against the ledger, but a failed webhook would retry forever.
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return 0;
     console.warn("Brand wallet credit failed:", e instanceof Error ? e.message : e);
     return 0;
@@ -175,13 +154,7 @@ export async function listWalletEntries(brandId: string, limit = 200): Promise<W
   }));
 }
 
-/**
- * Record that the platform paid the brand. The money moved outside the app —
- * a bank transfer, a Stripe transfer done by hand — so this is bookkeeping:
- * a negative entry that lowers the balance, with the reference the brand can
- * match against its own statement. Never more than the balance in that
- * currency; a wallet does not go negative.
- */
+/** Bookkeeping for a payout made outside the app: a negative entry with a reference. Never more than the balance in that currency — a wallet does not go negative. */
 export async function recordPayout(opts: {
   brandId: string;
   amountCents: number;
@@ -245,16 +218,7 @@ export async function recordPayout(opts: {
   };
 }
 
-/**
- * Undo (part of) a credit when the customer's charge is refunded.
- *
- * Works from Stripe's CUMULATIVE `amount_refunded` on the charge, not from
- * individual refund objects (which the charge payload no longer carries by
- * default): the reversal that should exist in total is the credit scaled by
- * the refunded fraction, and only the difference from what is already booked
- * is written. A replayed or repeated webhook therefore books nothing new, and
- * two partial refunds produce two correctly sized reversals.
- */
+/** Reverses (part of) a credit on refund. Works from Stripe's CUMULATIVE amount_refunded and books only the delta from what's already reversed, so replayed webhooks and partial refunds both come out right. */
 export async function reverseCreditForRefund(opts: {
   invoiceId: string;
   chargeId: string;

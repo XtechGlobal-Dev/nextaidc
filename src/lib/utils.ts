@@ -50,11 +50,7 @@ export function capitalize(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
-/**
- * Title-case a person's name for display (e.g. "redtape" -> "Redtape",
- * "john doe" -> "John Doe"). Only the first letter of each word is forced up —
- * the rest is left untouched so intentional caps (e.g. "McCoy") survive.
- */
+/** Title-case a name ("john doe" -> "John Doe"). Only the first letter of each word changes so "McCoy" survives. */
 export function titleCaseName(value: string): string {
   return value
     .split(/\s+/)

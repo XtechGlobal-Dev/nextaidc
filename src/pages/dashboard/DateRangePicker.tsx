@@ -2,11 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ *
- *  DateRangePicker — a self-contained dual-month calendar range
- *  picker. Works purely in `yyyy-mm-dd` strings (timezone-safe) so it
- *  drops straight into the dashboard's existing custom-range state.
- * ------------------------------------------------------------------ */
+// Dual-month range picker. Works purely in `yyyy-mm-dd` strings (timezone-safe) to match the dashboard's custom-range state.
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",

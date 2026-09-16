@@ -6,14 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api, ApiError, type Brand, type BrandTenantDb } from "@/lib/api";
 
-/* ------------------------------------------------------------------ *
- *  The brand's own database, on its page.
- *
- *  Every brand has one, made when the brand is. The only thing an operator
- *  ever does here is press Retry after a failed setup — everything else is
- *  information: where the database is, whether its schema is current, and
- *  what the last attempt said if it broke.
- * ------------------------------------------------------------------ */
+// The brand's tenant DB (created with the brand). Read-only apart from Retry after a failed setup.
 
 const STATUS: Record<
   BrandTenantDb["status"],

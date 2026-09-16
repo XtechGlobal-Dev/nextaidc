@@ -1,6 +1,4 @@
-/* One-off: verify 4 requested Australian voice ids — are they in the account
- * already? If not, locate them in the shared Voice Library (to get the
- * public_owner_id needed to add them). Prints no secrets. */
+// One-off: check 4 AU voice ids are in the account, else find their public_owner_id in the shared library.
 import { loadSettings, getEffective } from "../src/services/settings.js";
 
 const WANTED = [

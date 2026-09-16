@@ -38,17 +38,9 @@ export interface PlanPickerProps {
   variant?: "page" | "modal";
   /** Continue button label (defaults to "Continue to payment"). */
   continueLabel?: string;
-  /** True when the free trial is already used up — the card is charged TODAY and
-   *  the plan activates immediately (no trial). Flips all "free trial / $0 due
-   *  today" copy to "charged now / plan activates immediately". */
+  /** Trial already used up: card charged today, plan activates immediately; flips all the trial copy. */
   immediate?: boolean;
-  /**
-   * Called whenever the applied coupon changes — with the validated coupon, and
-   * with null when it's cleared or stops applying to the selected plan. The
-   * parent sends `.code` to `api.billing.subscribe`, and needs the rest so any
-   * total it renders itself agrees with the one shown here. Omit to hide the
-   * coupon field entirely.
-   */
+  /** Fires with the validated coupon, or null when cleared/no longer applies. Omit to hide the coupon field. */
   onCouponChange?: (coupon: AppliedCoupon | null) => void;
   /** A code the parent already holds, so it survives leaving and returning to
    *  this step (e.g. "Back to plans" from the card form). */
@@ -57,14 +49,8 @@ export interface PlanPickerProps {
 
 /* ---------------------------- Coupon field ---------------------------- */
 
-/**
- * "Have a coupon code?" — validates against the SELECTED plan and reports the
- * applied code upward.
- *
- * Re-validates whenever the plan changes, because eligibility is per-plan: a
- * Starter-only code must visibly fall off when the user switches to Pro, rather
- * than silently surviving to a checkout that then rejects it.
- */
+// Coupon field validates against the selected plan and re-validates on plan change, since eligibility
+// is per-plan and a stale code must visibly fall off rather than fail at checkout.
 /** A coupon that validated — the `valid: true` arm of CouponValidation. */
 export type AppliedCoupon = Extract<CouponValidation, { valid: true }>;
 
@@ -75,10 +61,7 @@ function CouponField({
   registerFlush,
 }: {
   planId: string | null;
-  /** A code the parent is already holding — set when the user reached the card
-   *  step, backed out, and landed here again. Re-checked on mount so the applied
-   *  chip and the discounted total survive the round trip, instead of the parent
-   *  silently keeping a code the field no longer shows. */
+  /** Code the parent still holds after a back-out from the card step; re-checked on mount so the chip survives. */
   initialCode?: string | null;
   onApplied: (coupon: AppliedCoupon | null) => void;
   /** Hands the parent a `flush()` it can await before continuing to payment. */
@@ -107,12 +90,8 @@ function CouponField({
     }
   }
 
-  /**
-   * Called before the parent continues to payment. A code that was typed but
-   * never applied must NOT be silently dropped — that would charge full price to
-   * someone who believes they have a discount. So validate it here and block the
-   * step if it doesn't hold up; clearing the field is the way past.
-   */
+  // Flush before payment: a typed-but-unapplied code must not be silently dropped (full price to someone
+  // who thinks they have a discount). Block the step if it fails; clearing the field is the way past.
   useEffect(() => {
     registerFlush(async () => {
       const typed = code.trim();
@@ -122,11 +101,7 @@ function CouponField({
     });
   }, [code, planId, applied, registerFlush]);
 
-  // Two triggers, one effect:
-  //  • mount with a code the parent is still holding (they came back from the
-  //    card step) → re-check so the chip and discounted total are restored;
-  //  • the plan changed while a code was applied → re-check against the new
-  //    plan, since eligibility is per-plan.
+  // Re-check on mount (code held from the card step) and on plan change (eligibility is per-plan).
   useEffect(() => {
     const pending = applied?.code ?? initialCode?.trim();
     if (!pending || !planId) return;
@@ -178,10 +153,7 @@ function CouponField({
     );
   }
 
-  // Collapsed — a full-width panel, not a text link. Sitting between the
-  // auto-renew card and the total bar, a bare link read as fine print and got
-  // skipped; the dashed border marks it as something you can act on without
-  // competing with the primary CTA.
+  // Collapsed state is a full-width dashed panel; a bare text link here read as fine print and got skipped.
   if (!open) {
     return (
       <button
@@ -231,10 +203,7 @@ function CouponField({
               void check(code.trim(), planId);
             }
           }}
-          // Check as soon as they tab/click away, so the discount (or the reason
-          // it doesn't apply) is visible without hunting for the Apply button.
-          // Only reachable while nothing is applied — an applied coupon renders
-          // the chip above instead of this input.
+          // Check on blur so the discount (or why not) shows without hunting for Apply.
           onBlur={() => {
             const typed = code.trim();
             if (typed && planId) void check(typed, planId);
@@ -304,12 +273,7 @@ function PlanSelectSkeleton() {
   );
 }
 
-/**
- * The "choose a plan" step, shared by the /subscribe page and the in-dashboard
- * number-setup wizard: trial banner, plan cards, auto-renew toggle, and the
- * total + continue bar. Presentational — the parent owns the plans/planId state
- * and what "continue" does (usually: start a subscription → collect a card).
- */
+/** "Choose a plan" step shared by /subscribe and the number-setup wizard. Presentational; parent owns state and continue. */
 export function PlanPicker({
   plans,
   trialInfo,
@@ -348,16 +312,8 @@ export function PlanPicker({
   // Same two funnels the card step reports, so plan → card can be joined in GA4.
   const analyticsContext: FunnelContext = variant === "page" ? "subscribe_page" : "quick_setup";
 
-  /**
-   * A plan card was clicked. Reports the choice to GTM before selecting, so the
-   * event carries the plan the user just picked rather than the one leaving.
-   * Re-clicking the already-selected card still fires — it's a deliberate
-   * "yes, this one", and GA4's own `select_item` behaves the same way.
-   *
-   * Note this does NOT fire for the plan that is pre-selected on load (the
-   * admin's default): nobody chose it. `plan_checkout_started` below is the
-   * event that always names the plan they actually went to payment with.
-   */
+  // Tracks before selecting so the event names the picked plan. Re-clicks still fire (like GA4 select_item);
+  // the pre-selected default never does, since nobody chose it. plan_checkout_started covers that.
   function handleSelectPlan(plan: SubscriptionPlan) {
     trackEvent("select_plan", {
       ...planAnalyticsParams(plan),
@@ -367,18 +323,12 @@ export function PlanPicker({
     onSelectPlan(plan.id);
   }
 
-  /**
-   * A code left sitting in the field unapplied is validated before we move on.
-   * If it doesn't hold up we stay put with the reason on screen — continuing
-   * would charge full price to someone who thinks a discount is applied.
-   */
+  // Validate any unapplied code first; continuing would charge full price to someone expecting a discount.
   async function handleContinue() {
     setContinuing(true);
     try {
       if (!(await flushCoupon.current())) return;
-      // The conversion-shaped signal: this names the plan they're paying for,
-      // including the pre-selected default they never clicked. Fired only once
-      // the coupon check passes, i.e. only when we really do move on.
+      // Names the plan they're paying for (including an unclicked default). Only after the coupon check passes.
       if (selectedPlan) {
         trackEvent("plan_checkout_started", {
           ...planAnalyticsParams(selectedPlan),
@@ -454,9 +404,7 @@ export function PlanPicker({
                 ""
               )}
               .{" "}
-              {/* Only the quick-setup modal actually offers a "Skip for now" button —
-                  promising one on the full-page picker (where the user is here because
-                  they must be) sends them hunting for a control that doesn't exist. */}
+              {/* Only the quick-setup modal has a "Skip for now" button; don't promise one on the full page. */}
               {variant === "modal" ? (
                 <>
                   Prefer to explore first? Skip for now to stay on your free trial

@@ -9,23 +9,9 @@ import { ProviderDrawer } from "@/components/admin/api-center/ProviderDrawer";
 import { API_CENTER_BASE, API_CENTER_SECTIONS, sectionPath } from "@/components/admin/api-center/sections";
 import { timeAgo } from "@/components/charts/primitives";
 
-/* ------------------------------------------------------------------ *
- *  The API Center shell.
- *
- *  Holds the one snapshot fetch, the shared filter row, the section rail and the
- *  provider drawer. Sections render into the <Outlet/> and never fetch the
- *  snapshot themselves, so switching sections is instant and every screen is
- *  describing the same moment in time.
- * ------------------------------------------------------------------ */
+// API Center shell: owns the one snapshot fetch so sections never refetch and all describe the same moment.
 
-/**
- * The section tabs.
- *
- * Styled to match the app's Tabs primitive (a muted track with a raised active
- * pill) but built from NavLinks over real routes rather than local tab state —
- * so the browser back button, a page refresh and a shared link all land on the
- * section you were actually looking at. Tab state alone would lose all three.
- */
+// Section tabs are NavLinks over real routes (not tab state) so back button, refresh and shared links all work.
 function SectionTabs() {
   const { pathname } = useLocation();
   const { snapshot } = useApiCenter();
@@ -111,11 +97,7 @@ function ApiCenterHeader() {
   );
 }
 
-/**
- * Warn when the tracer had to drop rows. The screens would otherwise show a
- * quiet period that never happened, which is the one way a monitoring dashboard
- * can actively mislead.
- */
+// Warn when the tracer dropped rows — otherwise the screens show a quiet period that never happened.
 function DroppedRowsNotice() {
   const { snapshot } = useApiCenter();
   if (!snapshot || snapshot.droppedRows === 0) return null;

@@ -1,12 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Client mirror of server/src/lib/ticketFiles.ts.
- *
- *  This exists so the composer can say "that file type isn't allowed"
- *  the instant someone picks it, instead of after a 10 MB upload. The
- *  server list is the one that ENFORCES — this one only spares people a
- *  pointless round trip, so the two staying byte-identical isn't
- *  critical, but they should be kept in step.
- * ------------------------------------------------------------------ */
+// Client mirror of server/src/lib/ticketFiles.ts, so the composer can reject a file before a 10 MB upload.
+// The server list is the one that enforces; keep this in step with it.
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB per file
 /** Video is the one thing nobody can make small — a screen recording gets more room. */

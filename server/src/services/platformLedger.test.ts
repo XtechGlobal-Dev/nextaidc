@@ -1,13 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 
-/* ------------------------------------------------------------------ *
- *  The platform ledger: one paid invoice → one row, split into the
- *  platform's share and the brand's, with the wallet credited FROM that
- *  row. The plan's own worked example is the first test: a $50 plan with
- *  a $25 brand addon, paid in full, is $50 to the platform and $25 to
- *  the brand.
- * ------------------------------------------------------------------ */
+// Platform ledger: one paid invoice → one row split platform/brand, wallet credited
+// FROM that row. Worked example: $50 plan + $25 brand addon → $50 platform, $25 brand.
 
 const h = vi.hoisted(() => ({
   ledgerFindUnique: vi.fn(),

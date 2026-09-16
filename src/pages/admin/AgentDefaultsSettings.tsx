@@ -7,12 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 
-/**
- * Admin editor for the gender-matched default assistant names. When a customer
- * finishes onboarding, an assistant they haven't named yet is called after its
- * picked voice's gender — a male voice gets the "male" name, a female voice the
- * "female" name. Owners can always rename it later in their AI Brain.
- */
+/** Default assistant names, picked by the chosen voice's gender at onboarding; owners can rename later. */
 export function AgentDefaultsSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

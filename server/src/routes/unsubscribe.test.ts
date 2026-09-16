@@ -2,12 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  End-to-end test of the public /api/unsubscribe route: stand up a
- *  real Express server on an ephemeral port and drive it with fetch.
- *  Prisma/env/settings are stubbed; a tiny in-memory user stands in
- *  for the DB so we can assert the opt-out flag is toggled.
- * ------------------------------------------------------------------ */
+// End-to-end /api/unsubscribe over a real Express server; an in-memory user stands
+// in for the DB so the opt-out flag can be asserted.
 
 const db = vi.hoisted(() => ({
   // Mutable stand-in row; update() writes here, findUnique() reads it.

@@ -1,4 +1,19 @@
 import { env } from "@/lib/env";
+import type { IndustriesListResponse, IndustrySuggestResponse } from "@shared/contracts/industries";
+import type {
+  AllVoicesResponse as SharedAllVoicesResponse,
+  ProviderVoice as SharedProviderVoice,
+  VoiceCatalogItem as SharedVoiceCatalogItem,
+  VoiceCatalogResponse as SharedVoiceCatalogResponse,
+} from "@shared/contracts/voices";
+import type {
+  Notification as SharedNotification,
+  NotificationChannelsResponse,
+  NotificationsListResponse,
+  NotificationType as SharedNotificationType,
+  TestSummaryResponse,
+} from "@shared/contracts/notifications";
+import type { OkResponse } from "@shared/contracts/common";
 import type {
   AgentConfig,
   Appointment,
@@ -54,9 +69,7 @@ import type {
   RangeKey,
 } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  Typed API client. Talks to the Express backend with a Bearer token.
- * ------------------------------------------------------------------ */
+// Typed API client for the Express backend (Bearer token + X-Brand header).
 
 export const TOKEN_KEY = "hello22_token";
 
@@ -68,10 +81,8 @@ export function setToken(token: string | null) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
-// Whether the app currently believes it has a signed-in user. Kept in sync by the
-// auth store (see markSessionActive). Lets a 401 force a logout even when this
-// tab's token was already cleared elsewhere (e.g. signed out in another tab) — a
-// tokenless request wouldn't otherwise trip the `token`-gated logout below.
+// Whether the app believes it has a signed-in user (synced by the auth store). Lets a 401 force
+// logout even when this tab's token was already cleared elsewhere, e.g. signed out in another tab.
 let sessionActive = false;
 export function markSessionActive(active: boolean) {
   sessionActive = active;
@@ -91,10 +102,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   // For FormData bodies, let the browser set the multipart Content-Type (with boundary).
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
-  // Which brand's front door this page is: with path routing every brand shares
-  // one host, so the API can't infer it and we have to say. It selects a public
-  // front door only — an authenticated request is re-scoped server-side to the
-  // tenant the account actually belongs to (see middleware/brand.ts).
+  // With path routing every brand shares one host, so we have to name the brand. It selects a
+  // public front door only; an authenticated request is re-scoped server-side to the account's tenant.
   const brandSlug = activeBrandSlug();
   const res = await fetch(`${env.apiUrl}${path}`, {
     ...init,
@@ -109,27 +118,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = isJson ? await res.json() : await res.text();
   if (!res.ok) {
     const message = (isJson && (body as { error?: string }).error) || res.statusText;
-    // A request that 401s while we have a session = it's no longer valid (deleted
-    // user, revoked, or expired token) → force logout immediately. We trip this on
-    // either a token being sent OR the app still showing a signed-in session, so a
-    // tab whose token was cleared elsewhere (signed out in another tab) doesn't sit
-    // on the dashboard silently 401ing instead of bouncing to login.
+    // 401 with a session = invalid token, force logout. Trips on token OR sessionActive so a tab
+    // signed out elsewhere doesn't sit on the dashboard silently 401ing.
     if (res.status === 401 && (token || sessionActive)) forceLogout();
     throw new ApiError(res.status, message, isJson ? (body as { details?: unknown }).details : undefined);
   }
   return body as T;
 }
 
-/**
- * Clear the token and bounce to the login screen (a session became invalid).
- *
- * This is a full page load, so the router's `basename` does NOT apply and the
- * brand prefix has to be spelled out: on a path door (`/acme/...`) a bare
- * "/login" would drop the customer onto the PLATFORM's sign-in page, wearing
- * the platform's name and colours. The same prefix is why the "already there?"
- * check compares the whole path — `/acme/login` never started with `/login`, so
- * a brand's own login page used to redirect to itself.
- */
+/** Clear the token and bounce to login. Full page load, so the router basename doesn't apply and the brand
+ *  prefix must be spelled out; the "already there" check compares the whole path or /acme/login redirects to itself. */
 function forceLogout() {
   setToken(null);
   sessionActive = false;
@@ -138,13 +136,7 @@ function forceLogout() {
   if (window.location.pathname !== login) window.location.assign(login);
 }
 
-/**
- * Multipart upload that reports progress.
- *
- * XHR rather than fetch, because fetch still cannot report UPLOAD progress —
- * and a 10 MB attachment with no bar reads as a frozen app. Abortable, so
- * removing a file mid-upload actually stops it.
- */
+/** Multipart upload with progress. XHR because fetch still can't report upload progress; abortable so removing a file mid-upload stops it. */
 export function uploadWithProgress<T>(
   path: string,
   file: File,
@@ -262,11 +254,7 @@ function apiLogQuery(params: ApiLogFilters): string {
   return q ? `?${q}` : "";
 }
 
-/**
- * SUPER_ADMIN is the platform owner: every ADMIN right, plus the areas a brand
- * admin must never reach — Brands, Platform Settings (integration keys) and the
- * API Center. Use the helpers in lib/roles.ts rather than comparing by hand.
- */
+/** SUPER_ADMIN = platform owner (every ADMIN right plus Brands, Platform Settings, API Center). Use lib/roles.ts helpers, don't compare by hand. */
 export type UserRole = "USER" | "ADMIN" | "SUPER_ADMIN" | "STAFF" | "RESELLER";
 
 /** One account the handler may raise a request for. */
@@ -353,30 +341,15 @@ export interface IndustryAdminView {
   pending: PendingIndustry[];
 }
 
-export type NotificationType =
-  | "missed_call"
-  | "new_lead"
-  | "billing"
-  | "agent"
-  // Support tickets, on both lanes. Which inbox a ticket notification links to
-  // is baked into its `link` by the server, so the bell needs no extra field
-  // to tell a customer's reply from a brand's request.
-  | "ticket"
-  | "system";
+// Inferred from the shared Zod schemas in @shared/contracts/notifications; re-exported
+// under the old names so nothing else has to change its imports.
+export type NotificationType = SharedNotificationType;
 
 /** Where typed digits must sit in a phone number — mirrors Twilio's "Match to".
  *  Keep in step with NumberMatch in server/src/services/sms.ts. */
 export type NumberMatch = "start" | "anywhere" | "end";
 
-export interface ApiNotification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  message: string;
-  link?: string | null;
-  read: boolean;
-  createdAt: string;
-}
+export type ApiNotification = SharedNotification;
 
 /** The visitor's IANA timezone (e.g. "Asia/Kolkata"), best-effort. Sent at signup
  *  so admin notifications can show times in the customer's own region. */
@@ -428,9 +401,7 @@ export interface BrandThemeCatalog {
  *  links this brand sends — see server/src/services/brands.ts. */
 export type BrandDomainStatus = "none" | "pending" | "verified" | "error";
 
-/** One record the brand's client pastes into their DNS provider — a numbered
- *  step with plain-words help, plus the four fields a registrar's form has.
- *  Mirrors DnsRecord in server/src/services/brandDomains.ts. */
+/** One DNS record the brand's client pastes into their registrar. Mirrors DnsRecord in server/src/services/brandDomains.ts. */
 export interface BrandDnsRecord {
   type: "CNAME" | "A" | "TXT";
   /** 1-based position in the client's checklist — the ownership TXT first. */
@@ -471,13 +442,9 @@ export interface BrandDomain {
   checkedAt: string;
   /** Where the brand answers today (vanity domain once verified, else subdomain). */
   origin: string | null;
-  /** The wildcard-covered subdomain — live from the moment the brand exists.
-   *  Carries the dev frontend's port on the loopback apex (e.g. "acme.localhost:5174"),
-   *  where a bare host has nothing listening on it. */
+  /** Wildcard subdomain, live from creation. Carries the dev port on loopback ("acme.localhost:5174"). */
   platformHost: string;
-  /** Where `platformHost` is actually reachable — `https://` normally,
-   *  `http://` plus its port on the loopback apex. Always the subdomain, even
-   *  once `origin` above has moved on to a verified custom domain. */
+  /** Reachable URL for `platformHost` (http + port on loopback). Always the subdomain, even once `origin` is a custom domain. */
   platformUrl: string;
   /** Path-routed fallback that needs no DNS at all. */
   pathUrl: string;
@@ -522,9 +489,7 @@ export interface BrandReadiness {
   total: number;
 }
 
-/** One plan as a brand sells it: the platform's base price plus the brand's
- *  own addon. The customer pays brandPriceCents to the platform; the addon
- *  share is credited to the brand's wallet on every paid invoice. */
+/** A plan as a brand sells it: base + addon. The customer pays brandPriceCents to the platform; the addon share is credited to the brand's wallet per paid invoice. */
 export interface BrandPricingRow {
   planId: string;
   planName: string;
@@ -582,9 +547,7 @@ export interface BrandWallet {
   entries: WalletEntry[];
 }
 
-/** A window of the platform ledger summed up: what customers paid, and how it
- *  split between the platform (the plans' base prices) and the brands (their
- *  addons). Per currency, because a brand can sell in several. */
+/** Ledger window totals: what customers paid, split platform (base) vs brand (addon). Per currency, since a brand can sell in several. */
 export interface LedgerTotals {
   currency: string;
   payments: number;
@@ -759,11 +722,7 @@ export interface UnroutedStripeEvent {
   receivedAt: string;
 }
 
-/**
- * Where a brand is in its life. Only `active` resolves a front door.
- *   provisioning — its own database is being set up
- *   failed       — that setup broke; Retry on the brand's page re-runs it
- */
+/** Brand lifecycle. Only `active` resolves a front door; `failed` means provisioning broke and Retry re-runs it. */
 export type BrandStatus = "active" | "suspended" | "provisioning" | "failed";
 
 /** The brand's own database, as its page shows it — never a connection string. */
@@ -1063,10 +1022,8 @@ export const api = {
       get<{ currency: string; prices: Record<string, number> }>(
         `/api/profile/number-pricing?country=${encodeURIComponent(country)}`,
       ),
-    /** Search Twilio for brand-new, purchasable numbers (admin-gated feature).
-     *  `prefix` (e.g. AU 02/03/04) narrows to a series; `q` + `match` search for
-     *  digits anywhere / at the start / at the end, like Twilio's own picker. A
-     *  `q` wins over `prefix` server-side — it's the more specific request. */
+    /** Search Twilio for purchasable numbers (admin-gated). `prefix` narrows to a series, `q` + `match` search
+     *  digits like Twilio's own picker; `q` wins over `prefix` server-side. */
     searchableNumbers: (
       country: string,
       opts?: { prefix?: string; q?: string; match?: NumberMatch; limit?: number },
@@ -1106,10 +1063,8 @@ export const api = {
     adoptLatestTemplate: () =>
       post<{ agentConfig: AgentConfig; promptTemplate: string; promptTemplateIsLatest: boolean }>("/api/agent/adopt-latest-template"),
     sync: () => post<{ vapiAssistantId: string }>("/api/agent/sync"),
-    /** Build the browser test-call payload SERVER-side, so the test call runs on
-     *  the same wire prompt a real inbound call does (short scaffold → summarizer
-     *  → regional style) instead of a client-side compile. Pass the current draft
-     *  config so unsaved AI Brain edits are still reflected. */
+    /** Build the test-call payload SERVER-side so it runs the same wire prompt a real inbound call does.
+     *  Pass the draft config so unsaved AI Brain edits are reflected. */
     testToken: (agentConfig?: AgentConfig) =>
       post<{ publicKeyConfigured: boolean; assistant: Record<string, unknown> }>(
         "/api/agent/test-token",
@@ -1125,13 +1080,10 @@ export const api = {
   },
   industries: {
     /** The AI-Brain industry options: built-ins + admin-approved customs. */
-    list: () => get<{ industries: string[] }>("/api/industries"),
+    list: () => get<IndustriesListResponse>("/api/industries"),
     /** Propose a custom industry — queued for admin review before it joins the list. */
     suggest: (value: string) =>
-      post<{ status: "submitted" | "exists" | "pending"; value: string }>(
-        "/api/industries/suggest",
-        { value },
-      ),
+      post<IndustrySuggestResponse>("/api/industries/suggest", { value }),
   },
   calls: {
     list: (params: Record<string, string | number | undefined> = {}) => {
@@ -1161,9 +1113,7 @@ export const api = {
         transcript?: unknown;
         analysis?: unknown;
       },
-      // `keepalive` lets the request finish even if the page is unloading (a web
-      // call saved on hang-up must survive an immediate refresh so its history +
-      // minutes aren't lost).
+      // keepalive so the save survives an immediate page refresh after hang-up.
       opts?: { keepalive?: boolean },
     ) => post<CallLog>("/api/calls", data, opts?.keepalive ? { keepalive: true } : undefined),
     attachRecording: (id: string, recordingUrl: string) =>
@@ -1186,47 +1136,26 @@ export const api = {
       ),
     recording: (vapiCallId: string) =>
       get<{ recordingUrl: string | null }>(`/api/calls/recording?vapiCallId=${encodeURIComponent(vapiCallId)}`),
-    /** A freshly-signed, short-lived proxy URL for playing this call's recording.
-     *  The <audio> element can't send an auth header, so the URL itself is the
-     *  capability — minted here (authenticated + scoped to the owner's calls). */
-    /** `share: true` mints a longer-lived link meant to be sent to someone else
-     *  (a client, a colleague) — the dashboard's own token is deliberately short
-     *  because it is re-minted on every open, which would strand a pasted link.
-     *  `expiresInDays` comes back so the UI can state the window truthfully. */
+    /** Signed, short-lived proxy URL for the recording: <audio> can't send an auth header, so the URL is the capability. */
+    /** `share: true` mints a longer-lived link for pasting to someone else; the dashboard's own token is short and re-minted per open. */
     recordingUrl: (id: string, share = false) =>
       get<{ url: string | null; expiresInDays?: number }>(
         `/api/calls/${id}/recording-url${share ? "?share=1" : ""}`,
       ),
   },
   notifications: {
-    list: () => get<{ notifications: ApiNotification[]; unreadCount: number }>("/api/notifications"),
-    markRead: (id: string) => post<{ ok: true }>(`/api/notifications/${id}/read`),
-    markAllRead: () => post<{ ok: true }>("/api/notifications/read-all"),
-    clear: () => del<{ ok: true }>("/api/notifications"),
+    list: () => get<NotificationsListResponse>("/api/notifications"),
+    markRead: (id: string) => post<OkResponse>(`/api/notifications/${id}/read`),
+    markAllRead: () => post<OkResponse>("/api/notifications/read-all"),
+    clear: () => del<OkResponse>("/api/notifications"),
     /** Which plan features the user has (email always true; customCrm gates webhook CRM). */
-    channels: () =>
-      get<{
-        email: boolean;
-        sms: boolean;
-        smsToCaller: boolean;
-        whatsapp: boolean;
-        customCrm: boolean;
-        multilingual: boolean;
-        /** Transfer departments the plan allows; 0 = Call Transfer not included. */
-        callTransferDepartments: number;
-      }>("/api/notifications/channels"),
+    channels: () => get<NotificationChannelsResponse>("/api/notifications/channels"),
     /** Send a dummy call-summary to the given destination to verify the channel works. */
     testSummary: (channel: "email" | "sms" | "whatsapp", to: string) =>
-      post<{ ok: true; to: string }>("/api/notifications/test-summary", { channel, to }),
+      post<TestSummaryResponse>("/api/notifications/test-summary", { channel, to }),
   },
-  /**
-   * "My requests" — the requester's own side of whichever lane they are on.
-   *
-   * One surface for both: a customer's requests go to their brand's team, a
-   * brand admin's go to the platform. The API decides which from the caller's
-   * role, so nothing here takes a lane — call `lane()` first to learn what to
-   * call things on screen.
-   */
+  /** "My requests", requester side. The API picks the lane (customer -> brand team, brand admin -> platform)
+   *  from the caller's role, so nothing here takes one; call `lane()` first for the on-screen wording. */
   tickets: {
     lane: () => get<TicketLaneInfo>("/api/tickets/lane"),
     departments: () => get<RequesterTicketDepartment[]>("/api/tickets/departments"),
@@ -1359,20 +1288,16 @@ export const api = {
      *  safe to call as the user types. */
     validateCoupon: (code: string, planId: string) =>
       post<CouponValidation>("/api/billing/coupon/validate", { code, planId }),
-    /** Start a trial subscription on the chosen plan; returns a SetupIntent client secret.
-     *  A `couponCode` is re-validated server-side and rejected outright if it no
-     *  longer applies — nobody should reach the card step expecting a discount
-     *  that isn't there. */
+    /** Start a trial subscription; returns a SetupIntent client secret. `couponCode` is re-validated server-side
+     *  and rejected outright if stale, so nobody reaches the card step expecting a missing discount. */
     subscribe: (planId: string, autoRenew = true, couponCode?: string) =>
       post<{ clientSecret: string | null; subscriptionId: string }>("/api/billing/subscribe", {
         planId,
         autoRenew,
         ...(couponCode ? { couponCode } : {}),
       }),
-    /** Confirm the saved card + activate the plan. `charged` = the free trial was
-     *  used up so the card was billed now (vs a trial that just started/continued). */
-    /** `activateNow` = the user explicitly bought a plan, so charge and activate
-     *  immediately rather than continuing their free trial. */
+    /** Confirm the saved card + activate. `charged` = the card was billed now (trial used up);
+     *  `activateNow` = the user explicitly bought a plan, so charge immediately instead of continuing the trial. */
     confirmCard: (paymentMethodId: string, activateNow?: boolean) =>
       post<{ ok: true; charged: boolean }>("/api/billing/confirm-card", {
         paymentMethodId,
@@ -1398,10 +1323,8 @@ export const api = {
         { planId },
       ),
 
-    /* --- Cross-currency switch ------------------------------------------- *
-     *  Stripe locks a customer to one currency, so moving to a plan in another
-     *  needs a NEW subscription paid with a re-entered card. Three steps, in
-     *  this order: the customer's existing plan stays live until `confirm`.  */
+    // Cross-currency switch: Stripe locks a customer to one currency, so this needs a NEW subscription
+    // with a re-entered card. Three steps in order; the existing plan stays live until `confirm`.
 
     /** Open the new subscription unpaid and get a PaymentIntent to confirm.
      *  Charges nothing and leaves the current plan untouched. */
@@ -1434,10 +1357,7 @@ export const api = {
     cancelDowngrade: () =>
       post<{ ok: true; message: string }>("/api/billing/change-plan/cancel-downgrade"),
   },
-  /* --------------------------------------------------------------------- *
-   *  Super admin only — the white-label brand (tenant) panel. Every call
-   *  here 403s for a brand ADMIN; see server/src/routes/brands.routes.ts.
-   * --------------------------------------------------------------------- */
+  // Super admin only: the white-label brand panel. Every call here 403s for a brand ADMIN.
   super: {
     brands: {
       list: () => get<Brand[]>("/api/super/brands"),
@@ -1486,14 +1406,8 @@ export const api = {
       },
       clearAsset: (id: string, slot: "logoLight" | "logoDark" | "favicon") =>
         del<Brand>(`/api/super/brands/${id}/assets/${slot}`),
-      /* ------------------------- Vanity domains ------------------------ *
-       *  The brand's SUBDOMAIN needs none of these — it is live from the
-       *  moment the brand exists. These drive the panel for a domain the
-       *  CLIENT owns, whose DNS only they can publish.
-       * ------------------------------------------------------------------ */
-      /** Records to publish + where the claim stands. Cheap: no DNS queries. */
-      /** `live` runs a real DNS check on a pending claim before answering, so
-       *  the panel opens on the truth rather than the last stored verdict. */
+      // Vanity domains. The subdomain needs none of this; these drive the panel for a client-owned domain.
+      /** Records to publish + claim status. Cheap unless `live`, which runs a real DNS check so the panel opens on the truth. */
       domain: (id: string, opts?: { live?: boolean }) =>
         get<BrandDomain>(`/api/super/brands/${id}/domain${opts?.live ? "?live=1" : ""}`),
       /** Claim, replace, or (with "") clear the vanity domain. */
@@ -1512,10 +1426,7 @@ export const api = {
       wallet: (id: string) => get<BrandWallet>(`/api/super/brands/${id}/wallet`),
       /** This brand's payments from the platform ledger: this month's totals and the latest rows. */
       ledger: (id: string) => get<BrandLedger>(`/api/super/brands/${id}/ledger`),
-      /* ------------------------ Inside the brand ------------------------ *
-       *  Read from THAT brand's database and nothing else. Opening a brand
-       *  queries only that tenant.
-       * ------------------------------------------------------------------ */
+      // Inside the brand: these read from that tenant's database and nothing else.
       customers: (id: string, opts?: { q?: string; page?: number; pageSize?: number }) =>
         get<BrandCustomersPage>(`/api/super/brands/${id}/customers${opts ? toQuery(opts) : ""}`),
       subscriptions: (id: string) => get<BrandSubscriptionsView>(`/api/super/brands/${id}/subscriptions`),
@@ -1547,11 +1458,7 @@ export const api = {
        *  brand is leaving the platform. */
       removeAdmin: (id: string, userId: string) =>
         del<{ ok: true }>(`/api/super/brands/${id}/admins/${userId}`),
-      /**
-       * The brand's customer-support queues. Which queues a brand HAS is the
-       * platform's call — the brand's admin only decides who works each one,
-       * from their own inbox. A brand starts with General and Sales.
-       */
+      /** The brand's support queues. Which queues exist is the platform's call; the brand admin only assigns who works them. */
       ticketDepartments: {
         list: (id: string) =>
           get<AdminTicketDepartment[]>(`/api/super/brands/${id}/ticket-departments`),
@@ -1635,10 +1542,8 @@ export const api = {
        *  whether it can be granted to them. One call for the Discount card. */
       forCustomer: (userId: string) =>
         get<CustomerCouponState>(`/api/admin/customers/${userId}/coupon`),
-      /** Give one customer a coupon directly (retention / comp). `override` is
-       *  required for a coupon outside its redemption window or restricted to
-       *  other plans — the server refuses without it, so neither can go out
-       *  unnoticed. */
+      /** Grant a coupon directly (retention/comp). `override` is required for one outside its window or
+       *  restricted to other plans; the server refuses without it. */
       grant: (userId: string, couponId: string, override = false) =>
         post<{ ok: true }>(`/api/admin/customers/${userId}/coupon`, {
           couponId,
@@ -1803,9 +1708,7 @@ export const api = {
       set: (data: { autoFallback: boolean; provider: string; model: string }) =>
         put<TranscriberFallbackSettings>("/api/admin/transcriber-fallback", data),
     },
-    /** Onboarding policy. `cardRequired` applies to NEW signups only — every
-     *  account snapshots it at creation, so changing it never affects anyone
-     *  already signed up. */
+    /** Onboarding policy. `cardRequired` applies to NEW signups only; every account snapshots it at creation. */
     onboarding: {
       get: () => get<{ cardRequired: boolean }>("/api/admin/onboarding"),
       set: (cardRequired: boolean) =>
@@ -1932,11 +1835,8 @@ export const api = {
       remove: (id: string) => del<{ ok: true }>(`/api/admin/roles/${id}`),
     },
 
-    /**
-     * The handler's inbox — a brand admin's customer queue, or the super
-     * admin's brand-request queue. Same endpoints for both: the API resolves
-     * the lane from the caller's role, so no call here names one.
-     */
+    /** Handler inbox (brand admin's customer queue, or the super admin's brand-request queue). The API
+     *  resolves the lane from the caller's role, so no call here names one. */
     tickets: {
       lane: () => get<TicketLaneInfo>("/api/admin/tickets/lane"),
       list: (params: AdminTicketListParams = {}) =>
@@ -1978,22 +1878,14 @@ export const api = {
       ) => post<TicketMessage>(`/api/admin/tickets/${id}/messages`, data),
       editMessage: (id: string, messageId: string, body: string) =>
         patch<TicketMessage>(`/api/admin/tickets/${id}/messages/${messageId}`, { body }),
-      /**
-       * Remove a message. Mine always; anyone's with `tickets.delete`, which is
-       * what makes it possible to pull a card number out of a thread.
-       */
+      /** Remove a message: mine always, anyone's with `tickets.delete` (how a card number gets pulled out of a thread). */
       deleteMessage: (id: string, messageId: string) =>
         del<TicketMessage>(`/api/admin/tickets/${id}/messages/${messageId}`),
       react: (id: string, messageId: string, emoji: string) =>
         post<TicketMessage>(`/api/admin/tickets/${id}/messages/${messageId}/reactions`, { emoji }),
       typing: (id: string) => post<void>(`/api/admin/tickets/${id}/typing`, {}),
-      /**
-       * Hand a customer's request up to the platform. Brand admins only. Opens
-       * a NEW ticket on the platform lane in the admin's name, linked to this
-       * one; the customer's thread stays in this inbox. `departmentId` is one
-       * of the PLATFORM's queues (`api.tickets.departments()` lists them for a
-       * brand admin).
-       */
+      /** Escalate to the platform (brand admins only): opens a NEW linked ticket on the platform lane in the
+       *  admin's name; the customer's thread stays here. `departmentId` is one of the PLATFORM's queues. */
       escalate: (id: string, data: { departmentId: string; note?: string }) =>
         post<{ ticket: Ticket; escalation: Ticket }>(`/api/admin/tickets/${id}/escalate`, data),
       update: (
@@ -2038,11 +1930,7 @@ export const api = {
         remove: (id: string) => del<{ ok: true }>(`/api/admin/tickets/saved-replies/${id}`),
       },
       departments: {
-        /**
-         * `scope: "all"` returns every queue in the lane (each tagged `mine`),
-         * which is what the reassign picker needs — you route a misfiled ticket
-         * TO another team, so the list can't stop at the ones you work yourself.
-         */
+        /** `scope: "all"` returns every queue in the lane (tagged `mine`); the reassign picker needs teams you don't work yourself. */
         list: (scope: "mine" | "all" = "mine") =>
           get<AdminTicketDepartment[]>(
             `/api/admin/tickets/departments${scope === "all" ? "?scope=all" : ""}`,
@@ -2072,12 +1960,8 @@ export const api = {
     },
 
     /* ----------------------------- API Center ------------------------- */
-    /**
-     * Admin → API Center. `snapshot` is deliberately one fat call: the Overview,
-     * Connections, Health, Quotas, Costs and Latency screens are all views of the
-     * same provider rows, and fetching per-screen would show six slightly
-     * different moments in time.
-     */
+    /** `snapshot` is deliberately one fat call: six screens view the same provider rows, and fetching
+     *  per-screen would show six slightly different moments in time. */
     apiCenter: {
       snapshot: (range: RangeKey = "24h", environment = "all") =>
         get<ApiCenterSnapshot>(
@@ -2169,9 +2053,7 @@ export interface PhonePoolNumber {
   brandId: string | null;
   /** That tenant's name, for the super admin's brand column. Null when shared. */
   brandName: string | null;
-  /** When an unassigned brand number returns to the shared platform pool, or
-   *  null when nothing is counting down. "Use it or lose it" — shown so a brand
-   *  isn't surprised by a number quietly leaving their pool. */
+  /** When an unassigned brand number returns to the shared pool (null = not counting down). Shown so a brand isn't surprised. */
   reclaimAt: string | null;
 }
 export interface PhoneUserNumber extends PhonePoolNumber {
@@ -2337,58 +2219,13 @@ export interface ResellerCustomerDetail {
 
 export type BillingInterval = "week" | "month" | "year";
 
-/** A single voice in the AI-Brain picker (from the Deepgram voice catalog). */
-export interface VoiceCatalogItem {
-  id: string;
-  name: string;
-  descriptor: string;
-  region: string;
-  previewUrl: string | null;
-  /** Male/Female label — from the catalog (Deepgram) or ElevenLabs voice labels;
-   *  null/absent when the provider doesn't say. */
-  gender?: "male" | "female" | null;
-  /** ISO 639-1 code for the curated single-language voices (Chinese "zh", Punjabi
-   *  "pa"). Absent on the premade/Deepgram voices, which aren't language-specific. */
-  language?: string;
-  /** Whether the current user's plan lets them select (not just preview) it. */
-  entitled: boolean;
-  /** Plan(s) that unlock this voice — shown as an upsell hint when locked. */
-  plans: string[];
-}
-
-export interface VoiceCatalogItemWithProvider extends VoiceCatalogItem {
-  provider?: "deepgram" | "elevenlabs";
-}
-
-export interface VoiceCatalogResponse {
-  voices: VoiceCatalogItemWithProvider[];
-  /** The voice the agent is currently on (for display even when locked). */
-  current?: VoiceCatalogItemWithProvider | null;
-  /** True when the user can't change voice yet (trial / no active plan / plan without
-   *  a Voice Bank category) — they stay on the default voice. */
-  locked?: boolean;
-  /** The Voice Bank category title the user's plan unlocks (when unlocked). */
-  category?: string | null;
-  currentPlanName: string | null;
-}
-
-/** A voice option in a specific provider's catalog (admin Voice Bank / plan editor). */
-export interface ProviderVoice {
-  id: string;
-  name: string;
-  descriptor: string;
-  region: string;
-  previewUrl: string | null;
-  /** Male/Female label (see VoiceCatalogItem). */
-  gender?: "male" | "female" | null;
-  /** ISO 639-1 code for the curated single-language voices (see VoiceCatalogItem). */
-  language?: string;
-}
-
-export interface AllVoicesResponse {
-  deepgram: ProviderVoice[];
-  elevenlabs: ProviderVoice[];
-}
+// Inferred from the shared Zod schemas in @shared/contracts/voices; re-exported
+// under the old names so nothing else has to change its imports.
+export type VoiceCatalogItem = SharedVoiceCatalogItem;
+export type VoiceCatalogItemWithProvider = SharedVoiceCatalogItem;
+export type VoiceCatalogResponse = SharedVoiceCatalogResponse;
+export type ProviderVoice = SharedProviderVoice;
+export type AllVoicesResponse = SharedAllVoicesResponse;
 
 /** A Voice Bank category (admin-curated named set of voices, both providers). */
 export interface VoiceCategory {
@@ -2782,9 +2619,7 @@ export interface Customer {
   createdAt: string;
   /** When the customer opted out of notification emails (null = still subscribed). */
   emailOptOutAt: string | null;
-  /** Live presence — the customer has the app open right now (active SSE stream).
-   *  Point-in-time only: it resets on an API restart and says nothing about when
-   *  they were last seen. */
+  /** Live presence (active SSE stream). Point-in-time only: resets on API restart, says nothing about last seen. */
   online: boolean;
 }
 
@@ -3024,9 +2859,7 @@ export interface CustomerDetail {
     suspended: boolean;
     stripeCustomerId: string | null;
     trialEndsAt: string | null;
-    /** Which onboarding rule applied the day THIS account was created — the admin
-     *  toggle never affects existing accounts, so this is the only way to explain
-     *  why two customers behave differently. */
+    /** The onboarding rule at THIS account's creation; the admin toggle never affects existing accounts. */
     cardRequiredAtSignup: boolean;
     /** When their first card landed; null = never. With the flag above, identifies
      *  a customer still stuck at the card wall. */

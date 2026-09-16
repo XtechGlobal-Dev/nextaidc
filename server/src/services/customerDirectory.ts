@@ -2,27 +2,8 @@ import type { Role } from "@prisma/client";
 import { PrismaClient as TenantClient, type Prisma as TenantPrisma } from "@prisma/tenant-client";
 import { prisma } from "../prisma.js";
 
-/* ------------------------------------------------------------------ *
- *  The thin customer directory (plan §7, decision Q4).
- *
- *  A brand's accounts live in the brand's own database, so Main has no
- *  way to answer "which brand is this email in?" or "how many people does
- *  this brand have?" without opening every tenant. This table is the one
- *  piece of customer PII kept in Main for exactly those two questions:
- *  brand, id, email, name, role. Nothing else — not a password hash, not a
- *  phone number, not a plan.
- *
- *  It is maintained by a middleware on every tenant client
- *  (`installDirectoryMirror`, wired in tenantDb.ts): every write to a
- *  brand's `users` is reflected here, same id, brand alongside. One
- *  place, one direction: tenant → Main. `rebuildDirectoryFromTenant`
- *  makes a brand's entries whole again from its database — run at
- *  provisioning and by `npm run tenant:migrate`.
- *
- *  Every write here is best-effort: a directory that lags is a search
- *  that misses, which is recoverable — an account write that fails
- *  because the directory did is not.
- * ------------------------------------------------------------------ */
+// Thin customer directory (plan §7, Q4): the ONLY customer PII in Main — brand, id, email, name, role, nothing else — so brand
+// lookups never open a tenant. Mirrored tenant -> Main by middleware; writes are best-effort since a lagging directory is recoverable and a failed account write is not.
 
 export interface DirectoryPerson {
   id: string;
@@ -54,13 +35,7 @@ function warn(what: string, brandId: string, e: unknown): void {
 const CACHE_MS = 5 * 60_000;
 const brandOf = new Map<string, { brandId: string; at: number }>();
 
-/**
- * The brand an account belongs to — for code that has a user id and no
- * request to go by: a webhook, a sweep, a notification. Null for the
- * platform's own people (and for an id nobody has). Cached briefly: an
- * account does not move between brands, and this sits under every
- * `tenantForUser` call.
- */
+/** An account's brand for off-request code (webhooks, sweeps). Null for platform staff. Cached briefly — accounts don't move brands, and this sits under every tenantForUser call. */
 export async function brandIdForOwner(userId: string | null | undefined): Promise<string | null> {
   if (!userId) return null;
   const hit = brandOf.get(userId);
@@ -108,11 +83,7 @@ export async function forgetInDirectory(brandId: string, userId: string): Promis
   }
 }
 
-/**
- * Make a brand's directory match this exact set of people: rows for each of
- * them, none for anyone else. Throws — this is the repair path, and a repair
- * that silently half-worked is worse than one that reports.
- */
+/** Makes a brand's directory match exactly this set of people. Throws — a repair that silently half-worked is worse than one that reports. */
 export async function rebuildDirectory(brandId: string, people: DirectoryPerson[]): Promise<number> {
   const keep = people.map((p) => p.id);
   await prisma.$transaction(async (tx) => {
@@ -130,11 +101,7 @@ export async function rebuildDirectory(brandId: string, people: DirectoryPerson[
   return people.length;
 }
 
-/**
- * Rebuild a brand's directory from its own database. Takes the tenant URL
- * rather than going through `tenantFor()`, because at provisioning time the
- * database is not yet `active` and must not route.
- */
+/** Rebuilds from the tenant DB by URL, not tenantFor() — at provisioning time the database isn't `active` yet and must not route. */
 export async function rebuildDirectoryFromTenant(brandId: string, tenantUrl: string): Promise<number> {
   const tenant = new TenantClient({ datasources: { db: { url: tenantUrl } } });
   try {
@@ -160,12 +127,7 @@ async function affected(client: TenantClient, params: TenantPrisma.MiddlewarePar
   return rows.map((r) => r.id);
 }
 
-/**
- * Keep Main's directory in step with one tenant's `users`. Installed on every
- * tenant client the moment it is opened (tenantDb.ts), so no write slips
- * through. Awaited on purpose: a sign-up routes by its brand a moment later
- * (`tenantForUser`), so the entry has to be there before the write returns.
- */
+/** Mirrors a tenant's `users` writes into Main. Awaited on purpose: a sign-up routes by brand via tenantForUser moments later, so the entry must exist before the write returns. */
 export function installDirectoryMirror(client: TenantClient, brandId: string): void {
   // A stand-in client (tests) may not carry middleware; the real one always does.
   if (typeof client.$use !== "function") return;

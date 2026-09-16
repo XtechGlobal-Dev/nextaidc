@@ -17,14 +17,7 @@ import { api, ApiError, type TranscriberOption } from "@/lib/api";
 
 const NONE = "__none__"; // Select needs a non-empty value for the "no preferred fallback" option.
 
-/**
- * Admin editor for the platform-wide transcriber (speech-to-text) FALLBACK. The
- * primary transcriber is still auto-chosen by the agent's language; here the admin
- * sets what Vapi should try if that primary STT fails: an optional preferred
- * provider/model (tried first), plus an Auto Fallback toggle (we then also
- * auto-pick a capable backup). Only backups that can hear an agent's language are
- * ever applied. Rolls out to a customer's live agent on their next AI-Brain sync.
- */
+/** Platform-wide STT fallback (primary is still picked by agent language). Only backups that support the agent's language are applied; rolls out on next AI-Brain sync. */
 export function TranscriberFallbackSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

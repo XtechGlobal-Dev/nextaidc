@@ -1,8 +1,6 @@
 import { cn } from "@/lib/utils";
 
-/* Soft, two-tone spot illustrations for the ticket empty states. Everything is
- * drawn in the primary hue at varying opacity, so they follow the theme (and
- * dark mode, and every brand's palette) without a second set of assets. */
+// Spot illustrations for ticket empty states, drawn in the primary hue so they follow theme/dark mode/brand palette.
 
 function Sparkle({ x, y, r = 4 }: { x: number; y: number; r?: number }) {
   return (

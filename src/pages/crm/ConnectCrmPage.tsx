@@ -156,10 +156,7 @@ export default function ConnectCrmPage() {
 
 /* ------------------------------ Panel shell --------------------------- */
 
-/**
- * Card header with a tinted icon badge, matching the provider cards above so
- * the picker and the panel it opens read as one flow.
- */
+// Card header with a tinted icon badge, matching the provider cards so picker and panel read as one flow.
 function PanelHeader({
   icon: Icon,
   title,
@@ -421,11 +418,7 @@ function CustomCrmPanel() {
   );
 }
 
-/**
- * Shown when the user previously selected Custom CRM but their current plan
- * no longer includes it (e.g. after a downgrade). Delivery is also blocked
- * server-side, so this is purely an upsell prompt.
- */
+// Custom CRM was selected but the plan no longer includes it (downgrade). Server blocks delivery too — this is just the upsell.
 function CustomCrmUpgradePanel() {
   const navigate = useNavigate();
   return (

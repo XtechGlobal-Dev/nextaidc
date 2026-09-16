@@ -8,17 +8,8 @@ import { useCallsStore } from "@/stores/useCallsStore";
 // used to detect a fresh call and live-refresh the Call Logs without a reload.
 const CALLS_LINK = "/dashboard/calls";
 
-/* ------------------------------------------------------------------ *
- *  Where a ticket notification points.
- *
- *  Three ticket surfaces, and every ticket notification links to
- *  exactly one of them — the server decides which when it writes the
- *  row, so the client never has to work out whose news this is:
- *
- *    /dashboard/support        the requester's own page (either lane)
- *    /dashboard/admin/tickets  a brand admin's customer inbox
- *    /superadmin/tickets       the platform owner's brand-request inbox
- * ------------------------------------------------------------------ */
+// Ticket notifications link to exactly one of three surfaces (requester page, brand admin's
+// customer inbox, platform owner's brand inbox) — the server picks when it writes the row.
 const REQUESTER_TICKETS_PATH = "/dashboard/support";
 const SUPPORT_INBOX_PATH = "/dashboard/admin/tickets";
 const BRAND_INBOX_PATH = "/superadmin/tickets";
@@ -80,13 +71,8 @@ interface NotificationState {
   hydrated: boolean;
   panelOpen: boolean;
   setPanelOpen: (open: boolean) => void;
-  /**
-   * The ticket conversation open on screen right now, else null.
-   *
-   * Anything new about it is treated as SEEN — marked read rather than toasted,
-   * since the reply is already on screen in front of the reader. Set by
-   * {@link useActiveTicketThread}.
-   */
+  /** Ticket thread open on screen right now, else null. Anything new about it is marked
+   *  read instead of toasted — the reply is already in front of the reader. */
   activeThreadId: string | null;
   setActiveThread: (ticketId: string | null) => void;
   /** Mark every unread notification about one ticket read — its thread is open. */
@@ -137,9 +123,8 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
       if (sessionChanged(mark)) return; // response belongs to a previous account
       const incoming = notifications.map(fromApi);
 
-      // A conversation that is open AND on screen counts as seen: anything
-      // unread about it is marked read instead of toasting what the reader is
-      // already looking at. A hidden tab isn't "seen", so those still surface.
+      // Open AND visible thread counts as seen — mark read instead of toasting. A hidden
+      // tab isn't "seen", so those still surface.
       const activeThread = get().activeThreadId;
       const threadOnScreen =
         !!activeThread &&
@@ -155,9 +140,8 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
         ? incoming.map((n) => (seenInThread.has(n.id) ? { ...n, read: true } : n))
         : incoming;
 
-      // Surface anything that arrived since the last poll as a live toast (e.g. a
-      // new signup landing under onboarding), so an admin doesn't have to open the
-      // bell to notice it. Only after the first hydrate — the initial list isn't new.
+      // Toast whatever arrived since the last poll — but only after the first hydrate,
+      // the initial backlog isn't new.
       if (hydratedOnce) {
         const seen = new Set(get().notifications.map((n) => n.id));
         const fresh = incoming.filter(

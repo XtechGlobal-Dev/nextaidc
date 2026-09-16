@@ -166,15 +166,8 @@ export default function AdminStaffDetailPage() {
 
   const selectedRole = useMemo(() => roles.find((r) => r.id === roleId) ?? null, [roles, roleId]);
 
-  /**
-   * The support queues this member ends up working.
-   *
-   * Read-only here, and deliberately so. Queues arrive with the ROLE, so the
-   * role editor is where they change; a queue lent to this one person is
-   * granted from Support Tickets → Departments → Team members. Showing an
-   * editable list on this form would offer to revoke a role grant that this
-   * form cannot actually revoke.
-   */
+  // Queues are read-only here on purpose: they come from the role (edit there) or from
+  // Departments → Team members. An editable list would offer to revoke grants this form can't.
   const roleDepartmentIds = useMemo(
     () => new Set((selectedRole?.departments ?? []).map((d) => d.id)),
     [selectedRole],
@@ -458,12 +451,7 @@ export default function AdminStaffDetailPage() {
   );
 }
 
-/**
- * Custom role picker — a dropdown that shows the selected role (name + summary)
- * in the trigger and lists every role with its description and the sections it
- * unlocks. Built on the shared DropdownMenu primitive so it inherits click-away,
- * keyboard nav and theming; the content is width-matched to the trigger.
- */
+// Role picker on the shared DropdownMenu so it inherits click-away, keyboard nav and theming.
 function RoleSelect({
   id,
   roles,

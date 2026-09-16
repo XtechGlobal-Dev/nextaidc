@@ -23,25 +23,11 @@ function countdown(ms: number): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-/**
- * Which question the dialog is asking. One dialog rather than three, because
- * every step wants the same thing — six digits — and the admin arriving here
- * has one goal: get into the account.
- */
+/** Which step the dialog is on. One dialog for all three since every step wants six digits. */
 type Mode = "enter" | "change" | "reset";
 
-/**
- * The PIN prompt behind "Login as Customer".
- *
- * The entry point is hidden (an emoji in the header), but that is presentation,
- * not protection — `POST /customers/:id/impersonate` verifies the PIN itself and
- * refuses without it. Nothing in this component is a security control; if it
- * were deleted entirely, the endpoint would still say no.
- *
- * Changing and resetting the PIN live in here too, rather than on a settings
- * page. The point of the feature is that the whole capability is out of sight,
- * and a "Login as Customer PIN" card in admin settings would advertise it again.
- */
+/** PIN prompt behind "Login as Customer". Not a security control (the endpoint verifies the PIN itself).
+ *  Change/reset live here rather than a settings page so the capability stays out of sight. */
 export function ImpersonationPinDialog({
   open,
   onOpenChange,
@@ -52,9 +38,7 @@ export function ImpersonationPinDialog({
   customerId: string;
 }) {
   const navigate = useNavigate();
-  // Resolved when the dialog opens. Naming the account is the point of the
-  // confirmation step — "sign in as someone" is not a question anyone should be
-  // answering blind.
+  // Resolved on open; the confirmation must name the account, not "someone".
   const [customerName, setCustomerName] = useState("this customer");
   const [mode, setMode] = useState<Mode>("enter");
   const [busy, setBusy] = useState(false);
@@ -68,11 +52,8 @@ export function ImpersonationPinDialog({
   const [newPin, setNewPin] = useState("");
   const [sentTo, setSentTo] = useState<string | null>(null);
 
-  /* When the server's lockout expires, as epoch ms. Held as an INSTANT rather
-   * than the "15 minute(s)" the error message quotes, so the dialog can count it
-   * down and let itself back in — a static message left the boxes typable and
-   * the button live for the whole fifteen minutes, inviting attempts the server
-   * was always going to refuse. */
+  // Lockout expiry as epoch ms, so the dialog can count down and unfreeze itself;
+  // a static "15 minutes" message left the form live for attempts the server would refuse.
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -106,9 +87,7 @@ export function ImpersonationPinDialog({
     }
   }
 
-  // Reset on every open. A PIN left in state from last time would otherwise be
-  // submitted by a stray Enter, and the previous error would flash up before
-  // this attempt had been made.
+  // Reset on every open, or a leftover PIN gets submitted by a stray Enter and the old error flashes.
   useEffect(() => {
     if (!open) return;
     setMode("enter");

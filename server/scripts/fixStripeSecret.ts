@@ -1,9 +1,7 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 
-/* One-off: remove a bad stripe.secretKey DB override so the correct
- * STRIPE_SECRET_KEY from .env is used. (A publishable key had been saved
- * into the secret-key slot via Admin → Settings.) */
+// One-off: drop a bad stripe.secretKey override (a publishable key was saved there) so .env wins.
 const prisma = new PrismaClient();
 try {
   const res = await prisma.platformSetting.deleteMany({ where: { key: "stripe.secretKey" } });

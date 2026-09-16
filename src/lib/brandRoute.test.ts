@@ -10,14 +10,8 @@ import {
   slugFromPath,
 } from "./brandRoute";
 
-/* ------------------------------------------------------------------ *
- *  Which door this page load came through, and what that means for a
- *  URL built by hand.
- *
- *  The distinction earns its keep in one place: a full page navigation
- *  (window.location) bypasses the router, so the brand prefix a path
- *  door relies on has to be applied deliberately — see brandPath.
- * ------------------------------------------------------------------ */
+// Which door the page load came through. Matters for hand-built URLs: window.location bypasses the
+// router, so a path door's prefix has to be applied deliberately (brandPath).
 
 beforeEach(() => setActiveBrandSlug(null));
 
@@ -75,9 +69,7 @@ describe("the two doors", () => {
 
 describe("brandPath", () => {
   it("keeps a path-door customer on their own front door", () => {
-    // The bug this exists for: a bare "/login" in window.location.assign drops
-    // an Acme customer onto the PLATFORM's sign-in page, wearing the platform's
-    // name and colours.
+    // The bug: a bare "/login" in window.location.assign dropped an Acme customer onto the platform's sign-in page.
     setActiveBrandSlug("acme");
     expect(brandPath("/login")).toBe("/acme/login");
     expect(brandPath("/dashboard/assistant")).toBe("/acme/dashboard/assistant");

@@ -9,9 +9,8 @@ import { clampName } from "@/lib/limits";
 import { autoGreeting } from "@/lib/compilePrompt";
 import { api, ApiError } from "@/lib/api";
 
-// Dedupes concurrent analyze calls. React StrictMode double-invokes the Step 1
-// mount effect in dev, which would otherwise fire two /analyze requests (and two
-// error toasts). Any overlapping call awaits the same in-flight promise.
+// Dedupes concurrent analyze calls — StrictMode double-mounts Step 1 in dev, which
+// fired two /analyze requests and two error toasts.
 let analyzeInFlight: Promise<void> | null = null;
 
 export interface OnboardingData {
@@ -80,11 +79,8 @@ interface OnboardingState {
   reset: () => void;
 }
 
-/**
- * The password is kept out of the persisted (localStorage) blob for security,
- * but we mirror it to sessionStorage so it survives going back to the account
- * step or a page reload, then clears itself when the tab closes.
- */
+// Password stays out of localStorage; sessionStorage mirror survives a reload / going
+// back a step, and clears itself when the tab closes.
 const PW_KEY = "hello22_onboarding_pw";
 const readPw = () => {
   try {
@@ -239,34 +235,25 @@ export const useOnboardingStore = create<OnboardingState>()(
 
       applyToAccount: async () => {
         const { data } = get();
-        // Start from a clean default config. The agent store is persisted in
-        // localStorage, so a *previous* account set up in this same browser would
-        // otherwise leak its config (assistant name, services, FAQs…) into this new
-        // signup — which is how a fresh account ended up named "Test12". Resetting
-        // first guarantees the assistant is named after THIS business below.
+        // Reset first: the agent store is persisted, so a previous account in this browser
+        // would leak its config into the new signup (a fresh account once came out named "Test12").
         useAgentStore.getState().reset();
-        // Seed the agent config from the collected onboarding info.
         useAgentStore.getState().updateSection("identity", (prev) => {
           const business = data.businessName.trim();
-          // Name the receptionist after the business (e.g. "Nexleon Receptionist")
-          // — but only while the name is still the untouched default, so we never
-          // clobber a name the owner deliberately set.
+          // Name the receptionist after the business only while the name is still the
+          // untouched default — never clobber one the owner set.
           const untouched =
             !prev.assistantName?.trim() ||
             prev.assistantName.trim() === DEFAULT_AGENT_CONFIG.identity.assistantName;
           return {
             ...prev,
-            // Clamp to NAME_MAX: a long scraped business title (e.g. an Amazon /
-            // Flipkart page name) must never overflow the 40-char cap or Vapi
-            // rejects the assistant. This is the path that produced the "73/40".
+            // Clamp: a long scraped page title over the 40-char cap makes Vapi reject the
+            // assistant (this path produced the "73/40").
             businessName: clampName(data.businessName),
-            // Built from the CLAMPED name so the greeting matches the stored
-            // business name (and stays re-derivable when the owner renames later).
+            // From the CLAMPED name so the greeting matches what's stored.
             greetingMessage: autoGreeting(clampName(data.businessName)),
-            // Voice is intentionally NOT seeded from the onboarding showcase — every
-            // new agent starts on the default voice (Sarah) and the owner can only
-            // change it later in the AI Brain on a paid plan. reset() above already
-            // set identity.voiceId to the default.
+            // Voice is deliberately not seeded from the showcase — new agents start on the
+            // default (Sarah); changing it is a paid-plan action in the AI Brain.
             ...(business && untouched
               ? { assistantName: clampName(`${business} Receptionist`) }
               : {}),
@@ -304,9 +291,8 @@ export const useOnboardingStore = create<OnboardingState>()(
             faqs: [...(prev.faqs ?? []), ...seededFaqs],
           };
         });
-        // Seed AI-suggested, business-specific Scenario Handling (when the analyser
-        // returned any) so the agent isn't on one-size-fits-all defaults. The owner
-        // edits/adds/removes these later in the AI Brain → Rules.
+        // Seed business-specific scenarios when the analyser returned any; editable later
+        // in AI Brain → Rules.
         const seededScenarios = data.scenarios
           .filter((s) => s.ifText.trim() && s.thenText.trim())
           .slice(0, 3)
@@ -332,11 +318,8 @@ export const useOnboardingStore = create<OnboardingState>()(
           ...(data.phone ? { businessNumber: data.phone } : {}),
           ...(data.address ? { address: data.address } : {}),
         });
-        // Persist the seeded config to the DB (deploys to the live agent too once
-        // one exists). Without this, the AI Brain's first hydrate from the server
-        // would overwrite these onboarding services/FAQs with defaults — so retry
-        // a few times (a cold-started API often fails only the first hit) and TELL
-        // the user if it still fails instead of silently losing their setup.
+        // Persist now or the AI Brain's first hydrate overwrites the seeded services/FAQs
+        // with defaults. Retry (a cold API often fails the first hit) and tell the user if it still fails.
         let persisted = false;
         for (let attempt = 0; attempt < 3 && !persisted; attempt++) {
           if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));

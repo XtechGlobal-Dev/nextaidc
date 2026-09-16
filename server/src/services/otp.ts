@@ -9,20 +9,13 @@ import { integrationsStatus } from "./settings.js";
 import { sendSms, isTwilioConfigured } from "./sms.js";
 import { brandDisplayName } from "../lib/brandUrls.js";
 
-/* ------------------------------------------------------------------ *
- *  Email OTP — sign-up verification & password reset.
- *  Codes are 6-digit, single-use, hashed at rest, expire after a few
- *  minutes, and are rate-limited by attempt count. The pending sign-up
- *  payload (passwordHash, name, business) rides along on the code row
- *  until the user verifies, so we never create a user before verification.
- * ------------------------------------------------------------------ */
+// Email OTP: 6-digit, single-use, hashed at rest, attempt-limited. The pending
+// sign-up payload rides on the code row so no user exists before verification.
 
 export type OtpPurpose = "signup" | "password_reset" | "impersonation_pin_reset";
 
-/** The template each purpose sends through. A map rather than a ternary, so
- *  adding a purpose is a compile error here instead of silently posting the
- *  wrong email — a PIN reset arriving as "reset your password" would read as a
- *  phishing attempt on the one account that must never be phished. */
+// A map, not a ternary: a new purpose is a compile error here instead of a
+// PIN reset silently arriving as "reset your password" (reads as phishing).
 const OTP_TEMPLATE: Record<OtpPurpose, string> = {
   signup: "email_verification",
   password_reset: "password_reset",
@@ -43,10 +36,7 @@ export interface SignupPayload {
   viaOnboarding?: boolean;
   /** IANA timezone the browser reported at signup (e.g. "Asia/Kolkata"). */
   timezone?: string;
-  /** The `onboarding.cardRequired` policy as it stood when /register/start ran.
-   *  Carried here rather than re-read at /register/verify so an admin flipping
-   *  the toggle inside the OTP window can't stamp the account with a rule the
-   *  user was never shown. */
+  /** cardRequired policy snapshotted at /register/start, so a toggle flipped mid-OTP can't stamp a rule the user never saw. */
   cardRequired?: boolean;
 }
 
@@ -61,12 +51,8 @@ function hashCode(email: string, code: string): string {
   return crypto.createHash("sha256").update(`${email}:${code}:${env.JWT_SECRET}`).digest("hex");
 }
 
-/**
- * Where this door's codes live: the brand's own database, or — on the
- * platform's own door, for the platform's own people — the control plane's
- * table of the same shape. A code is issued and checked on the same door, so
- * the two stores never need to meet.
- */
+// Codes live in the brand's DB, or the control plane's same-shaped table on the
+// platform door. Issued and checked on the same door, so the stores never meet.
 type CodeStore = TenantClient["verificationCode"];
 async function codes(): Promise<CodeStore> {
   const brandId = currentBrandId();
@@ -99,13 +85,7 @@ export async function createOtp(opts: {
 /** Grace window in which a sign-up code stays "recoverable" after being consumed. */
 const RECOVERY_TTL_MIN = 30;
 
-/**
- * True if `code` matches the most recent sign-up OTP for `email` — even if it was
- * already consumed — within a short grace window. Lets `/register/verify` be
- * retried idempotently: if the first verify created the account but its response
- * was lost (slow/dropped, e.g. a cold DB), re-submitting the same code recovers
- * the session instead of failing with "Email already registered".
- */
+/** Matches the latest sign-up code even if consumed (within a grace window), so a verify whose response was lost can be retried instead of hitting "Email already registered". */
 export async function signupCodeMatches(email: string, code: string): Promise<boolean> {
   const row = await (await codes()).findFirst({
     where: { email, purpose: "signup" },
@@ -193,12 +173,7 @@ export async function sendOtpEmail(email: string, code: string, purpose: OtpPurp
   }
 }
 
-/**
- * Best-effort: also text the SAME verification code to the user's mobile, so they
- * can grab it from either their inbox or their phone. Deliberately non-throwing —
- * email is the primary channel; a missing number, unconfigured Twilio, or a carrier
- * failure must never block sign-up. Failures are logged for ops, not surfaced.
- */
+/** Also texts the same code. Never throws — email is the primary channel and SMS trouble must not block sign-up. */
 export async function sendOtpSms(
   mobile: string | undefined,
   code: string,
@@ -214,9 +189,7 @@ export async function sendOtpSms(
   // No Twilio configured — nothing to send; email already carries the code.
   if (!isTwilioConfigured()) return;
 
-  // Whatever this tenant calls itself — a white-label customer verifying their
-  // sign-up must not be told to confirm an account on a product they have never
-  // heard of.
+  // Tenant's own name: a white-label customer must not see a product they've never heard of.
   const appName = brandDisplayName();
 
   // Lead with the code so it's the first thing the user sees, then say plainly

@@ -3,15 +3,8 @@ import { bookingPromptSection, buildBookingTools } from "./vapi.js";
 import type { BookingConfig } from "./booking/config.js";
 import { parseWorkingHours } from "./booking/hours.js";
 
-/* ------------------------------------------------------------------ *
- *  Booking is deliberately simple now: the AI books on the call when — and only
- *  when — the owner has auto-booking ON and Google Calendar connected
- *  (canAutoBook). Otherwise it takes a message. There is no website/link path.
- *
- *  INVARIANT: the prompt only ever describes abilities the AI actually has. If
- *  canAutoBook, the create/availability tools are attached and the prompt says
- *  "book them in yourself"; if not, no tools and the prompt says take a message.
- * ------------------------------------------------------------------ */
+// The AI books on the call only when canAutoBook (auto-booking on + Google connected), else takes a message.
+// Invariant: the prompt only describes abilities the AI actually has — tools attached iff it says "book them in yourself".
 
 function cfg(over: Partial<BookingConfig> = {}): BookingConfig {
   return {

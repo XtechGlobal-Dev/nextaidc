@@ -1,7 +1,4 @@
-/**
- * Human Call Transfer — shared constants and validation for the single-number
- * transfer settings. No I/O here.
- */
+// Human call transfer — shared constants and validation. No I/O.
 import { z } from "zod";
 
 /** Default ring time before the AI gives up and speaks the end message. */
@@ -33,11 +30,7 @@ export const settingsPatchSchema = z.object({
 
 export type SettingsPatch = z.infer<typeof settingsPatchSchema>;
 
-/**
- * Hard ceiling on departments for ANY plan, unlimited included — the transfer
- * tool stops being usable for a caller long before this, and it bounds the
- * prompt we hand Vapi. Plan limits are enforced on top of it, never above it.
- */
+/** Hard ceiling for ANY plan, unlimited included — bounds the Vapi prompt. Plan limits sit under it. */
 export const MAX_DEPARTMENTS = 20;
 
 /** The half of a plan that decides transfer access. */
@@ -47,17 +40,8 @@ export interface TransferPlanLimits {
   callTransferLimit: number;
 }
 
-/**
- * How many departments this plan may configure, as one number.
- *
- * The stored pair is deliberately never read raw: `callTransferLimit` is 0 for
- * BOTH "unlimited" and "irrelevant, the feature is off", so reading it alone
- * gets the STARTER case exactly backwards. Everything that needs the allowance
- * goes through here instead.
- *
- * Returns 0 when the plan excludes transfer entirely, otherwise the plan's cap
- * clamped to MAX_DEPARTMENTS.
- */
+/** Department allowance as one number. Never read `callTransferLimit` raw — 0 means both "unlimited"
+ *  and "feature off", so the STARTER case comes out backwards. */
 export function transferDepartmentAllowance(plan: TransferPlanLimits | null | undefined): number {
   if (!plan?.callTransferEnabled) return 0;
   const limit = plan.callTransferLimit;

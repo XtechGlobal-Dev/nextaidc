@@ -6,13 +6,8 @@ import { verifyUnsubscribe } from "../lib/jwt.js";
 import { escapeHtml } from "../lib/escapeHtml.js";
 import { emailGlobals } from "../services/emailTemplates.js";
 
-/* ------------------------------------------------------------------ *
- *  Public (no-auth) email unsubscribe endpoint.
- *  Reached from the tokenized link in notification-email footers and
- *  from mail clients' one-click List-Unsubscribe (RFC 8058) button.
- *  Toggles User.emailOptOutAt; renders a self-contained confirmation
- *  page so it works from any inbox without loading the SPA.
- * ------------------------------------------------------------------ */
+// Public (no-auth) email unsubscribe: footer link + RFC 8058 one-click. Toggles
+// User.emailOptOutAt and renders a self-contained page (no SPA needed).
 
 const router = Router();
 
@@ -53,11 +48,8 @@ async function setOptOut(userId: string, optOut: boolean): Promise<void> {
   });
 }
 
-/**
- * One-click unsubscribe (RFC 8058). Mail providers POST here directly — no
- * browser, no page rendered. Always 200 on a valid token so the provider marks
- * it done; opt-out is idempotent.
- */
+// RFC 8058 one-click: mail providers POST here, no browser. Always 200 on a valid
+// token so the provider marks it done.
 router.post(
   "/",
   asyncHandler(async (req, res) => {
@@ -71,11 +63,7 @@ router.post(
   }),
 );
 
-/**
- * Human-facing unsubscribe / re-subscribe. `?token=…` opts the user out and
- * shows a confirmation; `?token=…&resubscribe=1` (the link on that page) opts
- * them back in.
- */
+// Human-facing: `?token=` opts out, `?token=&resubscribe=1` opts back in.
 router.get(
   "/",
   asyncHandler(async (req, res) => {

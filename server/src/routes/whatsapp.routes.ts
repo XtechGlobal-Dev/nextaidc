@@ -9,17 +9,8 @@ import {
   type ChatTurn,
 } from "../services/whatsappAgent.js";
 
-/* ------------------------------------------------------------------ *
- *  Meta WhatsApp Cloud API webhook.
- *    GET  /api/whatsapp/webhook  — Meta's subscribe handshake (echo challenge)
- *    POST /api/whatsapp/webhook  — inbound messages → AI reply
- *
- *  Mounted with express.raw so we can verify Meta's X-Hub-Signature-256
- *  against the exact bytes (the app-level JSON parser skips this path).
- *
- *  Conversation memory is in-process (resets on restart) — a deliberate v1
- *  trade-off to avoid a new table on the shared DB. See server/MIGRATIONS.md.
- * ------------------------------------------------------------------ */
+// Meta WhatsApp webhook (handshake + inbound → AI reply). Uses express.raw so the
+// X-Hub-Signature-256 check sees the exact bytes. Conversation memory is in-process (v1).
 
 const router = express.Router();
 

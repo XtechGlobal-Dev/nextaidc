@@ -29,9 +29,8 @@ export const useTrialStore = create<TrialStoreState>()(
       },
       reset: () => set({ trial: null, loading: false }),
     }),
-    // Cache the last-known entitlement so the sidebar meter renders instantly on
-    // reload instead of flashing the "no entitlement" fallback until the
-    // /api/trial/status fetch returns. Cleared on logout via reset().
+    // Cache the last entitlement so the sidebar meter doesn't flash "no entitlement"
+    // on reload while /api/trial/status loads. Cleared on logout via reset().
     { name: "hello22_trial", partialize: (s) => ({ trial: s.trial }) },
   ),
 );

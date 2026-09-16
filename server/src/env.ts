@@ -149,6 +149,20 @@ const schema = z.object({
   // (e.g. "aws-ap-southeast-2"). Blank lets Neon pick, which is wrong for a
   // residency contract — so provisioning asks for a region explicitly.
   NEON_DEFAULT_REGION: z.string().optional().default(""),
+
+  // ---- Job queue (lib/jobQueue.ts, pg-boss) --------------------------------
+  // Postgres connection pg-boss's tables live in. Blank (the default) reuses
+  // DATABASE_URL — pg-boss's schema is additive and isolated from Prisma's, so
+  // most deployments need nothing here. Override only to isolate queue load
+  // onto a separate database if it ever needs to scale independently.
+  JOB_QUEUE_DB_URL: z.string().optional().default(""),
+  JOB_QUEUE_SCHEMA: z.string().default("pgboss"),
+  // Per-job cutover flags: each job migrated from scheduler.ts's setInterval
+  // onto the queue gets one, so a single instance can flip back to the old
+  // in-process path with an env change and a restart — no redeploy — if the
+  // queue path misbehaves. Off by default; enable per job as each is proven.
+  JOBS_VIA_QUEUE_API_LOG_SWEEP: z.enum(["true", "false"]).default("false"),
+  JOBS_VIA_QUEUE_ALERT_RULES: z.enum(["true", "false"]).default("false"),
 });
 
 const parsed = schema.safeParse(process.env);

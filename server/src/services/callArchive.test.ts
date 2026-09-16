@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Call log tiering. The whole point of this feature is that a call's
- *  transcript can leave Postgres WITHOUT the owner ever noticing, so
- *  these tests are mostly about what must never happen: a transcript
- *  destroyed because S3 was down, a recording that stops playing once
- *  its analysis blob moved, a re-run that orphans objects in the bucket.
- * ------------------------------------------------------------------ */
+// Call log tiering. Mostly about what must never happen: a transcript destroyed because S3 was
+// down, a recording that stops playing once its analysis moved, a re-run that orphans bucket objects.
 
 const h = vi.hoisted(() => ({
   findMany: vi.fn(),
@@ -30,9 +25,7 @@ vi.mock("./storage.js", () => ({
   deleteObject: h.del,
 }));
 vi.mock("../env.js", () => ({
-  // JWT_SECRET is here because retention now also deletes a call's personal
-  // half from an isolated brand's database, which pulls in the credential
-  // crypto that derives its key from this.
+  // JWT_SECRET: retention deletes a call's personal half from the tenant DB, which pulls in credential crypto keyed off this.
   env: { CALL_ARCHIVE_AFTER_DAYS: 90, CALL_RETENTION_DAYS: 0, JWT_SECRET: "test-secret-for-the-call-archive-suite" },
 }));
 

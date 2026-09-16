@@ -79,9 +79,7 @@ const router = express.Router();
 router.get(
   "/plans",
   asyncHandler(async (req, res) => {
-    // A white-label brand sells the plans it chose; an empty list means all of
-    // them. The brand is the request's front door (host / Origin / X-Brand),
-    // which is the one whose subscribe page is asking.
+    // A brand sells the plans it chose (empty list = all). The brand is the request's front door.
     const allowed = brandPlanIds(req.brand);
     const plans = await prisma.subscriptionPlan.findMany({
       where: { active: true, ...(allowed.length ? { id: { in: allowed } } : {}) },
@@ -89,9 +87,7 @@ router.get(
       // the same sort order always appear in a stable order on the subscribe page.
       orderBy: [{ sortOrder: "asc" }, { priceCents: "asc" }, { createdAt: "asc" }],
     });
-    // Resolve voice-category names so the subscribe page can show a voice pill
-    // ("Basic"/"Premium") like the admin card — plans carry only the id, and the
-    // category endpoint itself is admin-only.
+    // Resolve voice-category names here — plans carry only the id and the category endpoint is admin-only.
     const catIds = [...new Set(plans.map((p) => p.voiceCategoryId).filter((id): id is string => !!id))];
     const cats = catIds.length
       ? await prisma.voiceCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, title: true } })
@@ -125,14 +121,7 @@ router.get(
   }),
 );
 
-/**
- * Check a coupon code against a plan for the signed-in user, without reserving
- * anything — so the checkout page can validate as the user types and show the
- * discounted total live.
- *
- * Rate-limited and deliberately vague on failure (see `rejectionMessage`): a
- * precise "no such code" would turn this into a code-enumeration oracle.
- */
+/** Live coupon check for checkout, reserves nothing. Rate-limited and vague on failure — a precise "no such code" is an enumeration oracle. */
 router.post(
   "/coupon/validate",
   requireAuth,
@@ -170,11 +159,7 @@ router.post(
   }),
 );
 
-/**
- * Start a trial subscription for the signed-in user on the chosen plan.
- * Returns a SetupIntent client secret the frontend confirms with Elements
- * (saves the card). Trial auto-charges when it ends.
- */
+/** Start a trial subscription on the chosen plan. Returns a SetupIntent secret; the trial auto-charges when it ends. */
 router.post(
   "/subscribe",
   requireAuth,
@@ -195,10 +180,7 @@ router.post(
     // The brand's own Price when this customer's brand adds a charge on top.
     const priceId = (await stripePriceIdFor(plan, req.user!.brandId)) ?? plan.stripePriceId;
 
-    // Re-validate the code server-side. If it no longer applies (the last slot
-    // went to someone else, or the user re-picked a plan the code doesn't
-    // cover), FAIL rather than quietly continuing at full price — nobody should
-    // reach the card step believing a discount is applied when it isn't.
+    // Re-validate the code. If it no longer applies, FAIL — nobody should reach the card step believing a discount applies when it doesn't.
     let coupon = null;
     if (couponCode?.trim()) {
       const result = await validateCoupon({ code: couponCode, planId, userId });
@@ -206,9 +188,7 @@ router.post(
       coupon = result.coupon;
     }
 
-    // Drop any reservation held for a DIFFERENT code (the user changed their
-    // mind mid-signup), so an abandoned choice doesn't sit on a supply slot
-    // until the sweep and doesn't collide with the new one.
+    // Drop a reservation for a DIFFERENT code so it doesn't hold a supply slot until the sweep.
     await clearOtherPendingReservations(userId, coupon?.id ?? null);
 
     const profile = await (await requestTenant(req)).profile.findUnique({ where: { userId } });
@@ -216,13 +196,8 @@ router.post(
     const previousCustomerId = profile?.stripeCustomerId ?? null;
     const previousSubscriptionId = profile?.stripeSubscriptionId ?? null;
 
-    // Already in a trial (e.g. re-picking a plan during signup)? Reuse the
-    // existing trial subscription and just swap which plan it's on — do NOT open
-    // a second Stripe subscription. Opening another would orphan the first (it
-    // stays live and could double-charge at trial end) and log a duplicate
-    // "trial started". A genuine plan change logs `plan_switched` instead.
-    // Only safe when the currency matches; a currency switch still needs a fresh
-    // customer, so those fall through to the create path (which cancels the old).
+    // Already trialing: swap the plan on the existing subscription, never open a second one (the orphan could
+    // double-charge at trial end). Only when the currency matches — a switch falls through to the create path.
     if (profile?.subscriptionStatus === "trialing" && previousSubscriptionId && profile.subscriptionPlanId) {
       const current = await prisma.subscriptionPlan.findUnique({
         where: { id: profile.subscriptionPlanId },
@@ -233,9 +208,7 @@ router.post(
           priceId,
         );
 
-        // Keep the subscription's discount in step with the code the user is
-        // holding right now: attach the (re-validated) one, or clear it if they
-        // removed the code or swapped to a plan it doesn't cover.
+        // Keep the Stripe discount in step with the code the user holds now: attach it, or clear it.
         try {
           if (coupon?.stripeCouponId) {
             await attachSubscriptionDiscount(previousSubscriptionId, coupon.stripeCouponId);
@@ -292,10 +265,7 @@ router.post(
       }
     }
 
-    // The trial subscription is plan-only — every feature is bundled into the plan.
-    // Pass the plan currency so a customer locked to a different currency (e.g. an
-    // old USD customer subscribing to a new AUD plan) is moved to a fresh customer
-    // instead of failing with Stripe's "cannot combine currencies" error.
+    // Pass the plan currency so a customer locked to another currency gets a fresh Stripe customer instead of "cannot combine currencies".
     const { customerId, subscriptionId, clientSecret, trialEnd } = await createTrialSubscription({
       email: req.user!.email,
       owner: { brandId: req.user!.brandId, userId },
@@ -311,13 +281,8 @@ router.post(
     // card is actually charged, promotes it to a real redemption.
     if (coupon) await reserveRedemption(coupon.id, userId);
 
-    // Cancel whatever subscription we just replaced. Two cases reach here:
-    //  • a currency switch forced a new Stripe customer, so the old subscription
-    //    would be left dangling on the old currency;
-    //  • the previous attempt is unusable (past_due / canceled / incomplete) and
-    //    the user is retrying — the reuse branch above only covers "trialing".
-    // Without this a retry left the failed subscription live alongside the new
-    // one, so the customer had two and could be billed twice.
+    // Cancel the replaced subscription (currency switch, or a retry after past_due/canceled/incomplete).
+    // Without this a retry left two live subscriptions and the customer could be billed twice.
     if (previousSubscriptionId && previousSubscriptionId !== subscriptionId) {
       await cancelSubscription(previousSubscriptionId).catch(() => {
         /* best-effort — never block a paying customer on tidy-up */
@@ -334,11 +299,8 @@ router.post(
       }
     }
 
-    // Persist the PENDING trial subscription, but DON'T activate the trial yet —
-    // no subscriptionStatus flip, no minute grant, no provisioning. The trial is
-    // activated in /confirm-card, once a real card is on file. This is the gate
-    // that stops "free-trial farming": picking a plan on /subscribe and leaving
-    // without a card (or re-picking plans) can no longer grant fresh trial minutes.
+    // Persist the PENDING subscription but don't activate the trial — /confirm-card does that once a card is on
+    // file. This is the gate against trial farming by picking plans without a card.
     await (await requestTenant(req)).profile.update({
       where: { userId },
       data: {
@@ -356,15 +318,8 @@ router.post(
   }),
 );
 
-/**
- * Confirm the just-saved card AND activate the trial. The frontend calls this
- * right after Stripe's SetupIntent succeeds, passing the payment method id.
- *
- * This is where the trial actually starts (subscriptionStatus → "trialing", trial
- * minutes granted) — NOT at /subscribe — so a plan chosen without a card never
- * grants trial minutes. Card uniqueness is NOT enforced (the same card may fund
- * multiple accounts; sign-up is gated by a unique mobile number instead).
- */
+/** Confirm the saved card AND start the trial — the only place it starts, so a plan chosen without a card grants nothing.
+ *  Card uniqueness is deliberately not enforced; sign-up is gated by unique mobile instead. */
 router.post(
   "/confirm-card",
   requireAuth,
@@ -373,11 +328,7 @@ router.post(
     const { paymentMethodId, activateNow } = z
       .object({
         paymentMethodId: z.string().min(1),
-        /** Sent by the explicit "choose a plan and pay" flow. Charges the card and
-         *  activates the plan straight away instead of continuing the free trial:
-         *  someone who deliberately bought a plan expects to be on it, not to be
-         *  told their trial started. Absent (the trial-start flow) keeps the old
-         *  no-charge behaviour, so nobody is billed for saving a card. */
+        /** Explicit "buy a plan" flow: charge and activate now instead of continuing the trial. Absent = no charge for saving a card. */
         activateNow: z.boolean().optional(),
       })
       .parse(req.body);
@@ -391,14 +342,8 @@ router.post(
     if (customerId && customerId !== profile.stripeCustomerId) {
       throw badRequest("This payment method doesn't belong to your account");
     }
-    // An UNATTACHED method (customerId null) used to slip through the check above,
-    // because it matches nobody. That is not a formality any more: this handler
-    // stamps cardConfirmedAt, which is what the onboarding card wall keys on — so
-    // a caller who minted a PaymentMethod with the publishable key and posted it
-    // straight here would lift their own wall with no card on file anywhere.
-    // The SetupIntent normally attaches it on success; do it ourselves when it
-    // hasn't, so "card on file" is a fact rather than a claim, and fail closed if
-    // Stripe won't take it.
+    // An UNATTACHED method matches nobody and used to slip through — and this handler stamps cardConfirmedAt, the card
+    // wall's key, so a PaymentMethod minted with the publishable key could lift the wall. Attach it ourselves; fail closed.
     if (!customerId) {
       try {
         await attachPaymentMethod(paymentMethodId, profile.stripeCustomerId);
@@ -407,36 +352,13 @@ router.post(
       }
     }
 
-    // Activate the plan now that a real card is confirmed — the ONLY place it's
-    // ever activated (never at /subscribe), so a plan chosen without a card grants
-    // nothing. Skip when already on a live trial/plan (a plan switch / double-submit).
-    // `charged` = we billed the card now (trial was used up) vs started/continued a
-    // trial — the client uses it to show the right success toast.
+    // The ONLY place a plan is activated. `charged` tells the client whether we billed now or started/continued a trial.
     let charged = false;
-    // A card-required signup is `blocked` BY DESIGN until a card lands — that
-    // block means "no card yet", NOT "free trial spent". This is their first
-    // card and their trial hasn't started, so it must take the trial branch:
-    // treating them as blocked would bill the full plan price on day one, the
-    // opposite of the $0-auth-plus-free-trial policy they signed up under.
-    //
-    // Keyed on cardConfirmedAt rather than subscriptionStatus === "none": an
-    // abandoned card-required signup has its unpaid trial subscription cancelled
-    // by Stripe (missing_payment_method: "cancel"), landing the profile on
-    // "canceled". Keying on the status would then charge that returning user the
-    // full plan price for a trial they never actually received.
+    // A card-required signup is `blocked` meaning "no card yet", NOT "trial spent" — treating it as spent billed full price
+    // on day one. Keyed on cardConfirmedAt, not status: Stripe cancels an abandoned unpaid trial, landing it on "canceled".
     const firstCardForCardRequired = profile.cardRequiredAtSignup && !profile.cardConfirmedAt;
-    // `activateNow` is an explicit purchase, so it must go through even when the
-    // profile is already "trialing" — that is exactly the case the user hits when
-    // they buy a plan part-way through their trial.
-    //
-    // `firstCardForCardRequired` must ALSO force entry, whatever the status says.
-    // This block is the only writer of cardConfirmedAt, and cardConfirmedAt is the
-    // card wall's signal — so skipping it would accept the customer's card, leave
-    // the flag null, and bounce them to /subscribe on this and every future login
-    // while Stripe happily charges them at trial end. A walled account can reach
-    // "trialing" without a card (admin suspend → reactivate restores it from
-    // trialEndsAt, which /subscribe sets before any card exists), so the status
-    // alone cannot be trusted to let the first card through.
+    // `activateNow` (buying mid-trial) and `firstCardForCardRequired` must both force entry regardless of status: this
+    // block is the only writer of cardConfirmedAt, and a walled account can be "trialing" with no card (suspend → reactivate).
     if (
       activateNow ||
       firstCardForCardRequired ||
@@ -452,23 +374,15 @@ router.post(
       // trial). Otherwise the trial simply continues with a card on file.
       if (activateNow || (ent.blocked && !firstCardForCardRequired)) {
         charged = true;
-        // End the Stripe trial now, which bills the saved card, then activate the
-        // paid plan. Either they bought deliberately, or the free trial is spent
-        // and there is no second one.
+        // End the Stripe trial now (bills the card), then activate. No second free trial.
         if (!profile.stripeSubscriptionId) throw badRequest("No subscription to activate");
-        // Bill the card the user just entered, not whatever default the customer
-        // happened to have. On a retry after a decline that default IS the refused
-        // card, so without this the second attempt fails identically.
+        // Bill the card just entered, not the customer default — after a decline that default IS the refused card.
         try {
           await setSubscriptionDefaultPaymentMethod(profile.stripeSubscriptionId, paymentMethodId);
         } catch {
           /* best-effort — a single-card customer is already pointing at the right one */
         }
-        // errorIfIncomplete makes this atomic: a decline throws AND leaves the
-        // subscription trialing, so the user stays exactly where they were and can
-        // try another card. Dropping them to past_due instead used to leave them
-        // stranded — the retry then took the "create" path and opened a SECOND
-        // Stripe subscription alongside the failed one.
+        // errorIfIncomplete keeps a decline atomic (still trialing). Dropping to past_due used to make the retry open a SECOND subscription.
         try {
           await endTrialNow(profile.stripeSubscriptionId, { errorIfIncomplete: true });
         } catch {
@@ -489,26 +403,18 @@ router.post(
             subscriptionStatus: "active",
             trialEndsAt: null,
             currentPeriodEnd: periodEnd,
-            // A card is now genuinely on file — this route is the only writer of
-            // that fact, and it's what the card wall keys on. Recorded once (the
-            // FIRST card), so a later card change doesn't move the timestamp.
+            // Only writer of cardConfirmedAt (the card wall's key). Recorded once, for the FIRST card.
             ...(profile.cardConfirmedAt ? {} : { cardConfirmedAt: new Date() }),
           },
         });
-        // The card was charged, so a held coupon is now genuinely redeemed. Must
-        // run BEFORE the minute grant so any bonus minutes are already live when
-        // `effectiveIncludedMinutes` computes the allowance.
+        // Coupon is now redeemed. Must run BEFORE the minute grant so bonus minutes are live for the allowance calc.
         await activateRedemption(userId, profile.stripeSubscriptionId);
         await applyActivePlanMinutes(userId, {
           includedMinutes: await effectiveIncludedMinutes(userId, plan?.includedMinutes ?? 0),
           periodEnd,
           resetUsage: true,
         });
-        // This charge IS the coupon's first covered cycle — count it now that its
-        // discount and bonus minutes have both landed. A single-cycle coupon
-        // retires right here, so the next renewal is full price. Keyed on the
-        // invoice this charge produced, so a later same-day renewal is recognised
-        // as a separate cycle rather than a repeat of this one.
+        // This charge is the coupon's first cycle. Keyed on its invoice so a same-day renewal counts as a separate cycle.
         const firstCycleInvoice = await getLatestPaidInvoice(profile.stripeSubscriptionId);
         await consumeCycle(
           userId,
@@ -526,16 +432,8 @@ router.post(
             : "Trial already used up — charged immediately and plan activated",
         });
       } else {
-        // Free trial still has minutes → continue the SAME trial with a card on
-        // file (no fresh minutes — usage carries over); converts to paid at end.
-        //
-        // For a card-required signup this is where the trial genuinely BEGINS —
-        // they had no entitlement at all until this card landed — so snapshot the
-        // allowance now, for the same reason trialMinutesAllocated exists at all:
-        // an admin lowering the global trial minutes later must not shrink a trial
-        // that is already running. trialSecondsUsed is deliberately NOT written:
-        // a walled user has no usage to reset, and a grandfathered user must never
-        // be handed a fresh allowance here.
+        // Continue the SAME trial (usage carries over). For a card-required signup the trial begins here, so snapshot the
+        // allowance now. Usage is deliberately not reset — a grandfathered user must never get a fresh allowance.
         const trialStart = firstCardForCardRequired ? await buildTrialStartData() : null;
         await (await requestTenant(req)).profile.update({
           where: { userId },
@@ -554,11 +452,8 @@ router.post(
               : {}),
           },
         });
-        // Activate a held coupon here too, even though nothing was charged yet.
-        // The discount is already attached to the subscription and WILL apply at
-        // trial conversion — if we left the redemption pending, the sweep would
-        // bin it and a multi-cycle discount would then run with nothing counting
-        // its cycles, i.e. forever. `cyclesUsed` stays 0 until a real charge.
+        // Activate the coupon even though nothing was charged: left pending, the sweep bins it and the attached
+        // multi-cycle discount runs forever with nothing counting. cyclesUsed stays 0 until a real charge.
         await activateRedemption(userId, profile.stripeSubscriptionId);
         void recordPlanEvent({
           userId,
@@ -575,15 +470,7 @@ router.post(
   }),
 );
 
-/**
- * Apply one Stripe event to the account it concerns.
- *
- * Called by the webhook once the event has been placed in its brand (and the
- * brand's context set, so anything it sends is in the brand's name), and by
- * the super admin's retry of a parked event. Never throws for a business
- * reason: a webhook that fails is retried by Stripe forever, so anything that
- * cannot be applied is left for the next event or the reconcile sweep.
- */
+/** Applies one Stripe event (brand context already set). Never throws for a business reason — Stripe retries failures forever, so leave it for the next event or the sweep. */
 export async function processStripeEvent(event: Stripe.Event): Promise<void> {
   if (event.type.startsWith("customer.subscription.")) {
     // Subscription lifecycle: keep the customer's status in sync.
@@ -597,13 +484,8 @@ export async function processStripeEvent(event: Stripe.Event): Promise<void> {
     };
     const profile = await withPlan(await (await currentTenant()).profile.findFirst({
       where: { OR: [{ stripeSubscriptionId: sub.id }, { stripeCustomerId: sub.customer }] } }));
-    // A profile is matched on subscription id OR customer id, so an event for
-    // a subscription the account has MOVED ON FROM still finds it. That is
-    // exactly what a currency switch produces: the old subscription is
-    // cancelled once the profile already points at the new one, and Stripe's
-    // deleted event for it would otherwise mark a live, just-paid account
-    // "canceled". Only the subscription the profile actually holds may
-    // report its own death.
+    // Profiles match on subscription OR customer id, so a currency switch's old-subscription deleted event would
+    // mark a just-paid account "canceled". Only the subscription the profile holds may report its own death.
     if (
       profile &&
       event.type === "customer.subscription.deleted" &&
@@ -614,31 +496,17 @@ export async function processStripeEvent(event: Stripe.Event): Promise<void> {
     }
     if (profile) {
       const rawStatus = event.type === "customer.subscription.deleted" ? "canceled" : sub.status;
-      // A card-required account that hasn't confirmed a card yet still OWNS a
-      // live Stripe trial subscription: /subscribe creates it (that's where the
-      // SetupIntent comes from) and deliberately leaves the local status at
-      // "none", because /confirm-card is meant to be the only thing that starts
-      // the trial. Stripe reports that subscription as "trialing" and fires
-      // customer.subscription.created immediately — mirroring it here would
-      // mark the account premium and hand it the full free trial when the user
-      // has done nothing but pick a plan and close the tab.
-      // Entitlement is keyed on cardConfirmedAt so it holds regardless, but the
-      // stored status must stay honest too: it drives the admin panels.
+      // A card-required account without a confirmed card still owns a Stripe trial subscription that reports
+      // "trialing". Mirroring that would hand out the free trial for picking a plan and closing the tab.
       const awaitingFirstCard = profile.cardRequiredAtSignup && !profile.cardConfirmedAt;
       const status =
         awaitingFirstCard && rawStatus !== "canceled" ? profile.subscriptionStatus : rawStatus;
       const entitled = status === "trialing" || status === "active";
-      // Mirror Stripe's cancel flag back onto the local auto-renew mirror. The
-      // in-app toggle sets both DB + Stripe, but a cancel done in the Stripe
-      // hosted portal ("Manage billing") only touches Stripe — without this the
-      // local `autoRenew` stays true and the minutes-exhausted early renewal
-      // (renewActivePlanIfExhausted) would still charge a card the user cancelled.
-      // A gone (deleted/canceled) subscription can never auto-renew.
+      // Mirror Stripe's cancel flag: a portal cancel only touches Stripe, and a stale local autoRenew would let
+      // the exhausted-minutes early renewal charge a card the user cancelled.
       const autoRenew = entitled ? !sub.cancel_at_period_end : false;
 
-      // A pending downgrade takes effect once the billing period rolls past its
-      // effective date (the Stripe schedule has swapped the price). Promote the
-      // scheduled plan to the current plan and bill its minutes for the new cycle.
+      // A pending downgrade lands once the period rolls past its date: promote the scheduled plan.
       const newPeriodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
       const downgradeApplied =
         !!profile.scheduledPlanId &&
@@ -714,9 +582,7 @@ export async function processStripeEvent(event: Stripe.Event): Promise<void> {
       // grant/reset the plan's included call minutes for the new period.
       if (status === "active") {
         const wasActive = profile.subscriptionStatus === "active";
-        // On a trial→active conversion, carry the trial OVERAGE (minutes used
-        // past the trial allowance — e.g. a last call that ran on after
-        // auto-renew) into the new paid cycle. It lives in the trial counter.
+        // On trial→active, carry trial OVERAGE into the paid cycle (it lives in the trial counter).
         const trialAllocSec = (profile.trialMinutesAllocated ?? 0) * 60;
         const trialOverageSec =
           profile.subscriptionStatus === "trialing" && trialAllocSec > 0
@@ -725,22 +591,13 @@ export async function processStripeEvent(event: Stripe.Event): Promise<void> {
         await applyActivePlanMinutes(profile.userId, {
           includedMinutes: await effectiveIncludedMinutes(profile.userId, effectivePlanMinutes),
           periodEnd: newPeriodEnd,
-          // Only a genuine transition INTO active (trial converted, or a
-          // reactivation) grants a fresh allowance. This event also fires for
-          // edits that change nothing about the cycle — an auto-renew toggle, a
-          // downgrade being scheduled/released, a price swap — and those must
-          // leave the usage counter alone. A real renewal still resets via the
-          // period-end advance inside applyActivePlanMinutes.
+          // Only a real transition INTO active resets usage — this event also fires for toggles/price swaps that
+          // change nothing. A real renewal still resets via the period-end advance.
           resetUsage: !wasActive,
           ...(trialOverageSec > 0 ? { carryOverSeconds: trialOverageSec } : {}),
         });
-        // Count a coupon cycle for the charge this event reports. Keyed on the
-        // latest PAID invoice: the events that fire without a real renewal (an
-        // auto-renew toggle, a downgrade being scheduled, a price swap) carry
-        // the invoice that was already counted and are ignored — as is the
-        // webhook our own early renewal triggers. A genuine renewal brings a
-        // new invoice, so it counts even when it lands the same day as the
-        // last one, which the period end alone could not distinguish.
+        // Count a coupon cycle, keyed on the latest PAID invoice: no-renewal events carry an already-counted invoice
+        // and are ignored; a real renewal brings a new one even on the same day.
         const cycleInvoice = await getLatestPaidInvoice(sub.id).catch(() => null);
         await consumeCycle(profile.userId, sub.id, newPeriodEnd, cycleInvoice?.id ?? null);
         // Email/notify only on the trial→active transition, not on renewals.
@@ -772,11 +629,7 @@ export async function processStripeEvent(event: Stripe.Event): Promise<void> {
       customerId: invoice.customer,
       amountPaidCents: invoice.amount_paid,
     });
-    // The payment goes in the platform ledger, split into the platform's
-    // and the brand's share, and the brand's wallet is credited from that
-    // row. The line's Price says whether this subscription is on the
-    // brand's own Price at all (older and newer Stripe API shapes both
-    // checked).
+    // Ledger the payment split platform/brand and credit the brand wallet. The line's Price says whether this is the brand's Price at all.
     const line = invoice.lines?.data?.[0];
     await recordPaidInvoice({
       invoiceId: invoice.id,
@@ -808,9 +661,7 @@ export async function processStripeEvent(event: Stripe.Event): Promise<void> {
       }
     }
   } else if (event.type === "charge.refunded") {
-    // A refund undoes the brand's addon share of that invoice in the same
-    // proportion. Stripe's `amount_refunded` is cumulative, so a replayed
-    // or repeated event books nothing new.
+    // Refund undoes the brand share proportionally. amount_refunded is cumulative, so a replayed event books nothing new.
     const charge = event.data.object as {
       id: string;
       invoice?: string | { id: string } | null;
@@ -878,10 +729,7 @@ router.post(
     }
 
     try {
-      // Every event is first PLACED: which brand holds this Stripe customer?
-      // One that no brand holds is parked for the super admin — never applied
-      // to the wrong account, never dropped. Stripe is told "received" either
-      // way, so it does not retry a payment we have kept.
+      // Place the event in its brand first; unplaceable ones are parked for the super admin, never dropped. Stripe gets "received" either way.
       const customerId = customerIdOf(event.data.object);
       if (customerId && isRoutedEventType(event.type)) {
         const owner = await resolveStripeCustomer(customerId);
@@ -913,9 +761,7 @@ router.get(
 
     const session = await stripe().billingPortal.sessions.create({
       customer: profile.stripeCustomerId,
-      // Back to the origin this customer actually came from. Unlike an OAuth
-      // redirect_uri, Stripe takes this per session rather than pre-registered,
-      // so a white-label tenant needs no Stripe configuration of its own.
+      // Back to the customer's own origin. Stripe takes this per session, so a tenant needs no Stripe config of its own.
       return_url: brandAppUrl("/dashboard/settings", req.user!.brandId ?? null),
     });
     res.json({ url: session.url });
@@ -927,10 +773,7 @@ router.get(
   "/subscription",
   requireAuth,
   asyncHandler(async (req, res) => {
-    // Sync any change made in the Stripe hosted portal (cancel / renew-plan)
-    // first, so the page never shows a stale status or auto-renew flag. Forced
-    // past the throttle: this is the page users land on straight from the
-    // portal, and it's low-traffic enough to afford the live Stripe read.
+    // Sync portal changes first, forced past the throttle — users land here straight from the portal.
     await reconcileSubscription(req.user!.sub, new Date(), { forcePortalSync: true });
 
     const profile = await withPlan(await (await requestTenant(req)).profile.findUnique({
@@ -1018,12 +861,7 @@ router.get(
   }),
 );
 
-/**
- * Toggle auto-renew. Off → the plan/trial ends at the current period with no
- * further charge (Stripe cancel_at_period_end), then the account is frozen
- * (calls blocked) until the user picks a plan again. On → renews + charges as
- * normal. Stored on the profile and mirrored onto the Stripe subscription.
- */
+/** Toggle auto-renew (Stripe cancel_at_period_end). Off = ends at period end, then frozen until a plan is picked. Mirrored to Stripe. */
 router.post(
   "/auto-renew",
   requireAuth,
@@ -1034,12 +872,8 @@ router.post(
     if (!profile?.stripeSubscriptionId)
       throw badRequest("You don't have an active subscription to change.");
 
-    // Turning auto-renew off on a subscription with a pending downgrade forces
-    // Stripe to release the downgrade schedule (it blocks cancelation changes on
-    // scheduled subs). Nothing is lost that could still happen — with no next
-    // cycle there is no cycle to downgrade into — but our mirrored record of the
-    // pending change has to go too, or the UI keeps promising a plan switch that
-    // Stripe no longer has.
+    // Stripe blocks cancel changes on scheduled subs, so a pending downgrade must be released — and our mirror of it
+    // dropped, or the UI keeps promising a switch Stripe no longer has.
     let droppedDowngrade = false;
     if (isStripeConfigured()) {
       try {
@@ -1096,12 +930,7 @@ router.post(
   }),
 );
 
-/**
- * Renew the current plan NOW — for a user whose plan is blocked because minutes
- * ran out (auto-renew off) or a payment lapsed (past_due). Charges the saved card
- * for a fresh full period, resets minutes, turns auto-renew back on, and unfreezes
- * the line. Unlike /subscribe, it keeps the same plan and never restarts a trial.
- */
+/** Renew the current plan NOW (minutes ran out or past_due). Charges a full period, resets minutes, re-enables auto-renew. Never restarts a trial. */
 router.post(
   "/renew",
   requireAuth,
@@ -1117,19 +946,11 @@ router.post(
     const renewPriceId =
       (await stripePriceIdFor(profile.subscriptionPlan, req.user!.brandId)) ??
       profile.subscriptionPlan.stripePriceId;
-    // A card-required account that has never confirmed a card has nothing to
-    // renew: /subscribe already gave it a customer id, a plan id and a pending
-    // trial subscription, which is everything the guard above checks. Without
-    // this it would reach endTrialNow, fail against a customer with no payment
-    // method, and the catch below would persist "past_due" — moving the account
-    // off its wall-adjacent state and, before the wall was keyed on
-    // cardConfirmedAt, opening the dashboard. Send them to add a card instead.
+    // No confirmed card = nothing to renew. Without this, endTrialNow fails and the catch persists "past_due", which once opened the dashboard.
     if (profile.cardRequiredAtSignup && !profile.cardConfirmedAt)
       throw badRequest("Add your card to start your plan.");
 
-    // Is the existing Stripe subscription still alive? If auto-renew was off and the
-    // period lapsed, Stripe already canceled it — then we create a fresh subscription
-    // on the same plan instead of trying to revive a dead one.
+    // If Stripe already canceled it (auto-renew off, period lapsed), create a fresh one on the same plan.
     const live = profile.stripeSubscriptionId
       ? await getSubscription(profile.stripeSubscriptionId).catch(() => null)
       : null;
@@ -1245,27 +1066,14 @@ router.post(
 
 /* --------------------- Plan change (upgrade / downgrade) ------------------- */
 
-/**
- * What the customer has actually paid toward the CURRENT cycle, or undefined
- * when we can't tell.
- *
- * Two components, because money reaches us two ways:
- *  - the subscription invoice — `amount_paid`, i.e. AFTER any coupon; and
- *  - upgrade deltas, which are standalone invoices charged mid-cycle
- *    (`chargeOneTime`) and so never appear on the subscription's invoice list.
- *
- * Missing the second part would under-credit anyone upgrading twice in one
- * cycle: they'd have paid the first delta up to the new plan's full price, but
- * we'd still be crediting them against the original discounted charge.
- */
+/** What's actually been paid toward the CURRENT cycle (undefined if unknown): the invoice's amount_paid plus mid-cycle
+ *  upgrade deltas, which are standalone invoices — missing them under-credits anyone upgrading twice in a cycle. */
 async function paidThisCycleCents(
   userId: string,
   subscriptionId: string,
 ): Promise<number | undefined> {
   const invoice = await getLatestPaidInvoice(subscriptionId).catch(() => null);
-  // No paid invoice at all (free trial, or Stripe unreachable) — say "unknown"
-  // rather than "zero", so the caller falls back to the plan price instead of
-  // silently crediting nothing.
+  // No paid invoice: "unknown", not "zero", so the caller falls back to the plan price.
   if (!invoice) return undefined;
   const deltas = await tenantForUser(userId)
     .then((db) =>
@@ -1299,30 +1107,16 @@ async function loadPlanChangeContext(userId: string, targetPlanId: string) {
   // adds a charge to the target plan, else the platform's.
   const targetPriceId = (await stripePriceIdFor(target, brandId)) ?? target.stripePriceId;
 
-  // Stripe fixes a subscription's currency when it is created, so a price in a
-  // different currency cannot be swapped in — the update is rejected outright.
-  //
-  // Refused HERE, in the shared context loader, so it stops the preview as well
-  // as the apply. Without it the change ran all the way to Stripe and failed at
-  // the swap, which is AFTER the charge step — the customer saw "we took the
-  // payment but couldn't switch your plan". It also stopped the two prices being
-  // compared as if they were the same unit: $20 AUD against $20 USD came out as
-  // "same price", and a $30 USD plan would have read as an upgrade over $20 AUD
-  // purely on the number.
+  // Stripe won't swap in a price of another currency. Refused HERE so the preview stops too — it used to fail at the
+  // swap AFTER the charge, and $20 AUD vs $20 USD compared as "same price".
   if (target.currency !== current.currency) {
     throw badRequest(
       `${target.displayName} is priced in ${target.currency.toUpperCase()} and your subscription bills in ${current.currency.toUpperCase()}. A subscription can't change currency — please contact support to move to this plan.`,
     );
   }
 
-  // Call Transfer departments have to fit the TARGET plan before the change can
-  // go through. Refused HERE, in the shared loader, so the preview stops it too:
-  // the customer reads why in the plan modal instead of discovering it after the
-  // card has been charged.
-  //
-  // We never trim their departments to make room. Which ones to lose is a
-  // business decision only they can make, and silently deleting configuration
-  // someone set up is not a thing a downgrade should do.
+  // Transfer departments must fit the TARGET plan; refused in the shared loader so the preview explains it before
+  // any charge. We never trim departments for them — which to lose is their call.
   const targetDepartments = transferDepartmentAllowance(target);
   // Departments live in the customer's brand's database.
   const departmentCount = await (await tenantForUser(userId)).transferDepartment.count({
@@ -1337,10 +1131,7 @@ async function loadPlanChangeContext(userId: string, targetPlanId: string) {
     );
   }
 
-  // Price the change the way this customer is actually billed: base + the
-  // brand's addon on whichever side really sits on the brand's Price. The
-  // proration below and the preview's figures then match the invoices Stripe
-  // will raise. Mutated in place so every later reader of these plans agrees.
+  // Price as actually billed (base + brand addon where the brand's Price applies) so proration matches Stripe's invoices. Mutated in place.
   if (brandId) {
     const [targetAddon, currentAddon] = await Promise.all([
       brandAddonOnPrice(target.id, brandId, targetPriceId),
@@ -1362,27 +1153,10 @@ async function loadPlanChangeContext(userId: string, targetPlanId: string) {
   return { profile, current, target, ent, proration, targetPriceId };
 }
 
-/* ----------------------- Cross-currency plan switch ----------------------- *
- *
- * `/change-plan` refuses a currency change on purpose: Stripe fixes a customer's
- * currency at its first invoice, so a price in another currency cannot be swapped
- * onto an existing subscription — the update is rejected outright.
- *
- * The only route is a NEW customer with a NEW subscription, paid with a
- * re-entered card (payment methods cannot move between customers). That is two
- * Stripe writes with no transaction around them, so ORDER is the whole design:
- *
- *    start   → create the new subscription unpaid, keep the old one LIVE
- *    (client confirms the PaymentIntent with a card)
- *    confirm → new subscription is active → only NOW cancel the old one
- *
- * Done the other way round, a declined card leaves the customer with nothing.
- * Here the worst case is a customer who still has exactly what they had before.
- * ------------------------------------------------------------------------- */
+// Cross-currency plan switch: Stripe fixes currency per customer, so this needs a NEW customer + subscription with a
+// re-entered card. Two untransacted Stripe writes, so ORDER is the design: start (old stays LIVE) → confirm → only then cancel the old.
 
-/** Drop a half-finished switch, cancelling its Stripe subscription. Best-effort:
- *  Stripe also expires unpaid incomplete subscriptions on its own after ~23h, so
- *  a failure here delays cleanup rather than leaking a live subscription. */
+/** Drop a half-finished switch. Best-effort — Stripe expires unpaid incomplete subscriptions after ~23h anyway. */
 async function clearPendingSwitch(userId: string, subscriptionId: string | null): Promise<void> {
   if (subscriptionId) {
     await cancelSubscription(subscriptionId).catch(() => {
@@ -1400,11 +1174,7 @@ async function clearPendingSwitch(userId: string, subscriptionId: string | null)
   });
 }
 
-/**
- * Begin a currency switch. Creates the new customer + unpaid subscription and
- * returns a PaymentIntent secret for the client to confirm. Charges nothing and
- * changes nothing about the customer's current plan.
- */
+/** Begin a currency switch: new customer + unpaid subscription, returns a PaymentIntent secret. Changes nothing about the current plan. */
 router.post(
   "/switch-currency/start",
   requireAuth,
@@ -1420,11 +1190,7 @@ router.post(
     if (!current || !profile.stripeSubscriptionId) {
       throw badRequest("You don't have an active subscription to switch.");
     }
-    // A trial has nothing to preserve and nothing to cancel around, and this flow
-    // charges immediately — running it mid-trial would bill the customer today
-    // and burn the free days they have left. `/subscribe` already handles a
-    // trialing customer picking another currency (it mints a fresh customer and
-    // keeps the trial clock), so send them there instead.
+    // This flow charges immediately, so mid-trial it would burn their free days. /subscribe handles a trialing currency change.
     if (profile.subscriptionStatus === "trialing") {
       throw badRequest(
         "You're still on your free trial — pick the plan you want from the plan list and your trial carries over.",
@@ -1477,20 +1243,14 @@ router.post(
         interval: target.interval,
         includedMinutes: target.includedMinutes,
       },
-      // Spelled out for the confirmation screen: this is a fresh subscription,
-      // not a swap, so there is no proration credit for the old plan's unused
-      // time — Stripe cannot credit across currencies.
+      // Fresh subscription, not a swap — Stripe can't credit unused time across currencies.
       losesRemainingTime: true,
       currentPlan: { name: current.displayName, currency: current.currency },
     });
   }),
 );
 
-/**
- * Finish a currency switch, once the client has confirmed the PaymentIntent.
- * Verifies with Stripe that the new subscription is genuinely paid BEFORE the
- * old one is cancelled — the client saying so is not evidence.
- */
+/** Finish a currency switch. Verifies with Stripe that the new subscription is paid BEFORE cancelling the old — the client saying so is not evidence. */
 router.post(
   "/switch-currency/confirm",
   requireAuth,
@@ -1540,17 +1300,8 @@ router.post(
       },
     });
 
-    // Cancel the old subscription only now that the profile already points at the
-    // new one. Order matters twice over:
-    //
-    //  • Stripe fires customer.subscription.deleted for the cancelled one, and
-    //    that handler matches a profile by subscription OR customer id. Cancelling
-    //    first raced the profile update — the webhook found the account still
-    //    holding the old ids and flipped a freshly-active subscription back to
-    //    "canceled".
-    //  • If this call fails, the customer is briefly billed twice, which is
-    //    visible and refundable. The other order fails the other way: a paid
-    //    customer left pointing at a cancelled subscription, with no service.
+    // Cancel the old one only AFTER the profile points at the new: cancelling first raced the deleted webhook (which
+    // flipped the fresh subscription to "canceled"), and a failure here means brief double billing (refundable), not no service.
     if (previousSubscriptionId) {
       await cancelSubscription(previousSubscriptionId).catch((e) => {
         console.error(
@@ -1665,9 +1416,7 @@ router.post(
     const subId = profile.stripeSubscriptionId!;
     const newPriceId = targetPriceId;
 
-    // Any pending downgrade must be released first: a subscription attached to a
-    // schedule can't be price-swapped (upgrade/trial) and re-scheduling a different
-    // downgrade would otherwise collide with the existing schedule.
+    // Release a pending downgrade first — a scheduled subscription can't be price-swapped.
     if (profile.stripeScheduleId) await releaseSchedule(profile.stripeScheduleId);
 
     // Trial: no charge now — just switch which plan activates when the trial ends.
@@ -1728,11 +1477,7 @@ router.post(
       return;
     }
 
-    // Upgrade (or same-price switch): COLLECT FIRST, then apply the plan.
-    // The swap used to run first, so a failed collection left the customer on the
-    // upgraded price in Stripe while we threw an error and never wrote our own DB
-    // row — they held a plan they hadn't paid for and our records disagreed with
-    // Stripe. Charging first means a decline simply leaves everything as it was.
+    // Upgrade (or same-price switch): COLLECT FIRST, then apply. Swap-first left a declined customer on the upgraded price in Stripe.
     let charged = 0;
     if (proration.amountDueCents > 0) {
       const { paid } = await chargeOneTime(
@@ -1753,10 +1498,7 @@ router.post(
         `[billing] price swap failed for user ${userId} (charged ${charged} ${current.currency}):`,
         e instanceof Error ? e.message : e,
       );
-      // A same-price switch charges nothing (amountDueCents is 0 unless the
-      // direction is "upgrade"), so this path is reached with charged === 0 too.
-      // Telling that customer we took their money and owe them a refund sends
-      // them — and support — hunting for a payment that never happened.
+      // A same-price switch charges nothing, so this is reached with charged === 0 too — don't promise a refund that never existed.
       throw badRequest(
         charged > 0
           ? "We took the upgrade payment but couldn't switch your plan. Our team has been notified and will fix this or refund you."
@@ -1767,20 +1509,8 @@ router.post(
       where: { userId },
       data: { subscriptionPlanId: target.id, scheduledPlanId: null, scheduledPlanEffectiveAt: null, stripeScheduleId: null },
     });
-    // The upgrade keeps the same billing date (price swapped with
-    // `proration_behavior: 'none'`), so force the usage reset: the user paid the
-    // full new-plan price minus a credit for unused old-plan minutes, so the new
-    // allowance starts fresh. Without `resetUsage`, minutes already spent on the
-    // cheaper plan would carry over and shrink the upgraded allowance.
-    // A live coupon survives a plan change — its remaining cycles are honoured
-    // whichever plan the user moves to — but its BONUS MINUTES are deliberately
-    // NOT re-added here. They are granted per billing cycle, and an upgrade is
-    // not a new cycle: the delta is a standalone invoice, which is also why
-    // there's no consumeCycle on this path. Adding them again would hand out a
-    // fresh 200 minutes on top of the reset allowance, and a customer could
-    // simply upgrade repeatedly to farm them. The cycle's bonus was already
-    // granted at the boundary, and the unused part of the allowance came back as
-    // proration credit; the next real renewal grants them again if cycles remain.
+    // Same billing date, so force the usage reset (they paid for a fresh allowance). Coupon BONUS MINUTES are deliberately
+    // NOT re-added: they're per cycle and an upgrade isn't one — re-adding would let a customer farm them by upgrading repeatedly.
     await applyActivePlanMinutes(userId, {
       includedMinutes: target.includedMinutes,
       periodEnd: profile.currentPeriodEnd,

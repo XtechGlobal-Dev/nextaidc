@@ -1,16 +1,7 @@
 import type { SubscriptionPlan } from "@prisma/client";
 import { prisma } from "../prisma.js";
 
-/**
- * A customer's profile with its plan joined by hand.
- *
- * The profile lives in the brand's database and names its plan by id; the
- * plan catalogue — prices, included minutes, feature flags — is the
- * platform's, in the control plane. Prisma cannot join across the two, so
- * every reader that used to `include: { subscriptionPlan }` wraps its read
- * in this instead. The whole plan row comes back, so any field a reader
- * selected before is still there.
- */
+/** Profile with its plan joined by hand — the profile is in the brand DB, the catalogue in the control plane, and Prisma can't join across the two. */
 export async function withPlan<T extends { subscriptionPlanId: string | null }>(
   profile: T | null,
 ): Promise<(T & { subscriptionPlan: SubscriptionPlan | null }) | null> {

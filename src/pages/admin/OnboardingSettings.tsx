@@ -8,20 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
 
-/**
- * Admin control for the onboarding card policy.
- *
- * ON  → a new signup must pick a plan and add a card (a $0 authorisation — the
- *       free trial still runs and converts automatically) before the dashboard
- *       opens.
- * OFF → a new signup gets the card-less free trial and reaches the dashboard
- *       straight away; plan + card are collected later, when they claim a number.
- *
- * Each account snapshots this at signup, so flipping it only ever changes what
- * the NEXT signup gets. That is the whole point of the setting — the policy has
- * changed direction before, and this makes it a one-click decision instead of a
- * code change, without ever disturbing customers who are already using the app.
- */
+// Onboarding card policy: card required at signup vs card-less trial.
+// Each account snapshots it at signup, so flipping only affects the NEXT signup.
 
 interface Mode {
   key: "required" | "cardless";
@@ -63,9 +51,7 @@ const MODES: Mode[] = [
 
 export function OnboardingSettings() {
   const [loading, setLoading] = useState(true);
-  // The load failed, so we don't know the live value. Shown instead of the cards,
-  // because rendering them would assert a policy we can't actually vouch for —
-  // and `saved` staying null would leave Save disabled forever with no explanation.
+  // Load failed = live value unknown; show this instead of cards that would assert a policy we can't vouch for.
   const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   // Saved server truth + in-progress draft.
@@ -126,9 +112,7 @@ export function OnboardingSettings() {
             </p>
           </div>
         </div>
-        {/* Reflects the LIVE saved value, never the draft — and never guesses when
-            the load failed, or it would assert a policy that may be the opposite
-            of what new signups are actually getting. */}
+        {/* Live saved value, never the draft — and never a guess when the load failed. */}
         {!loading &&
           (loadFailed ? (
             <Badge variant="warning">Unknown</Badge>
@@ -155,9 +139,7 @@ export function OnboardingSettings() {
           </div>
         ) : (
           <>
-            {/* The two modes ARE the control — pick one. Each shows what a new
-                customer actually experiences, so the choice is a comparison
-                rather than a paragraph to decode. */}
+            {/* The two mode cards are the control — pick one. */}
             <div
               role="group"
               aria-label="Onboarding card policy"
@@ -248,9 +230,7 @@ export function OnboardingSettings() {
 
             <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
               {dirty && (
-                // The header badge shows what is LIVE, the cards show the draft —
-                // spell out the difference so a half-made change can't be misread
-                // as already applied.
+                // Badge shows live, cards show draft — say so, or a half-made change reads as applied.
                 <span className="text-xs text-muted-foreground">
                   Unsaved — new signups still get{" "}
                   <strong className="font-medium text-foreground">

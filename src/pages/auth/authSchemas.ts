@@ -1,8 +1,6 @@
 import { z } from "zod";
 
-/* Validation schemas for the auth screens. Mirrors the backend rules in
- * server/src/routes/auth.routes.ts, with friendlier client-side messages and a
- * couple of stronger UX-only checks (password complexity on sign-up). */
+// Auth screen schemas. Mirror server/src/routes/auth.routes.ts, plus friendlier messages and UX-only extras (sign-up password complexity).
 
 const email = z
   .string()

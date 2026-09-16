@@ -1,8 +1,4 @@
-/* ------------------------------------------------------------------ *
- *  Agent configuration — the structured config that compiles into a
- *  master system prompt + voice params, stored as `agent_config`.
- *  This is the core data model of the product (the "AI Brain").
- * ------------------------------------------------------------------ */
+// Agent config (the "AI Brain") — compiles into the master prompt + voice params, stored as `agent_config`.
 
 export type VoiceRegion = "Australian" | "British" | "American" | "Filipino";
 
@@ -51,9 +47,8 @@ export interface IdentitySection {
   businessName: string;
   voiceId: string;
   greetingMessage: string;
-  /** Voice provider this agent was set up with; stamped server-side and sticky, so
-   *  a global toggle change never retroactively switches an existing agent. Unset on
-   *  legacy configs → resolved from the voiceId. */
+  /** Stamped server-side and sticky so a global toggle never switches an existing agent.
+   *  Unset on legacy configs → resolved from the voiceId. */
   voiceProvider?: "deepgram" | "elevenlabs";
   /** Extra languages the assistant may answer in (multilingual plans only, PLAN-gated).
    *  English is always the base and isn't stored here. Empty/absent → English only. */
@@ -91,15 +86,8 @@ export interface RulesSection {
   humanHandover: HumanHandoverConfig;
 }
 
-/**
- * One piece of business information the AI can text to a caller who asks for it
- * mid-call ("what's your website?" → "sure, want me to text you the link?").
- *
- * The AI never writes the message: it only picks a `key`, and the body is
- * rendered server-side from `template`. That boundary is deliberate — it means a
- * caller can't talk the agent into sending arbitrary text from the business's
- * Twilio number.
- */
+/** A detail the AI can text a caller mid-call. The AI only picks a `key`; the body renders server-side
+ *  from `template`, so a caller can't talk the agent into texting arbitrary content from the business's number. */
 export interface SmsInfoItem {
   id: string;
   /** Stable key the AI passes as the tool's `topic` (its enum value). */
@@ -124,15 +112,11 @@ export interface SmsOnRequestConfig {
 export interface AutomationsSection {
   ownerEmailSummary: boolean;
   ownerSmsSummary: boolean;
-  /** Master switch for "Text Info to Callers" (see `smsOnRequest`). Historically a
-   *  dormant post-call flag that never sent anything — repurposed rather than
+  /** Master switch for "Text Info to Callers". Repurposed from a dormant post-call flag rather than
    *  replaced so no stored config needs migrating. */
   clientPostCallSms: boolean;
   ownerWhatsAppSummary: boolean;
-  /**
-   * Where post-call summaries are delivered. Each is optional — when blank the
-   * notification falls back to the account's default email / mobile number.
-   */
+  /** Summary destinations; blank falls back to the account's email / mobile. */
   summaryEmail: string;
   summarySmsNumber: string;
   summaryWhatsAppNumber: string;
@@ -158,9 +142,7 @@ export interface AdvancedSection {
   voiceStability: number; // 0..1, default 0.45
   voiceSpeed: number; // 0.5..2, default 1.05
   allowHangUp: boolean;
-  /** Ambient sound the caller hears under the call. "off" = silent, "office" =
-   *  gentle office ambience, "default" = let the platform decide (office on a
-   *  phone call). Maps to Vapi's backgroundSound. Default: "default". */
+  /** Vapi backgroundSound: "off", "office", or "default" (platform decides). */
   backgroundSound: "off" | "office" | "default";
 }
 

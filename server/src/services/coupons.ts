@@ -14,23 +14,8 @@ import {
 } from "./stripe.js";
 import { recordPlanEvent } from "./planHistory.js";
 
-/* ------------------------------------------------------------------ *
- *  Coupons, in two places (phase 6).
- *
- *  The COUPON — code, rules, Stripe coupon id, how many times it has been
- *  redeemed — is the platform's catalogue, in the control plane. A
- *  REDEMPTION — one customer's use of one coupon: reserved at checkout,
- *  applied when the subscription starts, ended or revoked later — is the
- *  customer's, so it lives in the customer's brand's database next to the
- *  profile whose `activeCouponRedemptionId` points at it.
- *
- *  Two databases means two things this file has to do by hand:
- *    - a redemption's `coupon` is joined here (`withCoupon`), not by Prisma;
- *    - the catalogue's tally (`redeemedCount`) is written in a second step
- *      after the tenant transaction, and "how many reservations are live"
- *      is summed across every brand's database — a coupon is the platform's,
- *      its claimants are everywhere.
- * ------------------------------------------------------------------ */
+// Coupons span two databases: the COUPON catalogue is in the control plane, each REDEMPTION in the customer's brand DB.
+// So `coupon` is joined by hand (withCoupon), redeemedCount is a second write after the tenant tx, and live reservations are summed across tenants.
 
 /** How long a checkout may hold a reservation before the hourly sweep frees it. */
 export const PENDING_RESERVATION_TTL_MS = 30 * 60 * 1000;
@@ -43,9 +28,7 @@ export function normalizeCode(raw: string): string {
   return raw.trim().toUpperCase();
 }
 
-/** Serialise the coupon writes for one customer: a concurrent activate and
- *  grant would otherwise both read "no live discount" and both apply. Row
- *  lock on the profile, inside the tenant transaction. */
+// Row-lock the profile so a concurrent activate and grant can't both read "no live discount" and both apply.
 async function lockUserCouponState(
   tx: { $executeRaw: (q: TemplateStringsArray, ...v: unknown[]) => Promise<number> },
   userId: string,
@@ -196,19 +179,14 @@ function isStalePending(r: CouponRedemption): boolean {
   return r.status === "pending" && r.reservedAt.getTime() <= Date.now() - PENDING_RESERVATION_TTL_MS;
 }
 
-/**
- * Hold a slot for a checkout that is about to happen. Idempotent for the same
- * user: a retry reuses the row rather than tripping the unique key.
- */
+/** Holds a slot for an imminent checkout. Idempotent per user — a retry reuses the row instead of tripping the unique key. */
 export async function reserveRedemption(couponId: string, userId: string): Promise<CouponRedemption> {
   const cutoff = new Date(Date.now() - PENDING_RESERVATION_TTL_MS);
   const db = await tenantForUser(userId);
   const coupon = await prisma.coupon.findUnique({ where: { id: couponId } });
   if (!coupon) throw new Error("coupon not found");
   return db.$transaction(async (inBrand) => {
-    // Clear this user's own abandoned reservation first: without it the unique
-    // constraint would reject a perfectly legitimate retry until the hourly
-    // sweep happened to run.
+    // Clear the user's own stale reservation first, or the unique constraint rejects a legitimate retry until the hourly sweep.
     await inBrand.couponRedemption.deleteMany({
       where: { couponId, userId, status: "pending", reservedAt: { lte: cutoff } },
     });
@@ -226,10 +204,7 @@ export async function reserveRedemption(couponId: string, userId: string): Promi
   });
 }
 
-/**
- * The subscription started: turn the reservation into a live discount. Any
- * other live redemption is revoked — one discount at a time.
- */
+/** Turns the reservation into a live discount once the subscription starts. Any other live redemption is revoked — one discount at a time. */
 export async function activateRedemption(userId: string, subscriptionId?: string | null): Promise<void> {
   const db = await tenantForUser(userId);
   let pending = await withCoupon(
@@ -264,9 +239,7 @@ export async function activateRedemption(userId: string, subscriptionId?: string
   });
 }
 
-/** A subscription that carries one of our Stripe coupons but has no
- *  reservation on our side (a checkout whose reservation the sweep freed):
- *  reconstruct the reservation so the discount is tracked. */
+// Sub carries one of our Stripe coupons but the sweep freed its reservation: rebuild it so the discount is tracked.
 async function recoverRedemptionFromSubscription(
   db: TenantClient,
   userId: string,
@@ -334,11 +307,7 @@ function couponAppliedNote(coupon: Coupon): string {
 
 /* ------------------------------ Live state ------------------------------ */
 
-/**
- * The discount this customer is holding right now, with its coupon. The
- * profile's pointer is the fast path; a scan is the truth, and a collided
- * state (two live rows) is healed on the way out.
- */
+/** The customer's live discount. The profile pointer is the fast path, a scan is the truth, and two live rows are healed on the way out. */
 export async function getActiveRedemption(userId: string): Promise<Redemption | null> {
   try {
     const db = await tenantForUser(userId);
@@ -415,11 +384,7 @@ async function ensureDiscountAttached(userId: string, subscriptionId: string | n
   }
 }
 
-/**
- * A billing cycle was charged: count it against the coupon's budget, and
- * retire the coupon when the budget is spent. Idempotent per invoice / per
- * period end, so the webhook and the reconcile path can both call it.
- */
+/** Counts a charged cycle against the coupon and retires it when spent. Idempotent per invoice / period end so webhook and reconcile can both call it. */
 export async function consumeCycle(
   userId: string,
   subscriptionId: string | null,
@@ -475,11 +440,7 @@ export async function consumeCycle(
   }
 }
 
-/**
- * Take a live discount away. `releaseSlot` deletes the row (and gives the
- * redemption back to the coupon's tally) so the code can be used again;
- * otherwise the row stays `revoked` and keeps blocking re-entry.
- */
+/** Removes a live discount. `releaseSlot` deletes the row and gives the tally back so the code is reusable; otherwise it stays `revoked` and blocks re-entry. */
 export async function revokeRedemption(
   userId: string,
   opts: { reason?: string; releaseSlot?: boolean } = {},
@@ -569,10 +530,7 @@ export function grantRestrictions(
   return out;
 }
 
-/**
- * An admin hands a customer a coupon directly — applied at once, no checkout.
- * Supersedes a pending reservation and any live discount.
- */
+/** Admin grants a coupon directly, applied at once. Supersedes a pending reservation and any live discount. */
 export async function grantCoupon(
   userId: string,
   couponId: string,
@@ -698,11 +656,7 @@ export async function effectiveIncludedMinutes(userId: string, planMinutes: numb
   return planMinutes + (bonus > 0 ? bonus : 0);
 }
 
-/**
- * A discount that ended on our side but is still attached in Stripe would keep
- * charging less. Detach it. Only an account that once held a coupon can have
- * drifted, which keeps this an indexed lookup on [userId, status].
- */
+/** Detaches a Stripe discount that ended on our side but is still attached (it'd keep undercharging). Only accounts that once held a coupon can drift, so it's an indexed lookup. */
 export async function healDiscountDrift(userId: string, subscriptionId: string): Promise<void> {
   try {
     if (!isStripeConfigured()) return;
@@ -753,13 +707,7 @@ export async function syncStripeCoupon(coupon: {
   return { stripeCouponId };
 }
 
-/**
- * Release coupon reservations left behind by abandoned checkouts, in every
- * brand's database, so a capped campaign isn't held hostage by shoppers who
- * never paid. The rows are DELETED rather than marked — a leftover row would
- * trip the unique (couponId, userId) index and lock the user out of a code
- * they never actually used.
- */
+/** Frees abandoned-checkout reservations across every tenant. Rows are DELETED, not marked — a leftover would trip the unique index and lock the user out of a code they never used. */
 export async function sweepStalePendingRedemptions(): Promise<number> {
   const cutoff = new Date(Date.now() - PENDING_RESERVATION_TTL_MS);
   let total = 0;

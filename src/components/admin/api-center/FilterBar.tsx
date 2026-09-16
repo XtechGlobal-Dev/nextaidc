@@ -6,18 +6,8 @@ import { Segmented } from "./shared";
 import { useApiCenter, type EnvFilter, type HealthFilter } from "./ApiCenterContext";
 import type { RangeKey } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  The one filter row, shared by every section.
- *
- *  Only two controls are always on show — the time range and search — because
- *  those are the two an operator reaches for constantly. Category, status and
- *  environment sit behind a "Filters" toggle: they're occasional, and five
- *  dropdowns permanently across the top was a large part of what made this
- *  screen feel heavy.
- *
- *  Filters persist across sections, so chasing a provider from Overview to
- *  Activity never means re-typing its name.
- * ------------------------------------------------------------------ */
+// Shared filter row. Range + search always visible; the occasional filters sit behind a toggle
+// because five permanent dropdowns made the screen feel heavy. Filters persist across sections.
 
 const RANGES: { key: RangeKey; label: string }[] = [
   { key: "1h", label: "1h" },

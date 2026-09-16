@@ -1,20 +1,10 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 
-/** The middleware, plus a small introspection hook: `size()` returns how many
- *  keys are currently tracked — used by tests to prove the sweep evicts, and
- *  handy for a metrics/health readout. */
+/** The middleware plus `size()` (tracked keys) so tests can prove the sweep evicts. */
 export type RateLimiter = RequestHandler & { size(): number };
 
-/**
- * Tiny in-memory fixed-window rate limiter. Keyed by client IP. Good enough for
- * a single-process API to blunt brute-force / abuse on public endpoints; swap
- * for a shared store if we ever run multiple instances.
- *
- * A background sweep evicts expired entries so the map can't grow without bound.
- * Without it, every distinct IP that ever hit the endpoint stays in memory
- * forever — a slow leak, and a fast one once a client can vary its IP (spoofed
- * X-Forwarded-For, or just a botnet), letting an attacker exhaust memory.
- */
+/** In-memory fixed-window limiter keyed by IP (single-process; swap for a shared store if we scale out).
+ *  The sweep matters: without it every IP ever seen stays forever, and a botnet can exhaust memory. */
 export function rateLimit(opts: { windowMs: number; max: number; message?: string }): RateLimiter {
   const hits = new Map<string, { count: number; resetAt: number }>();
 

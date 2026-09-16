@@ -1,23 +1,8 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 
-/* ------------------------------------------------------------------ *
- *  Reset the "Login as Customer" PIN back to its default (000000).
- *
- *  The last resort, for when the in-app "Forgot PIN?" can't be used —
- *  SMTP is down, the admin mailbox is gone, or the reset email never
- *  arrives. The PIN is stored as a bcrypt hash, so it can never be
- *  recovered, only replaced; deleting the row puts the default back.
- *
- *  Also clears the lockout, since being locked out is one of the
- *  reasons to be running this.
- *
- *      npm run reset-impersonation-pin
- *
- *  Anyone who can run this already has database credentials, so it adds
- *  no access they didn't have — it just means they don't have to hand-
- *  write DELETE statements against a live database to get back in.
- * ------------------------------------------------------------------ */
+// Last-resort reset of the "Login as Customer" PIN to 000000 (bcrypt hash can only be replaced) and clear
+// the lockout. Adds no access — anyone running this already has DB credentials.
 
 const PIN_HASH_KEY = "admin.impersonationPinHash";
 const PIN_LOCK_KEY = "admin.impersonationPinLock";

@@ -1,17 +1,7 @@
 import { env } from "../env.js";
 
-/* ------------------------------------------------------------------ *
- *  Neon control-plane API — creating and destroying the Postgres
- *  project that backs one isolated tenant.
- *
- *  Plain fetch rather than a client library: three endpoints are needed and a
- *  dependency that can provision and delete customer databases is a large
- *  surface to take on for that.
- *
- *  The API key here can create and DELETE any project on the account. It is
- *  read from the environment only, never from admin settings, and never
- *  returned to any caller.
- * ------------------------------------------------------------------ */
+// Neon control-plane API for per-tenant Postgres projects. Plain fetch on purpose.
+// The key can DELETE any project: env only, never admin settings, never returned to callers.
 
 const API = "https://console.neon.tech/api/v2";
 
@@ -64,22 +54,15 @@ async function call<T>(
 function splitUris(uris: { connection_uri: string }[]): { url: string; directUrl: string } {
   const direct = uris.find((u) => !u.connection_uri.includes("-pooler."))?.connection_uri;
   const pooled = uris.find((u) => u.connection_uri.includes("-pooler."))?.connection_uri;
-  // Neon has returned only the direct URI on some plans. Deriving the pooled
-  // host is the documented transformation (insert `-pooler` before the first
-  // dot of the host), and deriving direct from pooled is the reverse.
+  // Some plans return only the direct URI; `-pooler` before the host's first dot
+  // is Neon's documented transformation, and the reverse for direct.
   const directUrl = direct ?? (pooled ? pooled.replace("-pooler.", ".") : "");
   const url = pooled ?? (direct ? direct.replace(/(@[^.]+)\./, "$1-pooler.") : "");
   if (!url || !directUrl) throw new Error("Neon returned no usable connection URI.");
   return { url, directUrl };
 }
 
-/**
- * Create a dedicated Neon project for a brand.
- *
- * `region` is the contractual part — a residency clause names a jurisdiction,
- * and this is where that promise is actually kept, so it is passed through
- * verbatim rather than defaulted silently.
- */
+/** Creates a brand's Neon project. `region` is a residency promise — passed through verbatim, never defaulted silently. */
 export async function createTenantProject(
   brandSlug: string,
   region: string,
@@ -106,19 +89,12 @@ export async function createTenantProject(
   };
 }
 
-/**
- * Permanently delete a tenant's Neon project.
- *
- * This destroys the customer's entire call history and cannot be undone, so
- * nothing calls it automatically — decommissioning is an explicit admin action
- * that requires the brand's data to have been exported or migrated back first.
- */
+/** Destroys the tenant's entire history, irreversibly. Explicit admin action only — nothing calls this automatically. */
 export async function deleteTenantProject(projectId: string): Promise<void> {
   await call(`/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
 }
 
-/** Regions the account may create projects in — the picker an admin chooses a
- *  residency region from, rather than a hardcoded list that goes stale. */
+/** Live region list for the residency picker, so nothing hardcoded goes stale. */
 export async function listRegions(): Promise<{ id: string; name: string }[]> {
   const data = await call<{ regions?: { region_id: string; name: string }[] }>("/regions");
   return (data.regions ?? []).map((r) => ({ id: r.region_id, name: r.name }));

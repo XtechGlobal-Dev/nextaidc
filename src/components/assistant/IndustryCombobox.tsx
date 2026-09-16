@@ -5,12 +5,7 @@ import { api } from "@/lib/api";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { INDUSTRIES, validateIndustry, normalizeIndustry, INDUSTRY_MAX_LEN } from "@/data/industries";
 
-/**
- * Searchable industry picker built on {@link SearchableSelect}, with an "add your
- * own" path in the footer. Lists the built-in + admin-approved industries (fetched
- * live) as suggestions; when nothing matches, the user can type any custom
- * industry — applied to their profile immediately, no review, no submission.
- */
+/** Industry picker with an "add your own" footer. Custom values apply immediately, no review. */
 export function IndustryCombobox({
   value,
   onChange,

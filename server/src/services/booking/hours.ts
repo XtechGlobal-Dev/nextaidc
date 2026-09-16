@@ -7,14 +7,8 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(customParseFormat);
 
-/* ------------------------------------------------------------------ *
- *  Booking working hours + slot generation (timezone/DST-safe).
- *
- *  The owner's bookable window is defined ONLY by working days + open/close
- *  times + slot length — no per-service capacity, no resources. Slots for a date
- *  are generated in the owner's IANA timezone and returned as UTC instants, so
- *  a slot that straddles a DST change lands at the correct wall-clock time.
- * ------------------------------------------------------------------ */
+// Working hours + slot generation. Window = working days + open/close + slot length, nothing else.
+// Slots are generated in the owner's IANA zone and returned as UTC instants so DST changes land at the right wall-clock time.
 
 /** One weekday's opening rule. `open` false = closed all day. */
 export interface DayHours {
@@ -93,13 +87,7 @@ function toMinutes(hhmm: string): number {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
-/**
- * Generate every candidate slot for `dateISO` (YYYY-MM-DD, interpreted in `tz`)
- * from the day's open/close window, stepping by `durationMin`. A slot is included
- * only when it fits entirely inside the window (start + duration ≤ close). Times
- * are built with dayjs.tz so DST is handled correctly. Returns [] for a closed
- * day, a bad date, or a non-positive duration.
- */
+/** Candidate slots for a date in `tz`, stepping by `durationMin`; only slots fitting entirely inside the window. [] for a closed day, bad date or non-positive duration. */
 export function generateSlots(
   dateISO: string,
   hours: WorkingHours,

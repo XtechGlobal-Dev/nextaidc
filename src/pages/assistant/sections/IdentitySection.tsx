@@ -34,10 +34,8 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 // Country display names for the searchable picker (profile.country stores the name).
 const COUNTRY_NAMES = PROFILE_COUNTRIES.map((c) => c.label);
 
-/** A curated voice's ISO language code → the Languages chip it implies. Picking
- *  such a voice auto-enables its language — a Hindi voice with Hindi off would
- *  never actually speak Hindi to a caller. English ("en") maps to nothing on
- *  purpose: English is the always-on base, no chip to flip. */
+// Voice language code → Languages chip it auto-enables (a Hindi voice with Hindi off never speaks Hindi).
+// "en" maps to nothing on purpose: English is the always-on base.
 const VOICE_IMPLIED_LANGUAGE: Record<string, string> = {
   hi: "Hindi",
   pa: "Punjabi",
@@ -56,11 +54,8 @@ export function IdentitySection() {
   const noteContextChange = useAgentStore((s) => s.noteContextChange);
   const isDirtyPrompt = useAgentStore((s) => s.config.advanced.masterPromptDirty);
 
-  // A newly-onboarded user lands here with Country / Region unset. Pre-fill it
-  // once from what onboarding captured — their business address, else their mobile
-  // number's country — so it's not "Not set". Runs only while it's genuinely empty
-  // (a once-per-mount guard lets the user clear it without it snapping back), and
-  // doesn't mark the section dirty — it's a silent, sensible default, not an edit.
+  // Pre-fill an unset country once from the onboarding address/mobile. Once-per-mount guard
+  // so clearing it doesn't snap back; deliberately doesn't mark the section dirty.
   const autoCountryDone = useRef(false);
   useEffect(() => {
     if (autoCountryDone.current || profileCountry) return;
@@ -76,20 +71,16 @@ export function IdentitySection() {
    *  the same test that decides whether a business rename may rewrite it. */
   const greetingIsCustom = isCustomGreeting(identity.greetingMessage);
 
-  /** Renaming the business must carry through to the opening greeting — it stores
-   *  the name baked in ("Thanks for calling Acme…"), so without this the agent
-   *  kept greeting callers with the old name. Only a greeting we generated is
-   *  rewritten; one the owner customised is left as-is. */
+  // The greeting bakes the business name in, so a rename must rewrite it (agent used to greet with
+  // the old name). Only a generated greeting is touched — an owner-customised one stays.
   const setBusinessName = (businessName: string) =>
     set({
       businessName,
       greetingMessage: resolveGreeting(identity.greetingMessage, businessName),
     });
 
-  /** The name the rest of the config's free text was written against. Onboarding
-   *  generates scenarios/FAQs/facts that name the business ("existing customer of
-   *  Acme"), so a rename has to sweep those too — from the last saved name, since
-   *  the owner may rename several times before saving. */
+  // Onboarding text (scenarios/FAQs/facts) names the business too, so a rename sweeps those —
+  // from the last SAVED name, since the owner may rename several times before saving.
   const savedBusinessName = useAgentStore((s) => s.savedConfig.identity?.businessName ?? "");
   const propagateBusinessRename = useAgentStore((s) => s.propagateBusinessRename);
   const renameBaseRef = useRef(savedBusinessName);
@@ -97,9 +88,7 @@ export function IdentitySection() {
     renameBaseRef.current = savedBusinessName;
   }, [savedBusinessName]);
 
-  /** Sweep on blur rather than per keystroke — mid-typing the name is only half
-   *  written ("i", "in", "ins"), and renaming the config against a partial name
-   *  would corrupt the text it's meant to keep in sync. */
+  // Sweep on blur, not per keystroke — renaming against a half-typed name ("in", "ins") would corrupt the text.
   const commitBusinessRename = () => {
     const previous = renameBaseRef.current.trim();
     const current = identity.businessName.trim();
@@ -110,16 +99,12 @@ export function IdentitySection() {
 
   // Multilingual entitlement — null while loading, then the plan's flag.
   const [multilingual, setMultilingual] = useState<boolean | null>(null);
-  // Languages offered depend on the picked voice: the ElevenLabs-only ones
-  // (Punjabi, Mandarin) are hidden on a Deepgram voice, which can't speak them.
-  // Derived from the voice id itself (not the loaded catalog) so it's correct on
-  // first render, before /api/voices resolves. Mirrors the server's save-time strip.
+  // ElevenLabs-only languages hide on a Deepgram voice. Derived from the voice id (not the catalog)
+  // so it's right on first render before /api/voices resolves. Mirrors the server's save-time strip.
   const offeredLanguages = languagesForVoiceProvider(
     providerForVoiceId(identity.voiceId, "elevenlabs"),
   );
-  // Ignore stale entries a config saved against an older, larger catalogue (or
-  // against a different voice provider) — the server drops them on save; the UI
-  // must never show what it can't offer.
+  // Drop languages saved against an older catalogue/other provider — the server strips them on save anyway.
   const selectedLanguages = (identity.languages ?? []).filter((l) =>
     offeredLanguages.includes(l),
   );
@@ -265,11 +250,8 @@ export function IdentitySection() {
 
   function chooseVoice(v: VoiceCatalogItemWithProvider) {
     const prevGender = selectedVoice?.gender;
-    // A language-specific voice switches the language selection to ITS language —
-    // replacing whatever was picked before, so the enabled languages always match
-    // the voice callers hear (the user can re-add others afterwards). English is
-    // untouched: it's the always-on base, not a removable chip. Skipped on plans
-    // without multilingual: the server would strip the language on save anyway.
+    // A language-specific voice replaces the language selection with ITS language so chips match
+    // what callers hear. Skipped without multilingual — the server would strip it on save anyway.
     const implied = v.language ? VOICE_IMPLIED_LANGUAGE[v.language] : undefined;
     const autoSwitch =
       implied &&
@@ -340,11 +322,8 @@ export function IdentitySection() {
                 onChange={(country) => {
                   updateProfile({ country });
                   if (!isDirtyPrompt) setTimeout(recompilePrompt, 0);
-                  // Country lives on the profile, so the config alone can't show it
-                  // changed — hand the store the values from BEFORE this edit (these
-                  // are the rendered ones) so Save Changes enables, and clears again
-                  // if they switch back. Must run AFTER updateProfile, which is what
-                  // it compares the baseline against.
+                  // Country lives on the profile, not the config, so tell the store the pre-edit values to
+                  // enable Save Changes. Must run AFTER updateProfile — that's the baseline it compares against.
                   noteContextChange({ country: profileCountry, industry: profileIndustry });
                 }}
                 options={COUNTRY_NAMES}
@@ -367,11 +346,8 @@ export function IdentitySection() {
             </div>
           </div>
 
-          {/* The exact first line callers hear. Left blank it stays auto-generated
-              from the business name and follows a rename; the moment the owner
-              writes their own, `resolveGreeting` stops touching it — that's what
-              AUTO_GREETING_RE distinguishes, so no extra "customised" flag is
-              needed here. */}
+          {/* Blank = auto-generated and follows a rename; once the owner writes their own,
+              AUTO_GREETING_RE tells `resolveGreeting` to leave it alone (no separate flag needed). */}
           <div className="space-y-1.5">
             <Label htmlFor="greetingMessage">Opening greeting</Label>
             <Input
@@ -503,11 +479,7 @@ export function IdentitySection() {
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-muted-foreground">Gender</span>
-                {/* Segmented control — one background track, the active option
-                    filled. Uses the same primary fill as the Accent pills below:
-                    a raised card-coloured chip reads fine on a light track but is
-                    nearly invisible against the dark-theme muted track, so there
-                    was no way to tell which gender was selected. */}
+                {/* Primary fill (like the Accent pills) — a card-coloured chip was invisible on the dark-theme muted track. */}
                 <div className="inline-flex rounded-full bg-muted p-0.5">
                   {(
                     [
@@ -654,10 +626,7 @@ export function IdentitySection() {
         )}
       </FieldGroup>
 
-      {/* Sits with the voice it tunes (moved here from Advanced, which is about
-          the master prompt). Kept BELOW the picker: choosing a voice is the
-          common task and has to be visible without scrolling — tuning it is the
-          follow-up. */}
+      {/* Kept BELOW the picker — choosing a voice is the common task and must be visible without scrolling. */}
       <VoiceBehaviourTuning />
 
       {/* Voice gender changed → offer to rename the assistant to match. */}

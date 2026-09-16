@@ -30,12 +30,7 @@ import { cachedBrand, brandOrigin } from "../services/brands.js";
 import { brandAllowsSignup } from "../services/brandSetup.js";
 import { tenantFor, tenantForUser, TenantUnavailableError, planeOf, type TenantClient } from "../services/tenantDb.js";
 
-/**
- * The name of the role a staff member holds. `staffRoleId` is a plain id
- * since phase 4 — a brand's roles live in the brand's own database, the
- * platform's in the control plane — so it is looked up in the account's plane
- * rather than joined. Best-effort: a missing role reads as none.
- */
+/** Staff role name, looked up (not joined) in the account's own plane — brand roles live in the brand DB. Missing reads as none. */
 async function withStaffRole<T extends { staffRoleId: string | null; brandId: string | null }>(
   user: T,
 ): Promise<T & { staffRole: { name: string } | null }> {
@@ -46,9 +41,7 @@ async function withStaffRole<T extends { staffRoleId: string | null; brandId: st
   return { ...user, staffRole: role };
 }
 
-/** The account behind a session, from the plane it lives in, shaped for
- *  serializeUser: its profile (a brand account's, from the brand's database)
- *  and the brand it belongs to. Null when the row is gone. */
+/** The account behind a session, read from its own plane and shaped for serializeUser. Null when the row is gone. */
 async function loadAccount(id: string, brandId: string | null) {
   const db = await planeOf(brandId);
   const user = await db.user.findUnique({ where: { id } });
@@ -85,19 +78,8 @@ async function signupTenant(): Promise<{ brandId: string; db: TenantClient }> {
 
 const router = express.Router();
 
-/**
- * Find the account an email names, ON THIS DOOR.
- *
- * A brand's door answers from that brand's own database — that is where its
- * people live. The platform's own people (the super admin, platform staff) may
- * sign in on any door, so a miss there falls through to the control plane, but
- * only for THEM: an account that exists and belongs to another door is refused
- * with where to go, rather than a bare "invalid email or password" that sends
- * someone off resetting a password that was fine.
- *
- * Returns the id and password hash to check, and the brand the session will be
- * read from — or null when nobody by that email is on this door.
- */
+/** Finds the account for an email ON THIS DOOR: the brand's DB first, then the control plane (platform people only —
+ *  they may sign in anywhere). An account behind another door is told where to go instead of "wrong password". */
 async function findAccountOnThisDoor(
   email: string,
 ): Promise<{ id: string; passwordHash: string; brandId: string | null } | null> {
@@ -122,9 +104,7 @@ async function findAccountOnThisDoor(
   // sign in on any door.
   const own = await prisma.user.findUnique({ where: { email }, select: { id: true, passwordHash: true } });
   if (own) return { ...own, brandId: null };
-  // Not here. Main's thin directory knows which brand's door this account is
-  // behind: say THAT, not "wrong password" — and for a brand that is suspended
-  // or still being set up, say that instead of "wrong door".
+  // Not here. Main's directory knows which door they belong to — say that, not "wrong password".
   const elsewhere = await prisma.customerDirectory.findFirst({
     where: { email, ...(door ? { brandId: { not: door } } : {}) },
     select: { brandId: true },
@@ -175,9 +155,7 @@ async function notifyAdminsOfSignup(details: {
 
   const row = (label: string, value?: string) =>
     value && value.trim() ? `<li><strong>${label}:</strong> ${escapeHtml(value.trim())}</li>` : "";
-  // Show the signup time in the customer's own region — the timezone their
-  // browser reported at signup, falling back to one derived from their phone
-  // number — with the timezone label so admins never mistake it for server/UTC time.
+  // Customer's own timezone (browser, else phone-derived), labelled so admins don't read it as UTC.
   const when = formatSignupTime(new Date(), { timezone: details.timezone, mobile: details.mobile });
 
   await sendEmail({
@@ -263,11 +241,7 @@ function normalizeMobile(mobile: string): string {
   return parsePhoneNumberFromString(mobile.trim())?.number ?? mobile.trim();
 }
 
-/**
- * Enforce one account per mobile number — mirrors the one-card-per-account rule.
- * Throws 409 with a clear message if another account already uses this number.
- * No-op when blank (mobile is optional).
- */
+/** One account per mobile (mirrors one-card-per-account). 409 if taken; no-op when blank. */
 async function assertMobileAvailable(mobile?: string): Promise<void> {
   const raw = mobile?.trim();
   if (!raw) return;
@@ -297,38 +271,20 @@ async function createUser(data: {
   referralCode?: string;
   viaOnboarding?: boolean;
   timezone?: string;
-  /** Snapshot of the platform card-required policy, frozen at /register/start so
-   *  the OTP window can't change it. Omitted by the direct /register route, which
-   *  falls back to reading the live setting here. */
+  /** Card-required policy frozen at /register/start so the OTP window can't change it. Direct /register omits it and reads live. */
   cardRequired?: boolean;
 }) {
   // One account per mobile — re-checked here (not just at /register/start) so a
   // race between two pending sign-ups can't create two accounts on one number.
   await assertMobileAvailable(data.mobile);
   const referredById = await resolveReferrer(data.referralCode);
-  // Freeze the platform's card-required policy onto this row. This is the ONLY
-  // place the setting is read for a customer account — every gate downstream
-  // (getEntitlement, getPlanFeatures, /confirm-card, the client cardWallActive)
-  // reads the stamped column instead, so flipping the admin toggle can never
-  // retroactively wall an account that is already live.
-  // The brand this sign-up came through decides its customers' defaults —
-  // starting voice, country, home timezone. Its card policy is folded into
-  // getOnboardingCardRequired itself, so the value frozen at /register/start
-  // and this live fallback can never disagree.
+  // Freeze the card policy onto the row — the ONLY read of it for a customer; every downstream gate uses
+  // the stamped column, so flipping the admin toggle never retroactively walls a live account.
   const signupBrand = cachedBrand(currentBrandId());
   const cardRequired = data.cardRequired ?? (await getOnboardingCardRequired());
-  // A fresh profile stays subscriptionStatus="none". Under the card-less policy
-  // that IS their free trial; under the card-required policy it means "no card
-  // yet" and the app walls them on the plan picker until one lands.
-  // Personalise the agent config with the business captured at signup so the AI
-  // Brain, system prompt, and Vapi assistant all reflect it — the assistant is
-  // named after the business (e.g. "Redtape Receptionist").
+  // A fresh profile stays subscriptionStatus="none": the free trial (card-less), or "no card yet" (card-required).
   const signupBusiness = data.businessName?.trim() || "";
-  // Resolve the operating timezone from the strongest signals we have at signup
-  // — the business's phone number and street address (where its callers are),
-  // refined to a city by the browser's zone. The owner confirms/overrides it in
-  // Rules; this only decides what that field says when they first open it,
-  // instead of every account starting life in Sydney.
+  // Best guess from phone/address/browser so accounts don't all start life in Sydney; the owner overrides in Rules.
   const signupTimeZone = resolveBusinessTimeZone({
     businessNumber: data.businessNumber,
     mobile: data.mobile,
@@ -340,9 +296,7 @@ async function createUser(data: {
     ...DEFAULT_AGENT_CONFIG,
     identity: {
       ...DEFAULT_AGENT_CONFIG.identity,
-      // The brand's defaults for its customers: the voice its agents start on
-      // and the country its regional style is drawn from. Both remain the
-      // owner's to change in the AI Brain.
+      // Brand defaults for its customers; the owner can still change both in the AI Brain.
       ...(signupBrand?.defaultVoiceId ? { voiceId: signupBrand.defaultVoiceId } : {}),
       ...(signupBrand?.defaultCountry ? { country: signupBrand.defaultCountry } : {}),
       businessName: signupBusiness,
@@ -357,11 +311,8 @@ async function createUser(data: {
   const onboarding = data.viaOnboarding
     ? { onboardingStep: 5 }
     : { onboardingStep: 0, onboardingCompletedAt: new Date() };
-  // Resolved once so the column written below and the membership row written
-  // after it are guaranteed to be the same brand. Never null here: every
-  // register route runs assertSignupOpen() first, which refuses the platform's
-  // own door — and the database refuses a USER row without a brand regardless,
-  // so this can never quietly create an account nobody owns.
+  // Resolved once so the user row and membership row get the same brand. Never null: assertSignupOpen()
+  // refuses the platform door, and the DB refuses a USER row without a brand anyway.
   const { brandId: signupBrandId, db } = await signupTenant();
   const user = await db.user.create({
     data: {
@@ -464,9 +415,7 @@ const registerSchema = z.object({
   // Clamp to 40 (Vapi's assistant-name limit) instead of rejecting, so signup
   // never fails on a long scraped business name.
   businessName: z.string().transform(clampName).optional(),
-  // Must be a valid E.164 number per libphonenumber's per-country rules — mirrors
-  // the client check so a malformed number can't slip through by calling the API
-  // directly. Empty/omitted stays allowed (the field is optional).
+  // Mirrors the client E.164 check so a direct API call can't slip a malformed number through. Blank stays allowed.
   mobile: z
     .string()
     .optional()
@@ -475,32 +424,18 @@ const registerSchema = z.object({
   address: z.string().optional(),
   referralCode: z.string().optional(),
   viaOnboarding: z.boolean().optional(),
-  // The visitor's IANA timezone (e.g. "Asia/Kolkata") captured by the browser at
-  // signup, so notifications can show times in the customer's own region. Junk is
-  // dropped (not rejected) — the email falls back to a phone-derived timezone.
+  // Browser IANA timezone. Junk is dropped, not rejected — signup must not fail on it.
   timezone: z
     .string()
     .optional()
     .transform((v) => (isValidTimeZone(v) ? v!.trim() : undefined)),
 });
 
-// Direct sign-up (no email verification) — used by the guided onboarding funnel,
-// which already collects the details step by step. The login page uses the
-// OTP-verified /register/start + /register/verify flow below.
-// Per-IP (now that the app trusts the proxy and sees real client IPs). Shared
-// across register/login/OTP, and several users can sit behind one office NAT, so
-// keep enough headroom for honest multi-step + retry traffic while still cutting
-// brute force off long before it's useful (thousands/min).
+// Per-IP limiter shared by register/login/OTP. Several users can share one office NAT, so leave
+// headroom for honest retries while still killing brute force.
 const authLimiter = rateLimit({ windowMs: 60_000, max: 30 });
 
-/**
- * Refuse self-serve sign-up on a brand that hands out its own accounts.
- *
- * Checked before the body is even parsed, so an invite-only door answers the
- * same way to every attempt rather than leaking validation hints first. Every
- * "public" brand is untouched. The platform's own door never takes sign-ups —
- * a customer is always some brand's — so it answers the same 403.
- */
+/** Refuses self-serve sign-up on an invite-only brand and on the platform door. Runs before body parsing so it leaks no validation hints. */
 function assertSignupOpen(): void {
   const brand = cachedBrand(currentBrandId());
   if (brandAllowsSignup(brand)) return;
@@ -596,9 +531,7 @@ router.post(
     const { brandId: door, db } = await signupTenant();
     const existing = await db.user.findUnique({ where: { email }, include: { profile: true } });
     if (existing) {
-      // Recovery: a prior verify likely created the account but its response was
-      // lost (slow/cold DB), leaving the client stuck on the OTP step. If the same
-      // code still matches, just re-issue the session instead of 409-ing.
+      // Recovery: a prior verify created the account but the response was lost. Same code → re-issue the session, don't 409.
       if (!(await signupCodeMatches(email, code))) {
         throw new HttpError(409, "Email already registered");
       }
@@ -648,9 +581,7 @@ router.post(
   }),
 );
 
-// Step 1 of reset: email a reset code. Rejects an unknown email with a clear
-// error so the user knows there's no account (we favour UX clarity here over
-// hiding which emails are registered).
+// Reset step 1: email a code. Unknown email gets a clear error — UX clarity over hiding which emails exist.
 router.post(
   "/forgot-password",
   authLimiter,
@@ -713,10 +644,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
 
-    // Who this is, and whether the password is right, is answered by the door's
-    // own database. The rest of the session — profile, role title, brand — is
-    // still composed from the control plane's mirror row (same id) until those
-    // tables move in later phases.
+    // Identity and password are answered by the door's own database.
     const account = await findAccountOnThisDoor(email);
     if (!account || !(await verifyPassword(password, account.passwordHash))) {
       throw unauthorized("Invalid email or password");
@@ -724,10 +652,7 @@ router.post(
     const user = await loadAccount(account.id, account.brandId);
     if (!user) throw unauthorized("Invalid email or password");
 
-    // Suspending a brand takes the whole tenant offline: its subdomain stops
-    // resolving AND nobody inside it can sign in. Without this, its admins and
-    // customers would keep working through the platform's own domain, which
-    // would make "suspended" mean almost nothing.
+    // A suspended brand's people can't sign in anywhere — otherwise they'd keep working via the platform domain.
     if (user.brand?.status === "suspended") {
       throw new HttpError(
         403,
@@ -766,16 +691,11 @@ router.get(
   "/me",
   requireAuth,
   asyncHandler(async (req, res) => {
-    // Reconcile a possibly-stale trial from Stripe first, so an ended trial that
-    // auto-charged the card shows as active (not "needs to subscribe again").
-    // A customer's subscription is reconciled with Stripe on every load; the
-    // platform's own people have none.
+    // Reconcile with Stripe first so an ended trial that auto-charged shows as active. Platform people have no subscription.
     if (req.user!.brandId) await reconcileSubscription(req.user!.sub);
     const user = await loadAccount(req.user!.sub, req.user!.brandId ?? null);
     if (!user) throw unauthorized("Your session is no longer valid");
-    // Admin suspended this account mid-session — kick the live session out so the
-    // user can't keep using the dashboard. The frontend treats this code as a
-    // hard logout and routes to /login with a "suspended" notice.
+    // Suspended mid-session: the frontend treats this code as a hard logout.
     if (user.profile?.suspendedAt) {
       throw new HttpError(403, "Your account has been suspended.", "account_suspended");
     }

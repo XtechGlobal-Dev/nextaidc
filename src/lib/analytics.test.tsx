@@ -1,11 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { trackEvent } from "./analytics";
 
-/* ------------------------------------------------------------------ *
- *  GTM data layer helper. Verifies events land on window.dataLayer in
- *  the shape GTM expects ({ event, ...params }). Lives as .test.tsx so it
- *  runs under jsdom, where `window` exists (see vitest.config.ts).
- * ------------------------------------------------------------------ */
+// Events must land on window.dataLayer as { event, ...params }. Named .test.tsx so it runs under jsdom.
 
 beforeEach(() => {
   (window as { dataLayer?: unknown[] }).dataLayer = undefined;

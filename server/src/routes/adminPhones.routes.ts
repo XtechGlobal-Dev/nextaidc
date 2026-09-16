@@ -98,14 +98,8 @@ router.post(
     const { agentId, brandId: agentBrandId } = z
       .object({ agentId: z.string().optional(), brandId: z.string().optional() })
       .parse(req.body ?? {});
-    // Tenant wall. Without it the scoped LIST would be cosmetic — an id is all
-    // a direct call needs.
-    //
-    // Deliberately NOT canReachBrand(): that treats an unowned record as out of
-    // reach, which is right for a customer row and exactly wrong here. The
-    // shared pool (brandId null) is inventory every brand draws from, so a brand
-    // admin may act on their own numbers AND on shared ones — just never on
-    // another tenant's, held or assigned.
+    // Tenant wall — a direct call only needs an id. Not canReachBrand() on purpose:
+    // the shared pool (brandId null) is inventory any brand may use, but never another tenant's.
     const rowBrand = await numberBrandId(req.params.id);
     const mine = viewerBrand(req);
     if (mine && rowBrand !== null && rowBrand !== mine) {

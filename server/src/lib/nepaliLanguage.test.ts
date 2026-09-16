@@ -7,10 +7,8 @@ import {
   transcriberFor,
 } from "./agentConfig.js";
 
-/* Adding a language touches two files that must agree exactly — the server list
- * sanitizes every save against its copy, so a client-only entry is silently
- * dropped on the next save and the customer's selection just disappears. These
- * pin the mirror, and the transcriber route Nepali actually takes. */
+// Client and server lists must agree exactly — the server sanitizes saves against its copy, so a
+// client-only language silently disappears on the next save.
 
 const clientLanguages = readFileSync(
   resolve(import.meta.dirname, "../../../src/data/languages.ts"),

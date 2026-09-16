@@ -5,12 +5,7 @@ import { useQuickSetupStore } from "@/stores/useQuickSetupStore";
 import { useTrialStore } from "@/stores/useTrialStore";
 import { api, ApiError, type SubscriptionPlan } from "@/lib/api";
 
-/**
- * Quick-setup step 3 — pick a plan and start the free trial. Gating the number
- * step: a customer tests web calls freely, but claiming a dedicated number needs
- * a plan + card. Selecting a plan starts a subscription (SetupIntent) whose secret
- * is handed to the Payment step (step 4).
- */
+/** Quick-setup plan step. Claiming a number needs plan + card; this starts the subscription and hands the SetupIntent secret to Payment. */
 export default function StepPlan() {
   const next = useQuickSetupStore((s) => s.next);
   const setBillingClientSecret = useQuickSetupStore((s) => s.setBillingClientSecret);

@@ -6,13 +6,8 @@ import { isAdminTeamRole } from "../lib/roles.js";
 
 const router = Router();
 
-/**
- * SSE stream. The browser's EventSource can't set an Authorization header, so the
- * JWT rides in the query string (`?token=`) — safe over HTTPS; it's the same
- * short-lived token already stored client-side. We verify it and confirm the user
- * still exists (mirroring requireAuth), then hold the connection open, pushing
- * tiny "refresh" events until the client disconnects.
- */
+// SSE stream. EventSource can't set headers, so the JWT rides in `?token=`; we
+// verify it and confirm the user still exists (same as requireAuth).
 router.get("/stream", async (req, res) => {
   const token = typeof req.query.token === "string" ? req.query.token : "";
   if (!token) {
@@ -70,16 +65,8 @@ router.get("/stream", async (req, res) => {
     removeClient(clientId);
   };
 
-  // Comment heartbeat keeps the connection (and any intermediary proxies) alive
-  // through idle periods. It's server→client only — the browser makes no request.
-  //
-  // It doubles as the dead-connection reaper. A client that vanishes WITHOUT a
-  // clean close (tab killed, laptop slept, Wi-Fi dropped, socket half-open) never
-  // fires 'close', and res.write() on that socket does NOT throw — Node just
-  // buffers it — so the old try/catch caught nothing and the entry lived in the
-  // hub forever. Harmless when the hub only fanned out events; visibly wrong once
-  // presence is derived from it (the customer showed "online" permanently). So
-  // check the socket is actually alive before writing, and drop it if not.
+  // Heartbeat also reaps dead clients: a half-open socket never fires 'close' and
+  // res.write() doesn't throw on it, so check it's alive or the user shows "online" forever.
   heartbeat = setInterval(() => {
     if (res.writableEnded || res.destroyed || res.socket === null || res.socket.destroyed) {
       cleanup();

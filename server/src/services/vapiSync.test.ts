@@ -2,16 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HttpError } from "../lib/http.js";
 import { prisma } from "../prisma.js";
 
-/* ------------------------------------------------------------------ *
- *  Retry queue for config pushes to the live Vapi assistant.
- *
- *  Saving writes the DB first and pushes to Vapi second, so a provider outage
- *  costs nobody their edits — but it used to leave the owner looking at settings
- *  that real callers never heard, with nothing to close the gap. These tests pin
- *  the properties that make the queue safe to run unattended: it converges on the
- *  LATEST saved config, it backs off instead of hammering a provider that keeps
- *  saying no, and it repairs only — it never brings an assistant into existence.
- * ------------------------------------------------------------------ */
+// Vapi push retry queue. Pins what makes it safe unattended: converges on the LATEST
+// config, backs off, and repairs only — never creates an assistant.
 
 type Row = {
   id: string;
@@ -119,9 +111,8 @@ describe("marking a config out of sync", () => {
   });
 
   it("parks a config Vapi rejected outright instead of queueing it", async () => {
-    // The 400 that started this: an ElevenLabs voice id Vapi can't resolve. The
-    // same payload will be rejected identically forever, so it stays flagged (the
-    // account IS out of sync) but never re-pushed.
+    // The 400 that started this: an ElevenLabs voice id Vapi can't resolve. Same
+    // payload, same rejection forever — stays flagged but never re-pushed.
     await markVapiSyncPending(prisma as never, "conv1", new HttpError(400, "Couldn't Find 11labs Voice"));
 
     expect(updateData().vapiSyncNextAt).toBeNull();
@@ -196,9 +187,8 @@ describe("the retry sweep", () => {
   });
 
   it("only repairs accounts that already have a live assistant", async () => {
-    // Provisioning is owned by picking a plan / claiming a number. If the sweep
-    // pushed for an account with no assistant, upsertAssistant would CREATE one —
-    // handing a live agent to someone who never qualified for it.
+    // Pushing for an account with no assistant would CREATE one — a live agent
+    // for someone who never qualified.
     await retryPendingVapiSyncs();
     expect(findManyWhere().vapiAssistantId).toEqual({ not: null });
   });

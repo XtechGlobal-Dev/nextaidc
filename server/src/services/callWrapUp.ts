@@ -1,31 +1,8 @@
-/* ------------------------------------------------------------------ *
- *  Graceful close before a call hits its hard duration cap.
- *
- *  Vapi enforces `maxDurationSeconds` by simply dropping the call — no goodbye,
- *  mid-sentence. That is fine as an abuse backstop but brutal for a genuine
- *  caller who happens to run long, and it is the business's own customer who
- *  hears the line go dead.
- *
- *  So a few seconds before the cap we nudge the assistant, via Vapi's live call
- *  control channel, to close the conversation itself. It speaks in its own
- *  voice, language and style, and Vapi's hard cut is left as the backstop it
- *  should be rather than the normal path.
- *
- *  A system message (not a canned `say`) is used on purpose: a fixed sentence
- *  would be in the wrong language for a multilingual agent and would ignore
- *  whatever the caller just asked. Letting the model close means it can finish
- *  the thought — "I'll get someone to call you back about that" — instead of
- *  reciting a script over the top of the caller.
- *
- *  Timers live in memory. A restart loses any pending wrap-up, and the call then
- *  ends the old abrupt way at the cap — degraded, never broken, and not worth a
- *  scheduler table for a window measured in minutes.
- * ------------------------------------------------------------------------- */
+// Graceful close before Vapi's hard maxDurationSeconds cut. A system message (not a canned `say`) so the
+// model closes in the caller's language and finishes the thought. Timers are in-memory: a restart just falls back to the hard cut.
 import { WRAP_UP_LEAD_SECONDS } from "./callDurationCap.js";
 
-/** What the assistant is told when the call is nearly out of time. Phrased as an
- *  instruction about what to DO, not words to say, so the model closes in the
- *  caller's language and picks up whatever is actually in flight. */
+// Phrased as what to DO, not words to say, so the model closes in the caller's language.
 const WRAP_UP_INSTRUCTION =
   "URGENT: this call must end in about 30 seconds — you are out of time. " +
   "Bring the conversation to a close NOW in one or two short sentences: tell the " +
@@ -47,9 +24,7 @@ async function sendWrapUp(controlUrl: string): Promise<boolean> {
       body: JSON.stringify({
         type: "add-message",
         message: { role: "system", content: WRAP_UP_INSTRUCTION },
-        // Speak now. Inserted silently, the model would only see this on its
-        // next turn — which may never come if the caller is mid-monologue,
-        // exactly the case this exists for.
+        // Speak now — inserted silently, the model wouldn't see this until its next turn, which may never come mid-monologue.
         triggerResponseEnabled: true,
       }),
     });
@@ -64,15 +39,7 @@ async function sendWrapUp(controlUrl: string): Promise<boolean> {
   }
 }
 
-/**
- * Arrange for `callId` to be told to close shortly before `capSeconds` elapses.
- *
- * `startedAt` is when the call actually began — a status-update can arrive late,
- * and measuring the delay from "now" would push the warning past the cap.
- * No-ops when the cap is too short to warn inside (the warning would land at or
- * before the call's start), when control is unavailable, or when this call is
- * already scheduled.
- */
+/** Schedules the close nudge before `capSeconds`. Measures from `startedAt`, not now — a late status-update would push the warning past the cap. No-op if already scheduled or no control URL. */
 export function scheduleWrapUp(input: {
   callId: string;
   controlUrl: string | null | undefined;

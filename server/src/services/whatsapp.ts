@@ -4,22 +4,13 @@ import { getEffective, integrationConfiguredFor } from "./settings.js";
 import { traceFetch } from "./apiTrace.js";
 import { currentBrandId } from "../lib/brandContext.js";
 
-/**
- * WhatsApp Business Cloud API (Meta) — sends messages via the Graph API.
- *
- * Required settings (Admin → Settings):
- *   whatsapp.accessToken   — permanent or system-user token from Meta Business
- *   whatsapp.phoneNumberId — the Phone Number ID from WhatsApp Business Manager
- *
- * API docs: https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages
- */
+// WhatsApp Cloud API (Meta Graph). Needs whatsapp.accessToken + whatsapp.phoneNumberId
+// from Admin -> Settings. Docs: https://developers.facebook.com/docs/whatsapp/cloud-api/guides/send-messages
 
 const API_VERSION = "v21.0";
 
-/* Every credential read below is brand-aware: a white-label tenant can bring
- * its own WhatsApp sender, so messages reach that tenant's customers from the
- * tenant's number. With no brand resolved (background work, the platform's own
- * domain) these fall through to the platform credentials exactly as before. */
+// Credentials are brand-aware: a white-label tenant can bring its own sender.
+// No ambient brand (background work, platform domain) falls through to the platform's.
 function apiUrl(brandId?: string | null): string {
   const phoneNumberId = getEffective("whatsapp.phoneNumberId", brandId ?? currentBrandId()).trim();
   if (!phoneNumberId) throw notImplemented("WhatsApp Phone Number ID not configured");
@@ -32,9 +23,7 @@ function accessToken(brandId?: string | null): string {
   return token;
 }
 
-/** True when both the access token and phone number ID are configured — for the
- *  ambient tenant, so a brand with its own WhatsApp sender counts as configured
- *  whatever the platform has. */
+/** Token + phone number ID both set, for the ambient tenant (a brand's own sender counts). */
 export function isWhatsAppConfigured(brandId?: string | null): boolean {
   return integrationConfiguredFor("whatsapp", brandId !== undefined ? brandId : currentBrandId());
 }
@@ -106,9 +95,7 @@ export async function sendWhatsApp(to: string, body: string): Promise<Record<str
   return data;
 }
 
-/** Send a template message via Meta's Cloud API. Template messages bypass the
- *  24-hour conversation window. Pass `bodyParams` for templates with {{1}}, {{2}}…
- *  placeholders in the body. */
+/** Sends a template message — templates bypass the 24-hour conversation window. `bodyParams` fill {{1}}, {{2}}... */
 export async function sendWhatsAppTemplate(
   to: string,
   template = "hello_world",
@@ -157,9 +144,7 @@ export async function sendWhatsAppTemplate(
   return data;
 }
 
-/** Send a test message to verify the Access Token + Phone Number ID work.
- *  Uses a template message (hello_world) so it works outside the 24-hour window.
- *  Returns a structured result instead of throwing, for the admin UI. */
+/** Admin test send. Uses the hello_world template so it works outside the 24-hour window; returns a result instead of throwing. */
 export async function sendTestWhatsApp(
   to: string,
 ): Promise<{ success: boolean; message: string }> {
@@ -176,12 +161,7 @@ export async function sendTestWhatsApp(
   }
 }
 
-/** Post-call WhatsApp summary to the agent owner. Uses the template configured
- *  in `whatsapp.callTemplate` (Admin → Settings) so it always delivers regardless
- *  of the 24-hour window. Falls back to `hello_world` if no custom template is set.
- *
- *  Custom template body should have up to 3 params:
- *    {{1}} = business name, {{2}} = caller + duration, {{3}} = summary */
+/** Post-call summary to the owner via `whatsapp.callTemplate` (delivers outside the 24h window). Params: {{1}} business, {{2}} caller + duration, {{3}} summary. */
 export async function callSummaryWhatsApp(opts: {
   to: string;
   callerName: string;
@@ -206,10 +186,8 @@ export async function callSummaryWhatsApp(opts: {
   const link = opts.conversationUrl?.trim();
 
   if (templateName) {
-    // Template params: {{1}} business, {{2}} caller, {{3}} summary, and — when the
-    // link is enabled — {{4}} the conversation link. The template MUST declare a
-    // {{4}} placeholder for this to pass (see whatsapp.callTemplate in Admin); when
-    // the link is off we send the original 3 params.
+    // With the link on, {{4}} is the conversation link — the template must declare
+    // a {{4}} placeholder or Meta rejects the send.
     const params = link ? [who, callerLine, summaryLine, link] : [who, callerLine, summaryLine];
     await sendWhatsAppTemplate(opts.to, templateName, "en_US", params);
     return;

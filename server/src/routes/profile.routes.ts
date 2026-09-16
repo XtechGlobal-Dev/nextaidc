@@ -41,13 +41,8 @@ function smsSenderDigits(): string {
   return digitsOnly(getEffective("twilio.fromNumber") || "");
 }
 
-/**
- * Clamp trial-only choices down to what the plan includes — called the moment a
- * user goes live (claims a number). During the trial every add-on is unlocked, so
- * the config may carry a voice or languages the plan doesn't include; strip those
- * so the live assistant + AI Brain honour the chosen plan's real limits. Mutates
- * and returns the config, plus whether anything changed.
- */
+// Trial unlocks every add-on, so at go-live strip any voice/languages the plan
+// doesn't include. Mutates the config; returns whether anything changed.
 async function clampConfigToPlan(
   userId: string,
   config: AgentConfig,
@@ -71,17 +66,10 @@ async function clampConfigToPlan(
   return { config, changed };
 }
 
-/**
- * Reserve `number` for `userId`: set the profile, route it to their live Vapi
- * assistant, flip the pool row to ASSIGNED, and email them. Returns the updated
- * profile. Shared by the claim (pool) and buy (new Twilio number) flows.
- */
+// Assign a number: profile, Vapi routing, pool row, email. Shared by claim and buy.
 async function assignNumberToUser(userId: string, number: string) {
-  // Going live commits a trial user to the plan they picked at onboarding: end the
-  // trial and charge the saved card NOW, before the number is assigned. Throws a
-  // 400 if the charge fails (declined / needs auth), so we never hand out a live
-  // number the user hasn't paid for — they fix their card and retry. A no-op for
-  // anyone who isn't a trialing user (already active, no card, later number swap).
+  // Charge the trial user's saved card BEFORE assigning — a failed charge throws 400
+  // so we never hand out a live number that isn't paid for. No-op unless trialing.
   const { converted } = await chargeTrialAndActivateNow(userId, { number });
 
   const prev = await (await tenantForUser(userId)).profile.findUnique({
@@ -95,13 +83,8 @@ async function assignNumberToUser(userId: string, number: string) {
     data: { receptionistNumber: number },
   });
 
-  // Route the number to this user's LIVE Vapi assistant so real inbound calls
-  // are answered by their AI. The assistant may not exist yet — the user can
-  // pick their number from the quick-setup modal before ever opening the AI
-  // Brain, so the conversion's vapiAssistantId can still be null here. Provision
-  // it now (upsertAssistant verifies/recreates a stale id) so routing never
-  // silently no-ops on a missing assistant — which is what left numbers claimed
-  // in the DB + the "you're live" email sent, but never imported into Vapi.
+  // The assistant may not exist yet (quick-setup runs before the AI Brain), so
+  // provision it here — skipping on a null id left numbers claimed but never imported into Vapi.
   let assistantId: string | null = null;
   let routeError: unknown = null;
   const conversion = await (await tenantForUser(userId)).conversion.findUnique({
@@ -109,10 +92,8 @@ async function assignNumberToUser(userId: string, number: string) {
     select: { id: true, vapiAssistantId: true, agentConfig: true },
   });
 
-  // Going live commits them to their plan — clamp any trial-only voice/languages
-  // the config still carries down to what the plan includes, and persist it so the
-  // live assistant AND the AI Brain both reflect the plan's real limits. (The
-  // profile now has the number, so getPlanFeatures/canSelectVoice are plan-scoped.)
+  // Clamp trial-only voice/languages to the plan and persist, so the live assistant
+  // and the AI Brain agree. Profile has the number now, so the checks are plan-scoped.
   let liveConfig = conversion?.agentConfig as unknown as AgentConfig | undefined;
   if (conversion && liveConfig) {
     const clamped = await clampConfigToPlan(userId, liveConfig);
@@ -147,10 +128,8 @@ async function assignNumberToUser(userId: string, number: string) {
     assistantId = conversion?.vapiAssistantId ?? null;
   }
 
-  // Cross-org lock (Vapi 409): this number is owned by a DIFFERENT Vapi org and
-  // can never be connected from this project — it just keeps surfacing in the
-  // picker and 409ing. Block it so it stops being offered, roll back the tentative
-  // assignment (don't leave the user holding a dead number), and surface the error.
+  // Vapi 409 = number owned by another Vapi org, never connectable from here. Block it
+  // so the picker stops offering it, roll back the assignment, surface the error.
   if (routeError instanceof HttpError && routeError.status === 409) {
     await blockNumber(number).catch(() => {});
     await (await tenantForUser(userId)).profile
@@ -165,10 +144,8 @@ async function assignNumberToUser(userId: string, number: string) {
     /* best-effort — admin can resync from the Phone Numbers panel */
   }
 
-  // Only tell the customer their AI is "live" once the number is actually routed
-  // to the assistant — otherwise the email would be a false promise. Skip it when
-  // we just converted them to paid: this template is trial-framed (X trial days /
-  // minutes), and notifyPlanActivated already emailed them their plan is active.
+  // Only say "you're live" once routing actually worked. Skip after a paid conversion:
+  // this template is trial-framed and notifyPlanActivated already emailed them.
   if (!routeError && !converted) {
     void (async () => {
       try {
@@ -193,10 +170,8 @@ async function assignNumberToUser(userId: string, number: string) {
     })();
   }
 
-  // Surface a routing failure so the user knows they aren't live yet instead of
-  // believing they are. Preserve a clear, actionable error (e.g. the number is
-  // locked to another Vapi org) verbatim; for transient failures the number is
-  // saved, so a retry just re-runs the idempotent import.
+  // Surface routing failures so the user knows they aren't live. The number is saved,
+  // so a retry just re-runs the idempotent import.
   if (routeError) {
     if (routeError instanceof HttpError) throw routeError;
     throw new HttpError(
@@ -216,13 +191,8 @@ router.get(
   "/",
   asyncHandler(async (req, res) => {
     let profile = await (await requestTenant(req)).profile.findUnique({ where: { userId: req.user!.sub } });
-    // ADMIN and USER accounts are customer-facing and always need a Profile — the
-    // AI Brain / Settings pages hang on a skeleton without one. A promoted admin
-    // (an existing user upgraded to ADMIN) or any account whose Profile row is
-    // missing would otherwise 404 here forever, so self-heal by creating it.
-    // STAFF, RESELLER and the SUPER_ADMIN are excluded: they have no customer
-    // workspace and are redirected away from these pages, so creating a Profile
-    // for them would only mint customer state nothing will ever use.
+    // Self-heal a missing Profile for customer-facing roles (a promoted admin would
+    // 404 here forever). STAFF/RESELLER/SUPER_ADMIN have no customer workspace, so skip them.
     if (!profile && hasCustomerWorkspace(req.user!.role) && req.user!.role !== "RESELLER") {
       profile = await (await requestTenant(req)).profile.create({ data: { userId: req.user!.sub } });
     }
@@ -248,9 +218,8 @@ const patchSchema = z.object({
   website: z.string().optional(),
   businessNumber: z.string().optional(),
   address: z.string().optional(),
-  // A display country NAME (e.g. "Australia"), not an ISO code — it's injected
-  // verbatim into the prompt's "a business based in {country}" line. (The ISO code
-  // used for the regional-style block lives separately on agentConfig.identity.country.)
+  // Display NAME, not ISO code — injected verbatim into the prompt. The ISO code
+  // lives on agentConfig.identity.country.
   country: z.string().max(60).optional(),
   industry: z.string().max(100).optional(),
   // Call forwarding: the chosen behaviour, and a boolean the client sends to mark
@@ -329,9 +298,8 @@ const onboardingSchema = z.object({
   completed: z.boolean().optional(),
 });
 
-// Persist guided-onboarding progress so a returning user resumes where they left
-// off. `step` only ever advances (we keep the furthest reached); `completed`
-// stamps onboardingCompletedAt and clears the pending step.
+// Onboarding progress. `step` only ever advances; `completed` stamps the timestamp
+// and clears the pending step.
 router.patch(
   "/onboarding",
   asyncHandler(async (req, res) => {
@@ -358,9 +326,7 @@ router.patch(
   }),
 );
 
-// Mark the quick-setup modal as seen so it never auto-opens again (the user can
-// still open it manually). Stamps the first-seen time once; later calls are a
-// no-op on the timestamp. Server-side so it survives a cache clear / new browser.
+// Quick-setup modal seen. Stamped once, server-side so it survives a new browser.
 router.post(
   "/quick-setup-seen",
   asyncHandler(async (req, res) => {
@@ -397,9 +363,7 @@ router.get(
       return;
     }
     const sender = smsSenderDigits();
-    // Show every Twilio number. The admin's reserved SMS sender stays in the
-    // list but is flagged taken (never claimable) instead of being hidden, so a
-    // number that's already in use is visibly accounted for.
+    // The reserved SMS sender stays listed but flagged taken, so it's visibly accounted for.
     const all = await listTwilioNumbers();
     const rows = await (await requestTenant(req)).profile.findMany({
       where: { receptionistNumber: { not: "" } },
@@ -430,13 +394,8 @@ router.get(
 
 const claimSchema = z.object({ number: z.string().min(3), country: z.string().optional() });
 
-/**
- * Persist the customer's ISO country onto their agent config (identity.country)
- * so the live assistant picks up the matching regional style. Called from the
- * onboarding number flows with the country the user selected. Best-effort — a
- * blank/invalid country is ignored. Runs BEFORE the number is routed so the very
- * first assistant push already carries the regional style.
- */
+// Save the ISO country onto identity.country so the regional style lands on the very
+// first assistant push. Blank/invalid is ignored.
 async function persistAgentCountry(userId: string, country?: string): Promise<void> {
   const iso = normalizeCountry(country);
   if (!iso) return;
@@ -469,10 +428,8 @@ router.post(
   "/claim-number",
   asyncHandler(async (req, res) => {
     const { number, country } = claimSchema.parse(req.body);
-    // A number is live infrastructure (recurring Twilio cost + a Vapi assistant
-    // created to route it to), so it follows the same entitlement rule as every
-    // other provisioning path. The quick-setup wizard already walks customers
-    // through plan → card → number, so this only ever fires on a direct API call.
+    // A number costs real money, so same entitlement rule as every other provisioning
+    // path. The wizard already enforces plan → card → number; this catches direct API calls.
     if (!(await canProvisionForUser(req.user!.sub, req.user!.role)))
       throw badRequest("Choose a plan before claiming your number.");
     if (!isTwilioConfigured()) throw badRequest("Phone numbers aren't configured yet.");
@@ -570,11 +527,7 @@ router.get(
   }),
 );
 
-/**
- * Buy a brand-new Twilio number (on the admin's account), add it to the pool,
- * and assign it to this user — gated by the admin toggle. Costs money, so only
- * call on an explicit user confirmation.
- */
+/** Buy a new Twilio number and assign it. Admin-toggle gated; costs money, so only on explicit confirmation. */
 router.post(
   "/buy-number",
   asyncHandler(async (req, res) => {
@@ -611,9 +564,8 @@ router.post(
 router.get(
   "/usage",
   asyncHandler(async (req, res) => {
-    // Source minutes from the entitlement (trial vs active plan) so the dashboard
-    // matches the sidebar — on plan activation the plan's minutes reset to 0/N,
-    // not the stale trial counter.
+    // Minutes come from the entitlement so the dashboard matches the sidebar and
+    // resets to 0/N on plan activation, not the stale trial counter.
     const ent = await getEntitlement(req.user!.sub);
 
     const db = await requestTenant(req);
@@ -621,10 +573,8 @@ router.get(
 
     const callsHandled = conversion ? await db.callLog.count({ where: { conversionId: conversion.id } }) : 0;
     const planMinutes = ent.minutesAllocated;
-    // Unlimited entitlements (admin) don't track a per-cycle counter, so the
-    // entitlement reports 0 used. Derive the real consumed minutes from the
-    // call logs instead, rounding each call up to a full billable minute so it
-    // matches how paid usage is metered.
+    // Unlimited (admin) entitlements report 0 used, so derive it from call logs,
+    // rounding each call up to a billable minute like paid usage.
     let minutesUsed = ent.minutesUsed;
     if (ent.unlimited && conversion) {
       minutesUsed = await billedMinutesFor(db, conversion.id);

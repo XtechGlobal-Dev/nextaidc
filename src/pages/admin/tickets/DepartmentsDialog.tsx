@@ -39,28 +39,8 @@ import { api, ApiError, type StaffMember } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { AdminTicketDepartment, TicketLaneInfo } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  The support queues themselves.
- *
- *  A department is two things at once — the queue a requester picks
- *  from, and the unit of access staff are granted. Access arrives by
- *  two routes: a whole ROLE can hold the queue (edited on the role), or
- *  individual PEOPLE can be dropped into it right here. Both give the
- *  same thing: every member of a department sees every conversation in
- *  it. That is why a department with requests can be turned OFF but
- *  not deleted.
- *
- *  Which lane these belong to is the caller's own — a brand admin sees
- *  its customer queues, the platform owner the ones brand admins file
- *  into. Neither can see the other's.
- *
- *  WHICH QUEUES EXIST is the platform's call on both lanes. The platform
- *  owner creates, renames and retires the platform's own from here, and
- *  a brand's from that brand's page. A brand admin therefore gets this
- *  dialog in a narrower mode: they decide who WORKS each of their
- *  queues, and nothing else — the definition is read-only, and the
- *  add/delete controls are gone rather than greyed.
- * ------------------------------------------------------------------ */
+// Support queues. Every member (via role or directly) sees every conversation, so a queue with requests can be disabled but not deleted.
+// Which queues exist is the platform's call — brand admins get a narrower mode: staffing only, definition read-only.
 
 interface DraftState {
   id: string | null;
@@ -83,11 +63,7 @@ const EMPTY_DRAFT: DraftState = {
   staffIds: [],
 };
 
-/**
- * A glyph and tint per department, guessed from its name so the list reads at a
- * glance. Names that match nothing cycle through the palette by position, so two
- * unknown departments never look identical.
- */
+// Glyph + tint guessed from the name; unmatched names cycle by position so two unknowns never look identical.
 const TILE_TONES: { icon: LucideIcon; tile: string }[] = [
   { icon: Users, tile: "bg-primary-tint text-primary" },
   { icon: FileCheck, tile: "bg-success-tint text-success" },
@@ -132,17 +108,9 @@ export function DepartmentsDialog({
   const [adding, setAdding] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
 
-  /**
-   * The platform's own queues have no staff to hand out to: the `brand` lane is
-   * answered by the super admin alone, so the whole membership block is
-   * meaningless there and is left out rather than shown empty.
-   */
+  // The `brand` lane is answered by the super admin alone, so the membership block is left out there.
   const hasTeam = lane.lane === "support";
-  /**
-   * On the support lane the caller is a brand admin, and the queues are the
-   * platform's to define — this dialog only staffs them. (The platform owner
-   * is never on this lane; see handlerLane on the server.)
-   */
+  // Support lane caller is a brand admin: queues are the platform's to define, this dialog only staffs them (see handlerLane).
   const managed = lane.lane === "support";
 
   // A fresh draft starts with the picker closed and the search empty.
@@ -176,13 +144,7 @@ export function DepartmentsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  /**
-   * Staff who already reach this queue through their ROLE.
-   *
-   * Shown as locked chips: the access is real, but it isn't this dialog's to
-   * revoke — unticking would have to edit the role, which would also silently
-   * change it for everyone else holding that role.
-   */
+  // Staff who reach this queue via their role. Locked chips — revoking here would silently edit the role for everyone on it.
   function roleGrantedMembers(departmentId: string | null): StaffMember[] {
     if (!departmentId) return [];
     return staff.filter((u) => u.roleDepartments.some((d) => d.id === departmentId));
@@ -257,9 +219,7 @@ export function DepartmentsDialog({
 
   return (
     <>
-      {/* One dialog, two faces: the list, or the new/edit form in its place.
-          Swapping the content rather than stacking a second modal means the form
-          never sits over a blurred list, and never has to be scrolled to. */}
+      {/* One dialog, two faces: list or form swapped in place, no stacked modal. */}
       <Dialog
         open={open}
         onOpenChange={(o) => {
@@ -399,11 +359,7 @@ export function DepartmentsDialog({
                   />
                 </label>
 
-                {/* Team members. Everyone listed here sees every conversation in
-                    this queue, whether or not it's assigned to them. Only the
-                    people already on the team are listed — with a big roster a
-                    tick-everyone checklist stops being readable — and the picker
-                    below searches the rest. */}
+                {/* Team members see every conversation in the queue, assigned or not. Only current members listed; the picker searches the rest. */}
                 {hasTeam &&
                   (() => {
                     const granted = roleGrantedMembers(draft.id);
@@ -730,9 +686,7 @@ export function DepartmentsDialog({
                 )}
               </div>
 
-              {/* Outside the scroll area so it stays reachable however long the
-                  list gets. The form takes over this dialog — inline at the
-                  bottom it sat below the fold once there were a few queues. */}
+              {/* Outside the scroll area so it stays reachable however long the list gets. */}
               {!managed && (
                 <button
                   type="button"

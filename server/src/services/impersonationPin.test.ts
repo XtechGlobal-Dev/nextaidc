@@ -2,13 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-/*
- * Impersonation hands over a real session as somebody else, so the PIN is a
- * credential. These pin the parts that make it one rather than a formality:
- * it is verified against a hash, a missing hash means the DEFAULT is still in
- * force (not "let anything through"), and guesses are counted centrally so a
- * six-digit secret can't simply be enumerated.
- */
+// The PIN is a credential: hashed, a missing hash means the DEFAULT applies (not
+// "allow anything"), and guesses are counted centrally so it can't be enumerated.
 
 const store = new Map<string, string>();
 const platformSetting = {
@@ -38,9 +33,8 @@ const {
   verifyPin,
 } = await import("./impersonationPin.js");
 
-// upsert's mock takes `create.value`, so the update path must supply the same
-// value — which the real code does. Kept explicit so a divergence would show up
-// here rather than as a silently unsaved PIN.
+// The upsert mock reads `create.value`; the real code passes the same value on
+// update, so a divergence would show up here rather than as a silently unsaved PIN.
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
@@ -117,9 +111,7 @@ describe("lockout", () => {
   });
 
   it("survives a restart, because the count is in the database", async () => {
-    // An in-memory counter would hand out a fresh five on every deploy, which
-    // for a million-combination secret is the difference between a real limit
-    // and a speed bump.
+    // An in-memory counter resets on every deploy — a speed bump, not a limit.
     await registerFailure();
     await registerFailure();
 
@@ -153,9 +145,8 @@ describe("lockout", () => {
   });
 });
 
-/* The endpoint is the thing being protected. Source-pinned, in the style of
- * couponUpdate.test.ts, because the handler is a long Express route wired to
- * Prisma, JWTs and the audit log. */
+// Source-pinned (like couponUpdate.test.ts): the handler is a long Express route
+// wired to Prisma, JWTs and the audit log.
 const adminRoutes = readFileSync(
   resolve(import.meta.dirname, "../routes/admin.routes.ts"),
   "utf8",
@@ -171,9 +162,7 @@ const impersonateRoute = (() => {
 
 describe("POST /customers/:id/impersonate", () => {
   it("verifies the PIN, on the server", () => {
-    // The dialog is hidden behind an emoji and validates nothing that matters.
-    // If this check is not here, the endpoint is open to any admin session with
-    // curl and the whole feature is theatre.
+    // Without this the endpoint is open to any admin session with curl.
     expect(impersonateRoute).toMatch(/await verifyPin\(pin\)/);
   });
 
@@ -192,11 +181,8 @@ describe("POST /customers/:id/impersonate", () => {
   });
 
   it("scopes the customer lookup to the admin's tenant", () => {
-    // Without this a brand admin could sign in as ANY customer on the platform
-    // just by knowing their id — the PIN gate says "an admin is really here",
-    // not "this customer is theirs".
-    // The database IS the tenant: the customer is read from the admin's own
-    // brand's database, where nobody else's customer exists.
+    // The PIN says "an admin is here", not "this customer is theirs". The lookup
+    // runs in the admin's own brand DB, where nobody else's customer exists.
     expect(impersonateRoute).toMatch(/requestTenant\(req\)/);
   });
 

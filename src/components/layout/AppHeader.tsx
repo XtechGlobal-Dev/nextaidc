@@ -103,9 +103,7 @@ export function AppHeader() {
             {greeting()}, {titleCaseName(firstName(displayName))}{" "}
             <ImpersonationEmojiTrigger />
           </p>
-          {/* The "… workspace" line orients admin/staff/reseller accounts, which
-              switch between contexts. A customer only ever has their own, so the
-              label is noise for them — hidden for the USER role. */}
+          {/* Workspace label helps roles that switch contexts; noise for a customer, so hidden for USER. */}
           {user?.role && user.role !== "USER" && (
             <p className="text-xs text-muted-foreground">{roleLabel(user)} workspace</p>
           )}

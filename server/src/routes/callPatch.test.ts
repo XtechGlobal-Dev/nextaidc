@@ -2,11 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 
-/* ------------------------------------------------------------------ *
- *  PATCH /api/calls/:id — the enrichment path a web call uses after its
- *  fast, refresh-safe initial save: patch in the AI summary (and recording)
- *  a moment later. Must be scoped to the caller's own calls.
- * ------------------------------------------------------------------ */
+// PATCH /api/calls/:id — a web call's late enrichment (summary, recording). Must stay scoped to the caller's own calls.
 
 const h = vi.hoisted(() => ({
   callLogFindFirst: vi.fn(),
@@ -111,9 +107,7 @@ describe("PATCH /api/calls/:id — enrich a saved call", () => {
 
     const res = await patchCall("call_1", { summary: "AI summary" });
     expect(res.status).toBe(200);
-    // `call_logs` is partitioned on createdAt, so the primary key is composite
-    // and the ownership check hands the timestamp forward — the write then
-    // prunes to one month instead of probing every partition.
+    // call_logs is partitioned on createdAt: composite key, and passing the timestamp keeps the write to one partition.
     expect(h.callLogUpdate).toHaveBeenCalledWith({
       where: { id_createdAt: { id: "call_1", createdAt: CREATED_AT } },
       data: { summary: "AI summary" },

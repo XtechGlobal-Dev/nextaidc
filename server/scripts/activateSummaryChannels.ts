@@ -1,17 +1,6 @@
 import "dotenv/config";
 
-/* ------------------------------------------------------------------ *
- *  One-time backfill: turn the owner call-summary channels ON for
- *  existing accounts.
- *
- *  Background: summary channels are now on-by-default, but accounts
- *  created before that change have these toggles stored as `false`
- *  (the old default). Since the post-call dispatch now gates on the
- *  toggles, those users would silently stop receiving summaries. This
- *  flips ownerEmailSummary / ownerSmsSummary / ownerWhatsAppSummary to
- *  true once. It does NOT touch override destinations, client toggles,
- *  or any other config. Idempotent — safe to run more than once.
- * ------------------------------------------------------------------ */
+// One-time: flip owner summary toggles ON for old accounts, which would otherwise silently stop getting summaries. Idempotent.
 // A brand's workspace lives in the brand's database (phase 6): BRAND=<slug> picks it.
 import { prisma } from "./_brandDb.js";
 

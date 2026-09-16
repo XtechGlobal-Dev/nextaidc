@@ -1,8 +1,6 @@
 import "dotenv/config";
 
-/** One-off sweep: capitalize the first letter of every scenario If/Then text
- *  in EVERY account's saved agent config (cosmetic; prompts re-compile on next
- *  save). Defaults were already capitalized for new signups. */
+// One-off: capitalize scenario If/Then text in every saved config (cosmetic; prompts recompile on next save).
 // A brand's workspace lives in the brand's database (phase 6): BRAND=<slug> picks it.
 import { prisma } from "./_brandDb.js";
 

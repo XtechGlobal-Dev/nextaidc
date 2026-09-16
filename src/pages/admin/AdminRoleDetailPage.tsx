@@ -42,14 +42,8 @@ export default function AdminRoleDetailPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedPerms, setSelectedPerms] = useState<Set<string>>(new Set());
-  /**
-   * Support queues this role works — the OTHER half of ticket access.
-   *
-   * Ticking "Support Tickets" above says what the role may DO with a request;
-   * these say WHICH requests it may do it to. A role with the capability and no
-   * queue can open the inbox and see nothing in it, which is why the warning
-   * below exists.
-   */
+  // Queues this role works — the capability says what it may do, these say to which tickets.
+  // Capability with no queue = an empty inbox, hence the warning below.
   const [departments, setDepartments] = useState<AdminTicketDepartment[]>([]);
   const [selectedDepartments, setSelectedDepartments] = useState<Set<string>>(new Set());
 

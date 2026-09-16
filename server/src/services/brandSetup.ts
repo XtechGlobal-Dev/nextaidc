@@ -2,32 +2,12 @@ import type { Brand, Prisma } from "@prisma/client";
 import { badRequest } from "../lib/http.js";
 import { isValidTimeZone } from "../lib/phoneTimeZone.js";
 
-/* ------------------------------------------------------------------ *
- *  Brand setup — the policy half of a tenant.
- *
- *  Name, address and look are in services/brands.ts. This file owns
- *  the fields that decide how the brand BEHAVES: who may sign up,
- *  which modules its customers see, which plans it sells, what its
- *  trial looks like, what its emails are signed as. Two halves:
- *
- *    readers     — brandModules(), brandPlanIds(), … Every one accepts
- *                  null (no brand = the platform) and answers with the
- *                  platform's behaviour, so callers never branch on
- *                  "is there a brand?".
- *    normalisers — resolveSetup() turns an admin payload into columns,
- *                  validating as it goes. Keeps brands.ts's create /
- *                  update paths to a one-line spread.
- *
- *  No import of brands.ts here, on purpose — brands.ts imports this.
- * ------------------------------------------------------------------ */
+// Brand policy (how a brand behaves; look/name live in brands.ts). Readers accept null = platform
+// so callers never branch on "is there a brand?". Must not import brands.ts — it imports this.
 
 /* -------------------------------- Modules -------------------------------- */
 
-/**
- * The customer-facing modules a brand can switch off. Deliberately the ones
- * that are optional products in their own right — the dashboard, inbox and
- * AI Brain are the receptionist itself and can't be removed.
- */
+/** Modules a brand can switch off. Only optional products — dashboard, inbox and AI Brain are the receptionist itself. */
 export const BRAND_MODULES = [
   {
     id: "booking",
@@ -63,9 +43,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** Every module's on/off for a brand. No brand (the platform) → all on. A
- *  key that was never written is on: switching a module off is the deliberate
- *  act, so a brand created before a module existed keeps getting it. */
+/** Module flags. No brand = all on; an unwritten key is on, so a brand created before a module existed keeps getting it. */
 export function brandModules(brand: Brand | null | undefined): BrandModules {
   const raw = isPlainObject(brand?.modules) ? brand!.modules : {};
   const out = {} as BrandModules;
@@ -121,10 +99,7 @@ export function brandSignupMode(brand: Brand | null | undefined): SignupMode {
   return brand?.signupMode === "invite" ? "invite" : "public";
 }
 
-/** Whether a stranger may create an account on this brand's front door. A
- *  brand may close its door and hand out accounts itself. The platform's own
- *  door (no brand) is never open: every customer belongs to a brand, so a
- *  sign-up there would have nowhere to go. */
+/** Public sign-up on this brand's door. The platform's own door (no brand) is never open — every customer belongs to a brand. */
 export function brandAllowsSignup(brand: Brand | null | undefined): boolean {
   return !!brand && brandSignupMode(brand) === "public";
 }
@@ -203,9 +178,7 @@ const URL_LABELS: Record<(typeof URL_FIELDS)[number], string> = {
   helpUrl: "Help URL",
 };
 
-/** A bare "acmevoice.com" is what people paste; make it a URL, then insist it
- *  really is one and is http(s) — a "javascript:" link in an email footer is
- *  not a typo anyone should be able to make. */
+/** Turns a pasted bare host into a URL and insists on http(s) — a "javascript:" link in an email footer must be impossible. */
 export function normalizeHttpUrl(raw: string | undefined, label: string): string {
   const s = (raw ?? "").trim();
   if (!s) return "";
@@ -274,12 +247,7 @@ function normalizeScripts(raw: BrandSetupInput["scripts"]): Prisma.InputJsonValu
   return { head: cleanScript(src.head), body: cleanScript(src.body), footer: cleanScript(src.footer) };
 }
 
-/**
- * Validate and normalise the setup half of a brand payload. Only keys that
- * were actually sent come back, so the same function serves create (where
- * Prisma's defaults fill the rest) and update (where untouched columns stay
- * untouched).
- */
+/** Validates the setup half of a brand payload. Only keys actually sent come back, so it serves both create and update. */
 export function resolveSetup(input: BrandSetupInput): BrandSetupData {
   const data: BrandSetupData = {};
   for (const key of TEXT_FIELDS) {

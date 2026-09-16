@@ -1,6 +1,5 @@
-/* Languages the owner can receive their call summaries + transcripts in.
- * The stored value is the label itself (sent to the LLM as "Write in <label>").
- * Empty string = English / the call's own language (no translation). */
+/** Summary/transcript languages. The label itself is stored and sent as "Write in <label>";
+ *  empty = the call's own language, no translation. */
 export const REPORT_LANGUAGES: string[] = [
   "Chinese (Simplified)",
   "Chinese (Traditional)",

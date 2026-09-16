@@ -9,11 +9,7 @@ import { BrandWalletSection } from "./BrandWalletSection";
 import { BrandLedgerCard } from "./BrandLedgerCard";
 import type { SetupDraft } from "./brandSetupDraft";
 
-/**
- * The platform owner's view of one brand's money: the addon policy (saved with
- * the rest of the brand), the price list (saved per row, live), and the wallet
- * with the payout form. Loads its own data so the brand page stays light.
- */
+/** Platform owner's view of a brand's money: addon policy, price list (saved per row) and wallet/payouts. Loads its own data. */
 export function BrandPricingTab({
   brand,
   value,

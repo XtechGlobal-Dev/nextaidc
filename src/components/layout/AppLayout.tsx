@@ -47,10 +47,8 @@ export function AppLayout() {
   const impersonator = useAuthStore((s) => s.impersonator);
   const stopImpersonation = useAuthStore((s) => s.stopImpersonation);
 
-  // The impersonation banner sticks to the top; the header must sit right below it,
-  // not under it. Measure the banner and expose its height as --chrome-top on
-  // <main> so the header can offset its sticky top by exactly that (the banner is
-  // responsive, so a hardcoded height would drift). 0 when not impersonating.
+  // Expose the sticky impersonation banner's measured height as --chrome-top so the header's sticky top
+  // sits below it, not under it. Measured because the banner is responsive.
   const mainRef = useRef<HTMLElement>(null);
   const bannerRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -67,9 +65,7 @@ export function AppLayout() {
     ro.observe(banner);
     return () => ro.disconnect();
   }, [impersonator]);
-  // STAFF and the SUPER_ADMIN have no customer workspace, so none of the
-  // customer chrome below (support chat, agent tester, number wizard, product
-  // tour) applies to them — see lib/roles.ts.
+  // STAFF and SUPER_ADMIN have no customer workspace, so the customer chrome below doesn't apply (lib/roles.ts).
   const platformOnly = !hasCustomerWorkspace(user?.role);
   const agentStatus = useAgentStore((s) => s.status);
   const trial = useTrialStore((s) => s.trial);
@@ -81,9 +77,7 @@ export function AppLayout() {
   // Lets the user dismiss the "activate your number" card for this session.
   const [setupBannerDismissed, setSetupBannerDismissed] = useState(false);
 
-  // Global keyboard shortcuts:
-  //   Ctrl+B / ⌘B  — collapse/expand the sidebar
-  //   Alt+N        — toggle the notifications panel
+  // Global shortcuts: Ctrl/⌘+B toggles the sidebar, Alt+N the notifications panel.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
@@ -102,11 +96,8 @@ export function AppLayout() {
     return () => window.removeEventListener("keydown", onKey);
   }, [toggleSidebar, toggleNotifications]);
 
-  // An admin-suspended account is a hard lock (not a billing lapse): log the live
-  // session out and send the user to /login with a notice — never to /subscribe,
-  // since they can't self-reactivate. Detect it from the cached profile or the
-  // polled entitlement flag (whichever updates first). Skip while an admin is
-  // impersonating, so viewing a suspended customer's panel doesn't kick the admin out.
+  // Admin suspension is a hard lock: log out to /login, never /subscribe (they can't self-reactivate).
+  // Skipped while impersonating so viewing a suspended customer doesn't kick the admin out.
   const adminSuspended =
     !impersonator &&
     user?.role === "USER" &&
@@ -124,20 +115,10 @@ export function AppLayout() {
   }
 
   const status = user?.profile?.subscriptionStatus;
-  // A fully-suspended account (grace lapsed without renewal) is locked out of the
-  // whole dashboard until it reactivates — gate on the polled entitlement flag
-  // too, so it kicks in even before the cached profile refreshes.
-  // ADMIN and STAFF users are never gated by subscription status.
+  // Gate on the polled entitlement flag too, so suspension kicks in before the cached profile refreshes.
   const suspended = status === "suspended" || !!trial?.suspended;
-  // A brand-new ("none") account that signed up under the CARD-LESS policy is not
-  // walled off — the dashboard is reachable on the trial (web test calls), and
-  // plan + card are collected later in the "tap to set up" number wizard, only
-  // when the user claims a number. An account created while the admin's
-  // card-required toggle was ON is walled hard until a card lands: cardWallActive
-  // reads that account's own signup snapshot, so flipping the toggle never
-  // affects anyone already using the app.
-  // Otherwise only a genuinely locked account (grace lapsed, or a canceled
-  // subscription) is bounced to re-subscribe. Impersonating admins are never bounced.
+  // Card-less "none" accounts stay in (plan + card come later in the number wizard). cardWallActive reads
+  // the account's own signup snapshot, so flipping the admin toggle never affects existing users.
   const needsSubscription =
     !impersonator &&
     user?.role === "USER" &&
@@ -153,9 +134,7 @@ export function AppLayout() {
     useQuickSetupStore.getState().openSetup(); // opens at the Plan step (step 1)
   }
 
-  // Only nag once they've started (trial/active). A "none" account is either on
-  // the card-less trial (nothing to nag about yet) or card-walled — and a walled
-  // user was already redirected to /subscribe above, so they never see this.
+  // Only nag once they've started; a "none" account has nothing to nag about yet (or was walled above).
   const blocked = trial && trial.phase !== "none" ? blockedCopy(trial) : null;
 
   // Initials for the profile button in the mobile top header.
@@ -231,9 +210,7 @@ export function AppLayout() {
             </BrandLogo>
           </Link>
           <div className="flex items-center gap-0.5">
-            {/* Search — the desktop header (and its search field) is hidden below
-                the `nav` breakpoint, and ⌘K doesn't exist on a phone, so without
-                this button the command palette is unreachable on mobile. */}
+            {/* Only way into the command palette on mobile: the desktop header is hidden and there's no ⌘K. */}
             <button
               type="button"
               onClick={() => setCommandPaletteOpen(true)}
@@ -320,9 +297,7 @@ export function AppLayout() {
       {/* Notifications slide-over — one instance serves both the desktop and
           mobile bells (see NotificationPanel for why it is not inside the bell). */}
       <NotificationPanel />
-      {/* Customer chrome: the support chat, the tester that dials this account's
-          own agent, the number-setup wizard and the product tour. None of it has
-          anything to act on for STAFF or the SUPER_ADMIN. */}
+      {/* Customer chrome; nothing here applies to STAFF or the SUPER_ADMIN. */}
       {!platformOnly && (
         <>
           <ChatWidget />

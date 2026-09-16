@@ -1,8 +1,7 @@
 import { prisma } from "../prisma.js";
-import { endTrialNow } from "./stripe.js";
 import { cachedBrand } from "./brands.js";
 import { currentBrandId } from "../lib/brandContext.js";
-import { tenantForUser } from "./tenantDb.js";
+import { createBillingDeps, type BillingDeps } from "./billing/deps.js";
 
 /* Global free-trial length (days). Stored in PlatformSetting, admin-editable. */
 export const TRIAL_DAYS_KEY = "trial.days";
@@ -13,15 +12,8 @@ export const DEFAULT_TRIAL_DAYS = 14;
 export const TRIAL_MINUTES_KEY = "trial.minutes";
 export const DEFAULT_TRIAL_MINUTES = 10;
 
-/* ------------------------------ Reporting FX ------------------------------ *
- *
- * Plans can be priced in more than one currency (AUD plans predate the USD
- * ones), and revenue figures were summing the raw `priceCents` across them —
- * A$89 + $299 came out as "388", which is not a number in any currency.
- *
- * USD is the reporting base. Rates are admin-editable rather than fetched live:
- * a dashboard that silently restates last month's MRR because the market moved
- * is worse than one that holds a rate someone chose and can explain.            */
+// Reporting FX. Plans exist in AUD and USD and revenue used to sum raw priceCents across both.
+// USD is the base; rates are admin-set, not live, so last month's MRR doesn't silently restate itself.
 
 export const FX_RATES_KEY = "fx.ratesToUsd";
 
@@ -33,13 +25,7 @@ export const REPORTING_CURRENCY = "usd";
 
 export type FxRates = Record<string, number>;
 
-/**
- * Admin-set rates for converting each non-USD currency to USD.
- *
- * Stored as a JSON object keyed by lowercase currency code. Malformed or absent
- * settings fall back to the defaults rather than throwing — a bad value in one
- * row must not take the whole admin dashboard down.
- */
+/** Admin-set rates to USD, keyed by lowercase code. Malformed settings fall back to defaults — one bad row must not take the dashboard down. */
 export async function getFxRates(): Promise<FxRates> {
   const row = await prisma.platformSetting.findUnique({ where: { key: FX_RATES_KEY } });
   if (!row?.value) return { ...DEFAULT_FX_RATES };
@@ -59,14 +45,7 @@ export async function getFxRates(): Promise<FxRates> {
   }
 }
 
-/**
- * Convert an amount to the reporting currency (USD).
- *
- * An unknown non-USD currency passes through unconverted — the same behaviour
- * as before this existed, so adding a currency without a rate can only be as
- * wrong as the old code was, never worse. `unconvertible` lets callers surface
- * that rather than quietly publishing a number nobody can source.
- */
+/** Converts to USD. An unknown currency passes through unconverted with `unconvertible` set so callers can flag it instead of publishing a number nobody can source. */
 export function toReportingCents(
   cents: number,
   currency: string,
@@ -79,15 +58,8 @@ export function toReportingCents(
   return { cents: cents * rate, unconvertible: false };
 }
 
-/*
- * Trial terms resolve brand-first: a white-label tenant may set its own days
- * and minutes, and everything else falls through to the platform setting.
- * The brand defaults to the AMBIENT one (the request's tenant, or the signed-in
- * account's — see lib/brandContext), so the many call sites in the trial
- * service need no threading; off-request work with no ambient brand gets the
- * platform's terms, which is what it always got. A brand override of 0 means
- * "no override", matching how a blank platform row is treated.
- */
+// Brand override first, platform setting as fallback. brandId defaults to the
+// ambient one so callers don't thread it; a brand value of 0 means "no override".
 export async function getTrialDays(
   brandId: string | null | undefined = currentBrandId(),
 ): Promise<number> {
@@ -106,9 +78,7 @@ export async function getTrialMinutes(
   return row ? Number(row.value) || DEFAULT_TRIAL_MINUTES : DEFAULT_TRIAL_MINUTES;
 }
 
-/* Post-trial grace period: when a trial ends and the user doesn't convert, hold
- * their assigned number for this many days before releasing it back to the pool.
- * On/off + length are admin-editable PlatformSettings; on by default. */
+// Post-trial grace: hold an unconverted user's number this many days before releasing it. Admin-editable, on by default.
 export const GRACE_ENABLED_KEY = "grace.enabled";
 export const GRACE_DAYS_KEY = "grace.days";
 export const DEFAULT_GRACE_ENABLED = true;
@@ -125,30 +95,20 @@ export async function getGraceConfig(): Promise<{ enabled: boolean; days: number
   };
 }
 
-/**
- * End a trialing customer's trial early once they've used up their trial-minute
- * quota. Ending the Stripe trial charges the saved card and flips the sub to
- * active (a customer.subscription.updated webhook then syncs the status too).
- * The days-based limit is enforced by Stripe's own trial_period_days, so this
- * only covers the "minutes ran out first" case. Best-effort and a no-op unless
- * the user is actively trialing with a Stripe subscription AND has auto-renew on
- * — with auto-renew off we never auto-charge; the trial simply lapses (calls
- * frozen) and Stripe cancels it at period end.
- */
-export async function enforceTrialMinutes(userId: string): Promise<void> {
-  const db = await tenantForUser(userId);
+/** Ends a trial early once its minute quota is spent. Only the "minutes ran out first" case — days are Stripe's job — and never with auto-renew off (no surprise charges). `deps` is injectable for tests. */
+export async function enforceTrialMinutes(
+  userId: string,
+  deps: BillingDeps = createBillingDeps(),
+): Promise<void> {
+  const db = await deps.tenantForUser(userId);
   const profile = await db.profile.findUnique({
     where: { userId },
     select: { subscriptionStatus: true, stripeSubscriptionId: true, autoRenew: true },
   });
   if (!profile || profile.subscriptionStatus !== "trialing" || !profile.stripeSubscriptionId) return;
 
-  // Auto-renew OFF → never auto-charge. A trial that runs out of minutes with
-  // auto-renew disabled must NOT convert to a paid plan: the user is already
-  // blocked (calls frozen) by the entitlement's expired_minutes status, and
-  // Stripe cancels the trial at its end via cancel_at_period_end — no charge.
-  // Mirrors reconcileSubscription's guard so BOTH trial-end paths (minutes here,
-  // date there) respect the user's auto-renew choice.
+  // Auto-renew off must never convert to paid: calls are already frozen and Stripe cancels at
+  // period end. Mirrors reconcileSubscription's guard so both trial-end paths agree.
   if (!profile.autoRenew) return;
 
   const quota = await getTrialMinutes();
@@ -162,7 +122,7 @@ export async function enforceTrialMinutes(userId: string): Promise<void> {
   if (minutesUsed < quota) return;
 
   try {
-    await endTrialNow(profile.stripeSubscriptionId);
+    await deps.endTrialNow(profile.stripeSubscriptionId);
     await db.profile.update({
       where: { userId },
       data: { subscriptionStatus: "active", trialEndsAt: null },

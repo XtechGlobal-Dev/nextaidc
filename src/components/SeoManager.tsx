@@ -1,21 +1,12 @@
 import { useEffect } from "react";
 import { api } from "@/lib/api";
 
-/* ------------------------------------------------------------------ *
- *  SeoManager — injects the admin-managed custom scripts/tags (Admin →
- *  Settings → SEO & Tracking Scripts) into the page on load:
- *    head   → appended to <head>
- *    body   → prepended to <body>
- *    footer → appended to <body>
- *  Renders nothing. Runs once per page load (SPA navigations don't
- *  re-run analytics snippets, matching how they behave on static sites).
- * ------------------------------------------------------------------ */
+// Injects the admin-managed SEO/tracking snippets (head/body/footer) once per page load.
+// SPA navigations don't re-run them, same as on a static site.
 
 let injected = false;
 
-/** Insert a raw HTML snippet so that <script> tags actually EXECUTE.
- *  (Scripts added via innerHTML are inert by spec — each one must be
- *  recreated as a real <script> element.) */
+/** Insert raw HTML; scripts set via innerHTML are inert by spec, so each one is recreated as a real <script>. */
 function injectHtml(target: Node, html: string, position: "append" | "prepend") {
   const trimmed = html.trim();
   if (!trimmed) return;

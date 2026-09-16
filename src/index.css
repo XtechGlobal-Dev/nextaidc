@@ -1183,22 +1183,35 @@
  *  Support ticket chrome
  * ------------------------------------------------------------------ */
 
-/* Conversation wallpaper. A faint dot grid over the warm panel tint, so a
- * thread reads as a chat rather than a blank form — and drawn from the theme's
- * own tokens rather than an image, so it follows dark mode and every brand's
- * palette with nothing to re-export. */
+/* Conversation wallpaper. The doodle tile in assets/ticket-wallpaper.svg (faint blue
+ * outlines: chat bubbles, stars, envelopes, paper planes…) repeated over the warm panel
+ * tint, so a thread reads as a chat rather than a blank form. Shared by every role's
+ * ticket thread — staff, brand and requester. Light mode paints the file as-is; dark
+ * mode uses it as a mask so the same lines come through in a soft white instead. */
 .ticket-wallpaper {
+  position: relative;
+  isolation: isolate;
   background-color: var(--color-warm);
-  background-image: radial-gradient(
-    currentColor 1px,
-    transparent 1px
-  );
-  background-size: 22px 22px;
-  background-position: 0 0;
-  color: color-mix(in oklab, var(--color-primary) 12%, transparent);
 }
-.dark .ticket-wallpaper {
-  color: color-mix(in oklab, white 6%, transparent);
+.ticket-wallpaper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: url("./assets/ticket-wallpaper.svg");
+  background-repeat: repeat;
+  background-size: 340px 340px;
+}
+.dark .ticket-wallpaper::before {
+  background-image: none;
+  background-color: color-mix(in oklab, white 55%, transparent);
+  -webkit-mask-image: url("./assets/ticket-wallpaper.svg");
+  mask-image: url("./assets/ticket-wallpaper.svg");
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+  -webkit-mask-size: 340px 340px;
+  mask-size: 340px 340px;
 }
 
 /* The sidebar bell that rings while a queue has something unread. A short

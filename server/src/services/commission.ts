@@ -1,16 +1,7 @@
 import { resolveStripeCustomer } from "./stripeCustomers.js";
 import { tenantFor } from "./tenantDb.js";
 
-/**
- * Accrue a reseller's referral commission for a paid Stripe invoice — if the
- * paying customer was referred by a reseller. Idempotent on the invoice id, so
- * the Stripe webhook AND the local reconcile path can both call it without
- * double-counting. Best-effort; never throws.
- *
- * The paying customer is found through the Stripe customer index, the same
- * way every payment is placed; the reseller, the customer and the commission
- * row all live in that customer's brand's database (phase 6).
- */
+/** Accrues a reseller's referral commission for a paid invoice. Idempotent on invoice id (webhook and reconcile both call it); never throws. Everything lives in the customer's brand DB. */
 export async function accrueCommissionForInvoice(opts: {
   invoiceId: string;
   customerId: string;

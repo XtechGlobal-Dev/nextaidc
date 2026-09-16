@@ -21,17 +21,8 @@ import {
 import { api, ApiError } from "@/lib/api";
 import type { Ticket, TicketDepartment } from "@/types/ticket";
 
-/* ------------------------------------------------------------------ *
- *  Handing a customer's request up to the platform.
- *
- *  A brand admin can't fix everything: a domain that won't verify, a
- *  number that won't provision, a payout that didn't land. This opens a
- *  NEW request with the platform in the admin's own name — filed into
- *  one of the platform's queues, the same picker they'd see raising any
- *  platform request — and links it to the customer's ticket. The
- *  customer's thread stays here, in this inbox; the platform never sees
- *  it, only the admin's account of it. One escalation per ticket.
- * ------------------------------------------------------------------ */
+// Escalate to the platform: opens a NEW ticket in the brand admin's own name, linked to the customer's.
+// The customer thread never leaves this inbox — the platform only sees the admin's account. One per ticket.
 
 export function EscalateTicketDialog({
   open,
@@ -56,9 +47,7 @@ export function EscalateTicketDialog({
     setNote("");
     setDepartmentId("");
     setLoading(true);
-    // The platform's queues, as offered to this brand admin when they raise any
-    // platform request — the requester-side list, because that is what an
-    // escalation is: the admin asking the platform.
+    // Requester-side list of platform queues — an escalation is the admin asking the platform.
     api.tickets
       .departments()
       .then((rows) => {

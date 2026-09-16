@@ -46,12 +46,7 @@ import {
   type GsmCodeRow,
 } from "@/data/callForwarding";
 
-/* ------------------------------------------------------------------ *
- *  Call Forwarding help — a standalone guide that walks a customer
- *  through pointing their existing number at their AI. Both tabs (iPhone
- *  and landline) run on the same carrier dial codes, chosen by country +
- *  carrier; iPhone adds the Live Voicemail warning on top.
- * ------------------------------------------------------------------ */
+// Call Forwarding guide. Both tabs (iPhone + landline) use the same carrier dial codes by country/carrier; iPhone adds the Live Voicemail warning.
 
 /** A prominent, can't-miss caveat (the iPhone Live Voicemail gotcha, which
  *  silently swallows calls before they ever reach the AI). */
@@ -63,10 +58,7 @@ interface GuideWarning {
   tip?: string;
 }
 
-/** iPhone-only: Live Voicemail answers on the handset itself, so it defeats
- *  forwarding however it was set up. Shown above the dial codes, which are the
- *  same ones the landline tab lists — a mobile and a landline both forward
- *  through the same carrier network codes. */
+// iPhone-only: Live Voicemail answers on the handset itself, so it defeats forwarding however it was set up.
 const LIVE_VOICEMAIL_WARNING: GuideWarning = {
   title: "Also turn off Live Voicemail — don't skip this",
   body:
@@ -79,11 +71,8 @@ const LIVE_VOICEMAIL_WARNING: GuideWarning = {
   tip: "After enabling forwarding, call your own number once to confirm it reaches your AI receptionist.",
 };
 
-/* -------------------------- Landline dial codes -------------------------- *
- *  Landline forwarding codes depend on the caller's country: US & Canada use
- *  the CLASS star codes (*72 / *73); most other countries use the standard GSM
- *  MMI codes (*21*…# / #21#). Carriers within a country share the same code, so
- *  the carrier picker mainly sets the caveat note. */
+// Landline codes: US/Canada use CLASS star codes (*72 / *73), most others GSM MMI (*21*…# / #21#).
+// Carriers within a country share the code, so the carrier picker mainly sets the caveat note.
 type CodeFamily = "us" | "gsm";
 interface LandlineCarrier {
   id: string;
@@ -448,9 +437,7 @@ function LandlinePanel({ aiNumber, businessNumber }: { aiNumber: string; busines
   );
 }
 
-/** Collapsible carrier-style table of every forwarding code for the chosen code
- *  family. The step guide covers the common "all calls" case; this lets a user
- *  look up the code for no-answer / busy / unreachable and how to turn each off. */
+// Full code table (no-answer / busy / unreachable + how to turn each off) — the step guide only covers "all calls".
 function ForwardingCodesAccordion({
   family,
   aiNumber,
@@ -470,12 +457,8 @@ function ForwardingCodesAccordion({
   const hasCheck = codeTableHasCheck(family);
   const isAustralia = iso === "au";
   const isTelstra = carrier.id === "telstra";
-  // The destination the user dials TO, in the form their carrier expects: the
-  // national form (0468159801) for a same-country AI number, since the code is a
-  // domestic call and a landline keypad has no "+" to key. When their AI number
-  // isn't assigned yet we show a placeholder token instead of a broken "**21*+#".
-  // US CLASS codes keep their own domestic form (1 + national) for a US number;
-  // every other same-country case uses the plain national form.
+  // Destination in the form the carrier expects: national form for a same-country number (a landline keypad
+  // has no "+"), US CLASS keeps 1 + national; a placeholder token when no AI number yet, not a broken "**21*+#".
   const foreignDest = isForeignDestination(aiNumber, iso);
   const dest = foreignDest
     ? formatDestination(aiNumber, "gsm") // no local form here — stays +…
@@ -536,9 +519,7 @@ function ForwardingCodesAccordion({
               </span>
             </p>
           )}
-          {/* The AI number is in a different country from the phone being forwarded,
-              so it has no local form there — the code keeps the international one,
-              which a landline can't key without its international dial-out prefix. */}
+          {/* AI number is abroad, so the code keeps the international form — a landline needs its dial-out prefix for that. */}
           {foreignDest && hasNumber && (
             <p className="mb-3 flex gap-2 rounded-lg border border-warning/40 bg-warning-tint px-3 py-2 text-xs leading-relaxed text-foreground/85">
               <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
@@ -601,9 +582,7 @@ function ForwardingCodesAccordion({
           <p className="mt-3 text-xs text-muted-foreground">
             Enter a code on your phone's keypad and press call — you'll see or hear a confirmation.
           </p>
-          {/* Carrier-specific caveat, else a reassurance that these are the standard
-              codes shared across the country's major carriers — so switching between
-              them showing the same codes is expected, not a bug. */}
+          {/* Carrier caveat, else reassure that carriers share these codes — same codes after switching isn't a bug. */}
           {carrier.note ? (
             <p className="mt-2 flex gap-2 rounded-lg border border-warning/25 bg-warning-tint px-3 py-2 text-xs leading-relaxed text-foreground/80">
               <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
@@ -617,9 +596,7 @@ function ForwardingCodesAccordion({
             </p>
           )}
 
-          {/* Carrier-doc nuances, verified against Telstra / Optus / Vodafone's own
-              pages — kept as notes so the core codes stay simple + universal. These
-              are Australia-specific, so only shown for AU (see the country note below). */}
+          {/* AU-only carrier nuances (verified against Telstra / Optus / Vodafone docs), kept as notes so the core codes stay universal. */}
           {family === "gsm" && isAustralia && (
             <div className="mt-3 rounded-xl border border-primary/25 bg-primary-tint-soft p-3.5 shadow-[var(--shadow-soft)]">
               <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
@@ -681,9 +658,7 @@ function ForwardingCodesAccordion({
   );
 }
 
-/** The "Turn on" code, rendered with the AI number as a distinct highlighted
- *  token so it's obvious which digits the user supplies vs the fixed carrier code.
- *  Copyable (full dialable string) once the AI number is known. */
+// "Turn on" code with the AI number as a highlighted token (user-supplied digits vs fixed carrier code); copyable once known.
 function ActivateCode({ row, dest, hasNumber }: { row: GsmCodeRow; dest: string; hasNumber: boolean }) {
   if (!row.activate) return <span className="text-muted-foreground">—</span>;
   const { prefix, suffix } = row.activate;
@@ -839,9 +814,7 @@ function VerifySetupCard() {
   );
 }
 
-/** "Info can change" disclaimer shown at the bottom of every tab. `carrier` names
- *  the provider to double-check with (the selected landline carrier); otherwise a
- *  generic "your carrier". */
+// "Info can change" disclaimer; `carrier` names who to double-check with, else a generic "your carrier".
 function CarrierDisclaimer({ carrier }: { carrier?: string }) {
   return (
     <div className="animate-attention-amber flex items-start gap-3 rounded-xl border border-warning/45 bg-warning-tint p-3.5">

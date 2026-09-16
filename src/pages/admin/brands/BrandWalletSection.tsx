@@ -39,11 +39,7 @@ function exportStatement(entries: WalletEntry[]): void {
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  A brand's wallet: what the platform owes it, how that built up, and
- *  what has been paid out. The platform owner records payouts here; the
- *  brand admin only reads.
- * ------------------------------------------------------------------ */
+// Brand wallet: owed, history, payouts. Platform owner records payouts; brand admin is read-only.
 
 export function BrandWalletSection({
   wallet,

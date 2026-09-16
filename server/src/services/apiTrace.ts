@@ -1,24 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  The write side of the API Center.
- *
- *  Every outbound third-party call goes through here so the platform can answer
- *  "is this vendor healthy, what is it costing us, and how close to the quota
- *  are we?" without opening anyone's dashboard.
- *
- *  Three rules shape the whole file:
- *
- *   1. Telemetry never fails the request it measures. Every write is
- *      fire-and-forget through an in-memory buffer; a dead database costs
- *      analytics, never a call.
- *   2. A request never waits on its own telemetry. Rows are batched and flushed
- *      on a timer, so a hot path pays an array push, not a round trip.
- *   3. The freshest facts live in memory. "Last successful request" must feel
- *      instant, so a small per-provider snapshot is updated synchronously and
- *      merged over the (slightly older) database aggregates by apiCenter.ts.
- *
- *  See apiProviders.ts for what a provider *is* and apiCenter.ts for what reads
- *  these rows.
- * ------------------------------------------------------------------ */
+// Write side of the API Center: every outbound vendor call is recorded here. Rules: telemetry never
+// fails or blocks the request it measures (buffered, fire-and-forget), and the freshest facts live in an in-memory snapshot.
 
 import { prisma } from "../prisma.js";
 import { providerDefOrFallback, type ProviderDef } from "./apiProviders.js";
@@ -29,13 +10,7 @@ import { providerDefOrFallback, type ProviderDef } from "./apiProviders.js";
 const FLUSH_AT_ROWS = 50;
 /** …or this often, whichever comes first. */
 const FLUSH_EVERY_MS = 5_000;
-/**
- * Hard ceiling on the buffer. If the database is down, the buffer would grow
- * without bound and take the process with it — so past this point the OLDEST
- * rows are dropped. Losing the oldest telemetry during an outage is strictly
- * better than an OOM, and keeping the newest means the screens still show what
- * is happening right now once the database returns.
- */
+// Hard ceiling: past this the OLDEST rows are dropped. Losing old telemetry during a DB outage beats an OOM.
 const MAX_BUFFER = 5_000;
 
 /** How long request rows are kept. Older rows are pruned by the daily sweep. */
@@ -61,12 +36,7 @@ export interface TraceInput {
   environment?: ApiEnvironment;
   errorCode?: string;
   errorMessage?: string;
-  /**
-   * Billable units consumed — tokens, characters, seconds, SMS segments.
-   * Omit when the call site genuinely cannot measure them; the cost estimate
-   * then falls back to per-request pricing and is reported as such, rather
-   * than silently pretending a token-priced call cost nothing.
-   */
+  /** Billable units (tokens, chars, seconds, segments). Omit when unmeasurable; cost then falls back to per-request pricing rather than pretending the call was free. */
   units?: number;
   /** Rate-limit headroom advertised on the response, when the vendor advertises any. */
   rateLimit?: number | null;
@@ -98,13 +68,8 @@ const PREFIXED_ID_RE = /^[A-Z]{2}[0-9a-f]{30,}$/;
 /** A dated API version segment, e.g. Twilio's `/2010-04-01/`. */
 const DATE_VERSION_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/**
- * Whether a path segment is a phone number. Telephony vendors put them straight
- * in the path, so they have to collapse — but the test has to be tighter than
- * "digits and punctuation", because a dated API version (`/2010-04-01/`) looks
- * exactly like that. Collapsing THAT would merge traffic to different API
- * versions into one row and hide a half-finished migration.
- */
+// Telephony vendors put phone numbers in the path, so they must collapse — but a dated
+// API version (/2010-04-01/) looks similar and collapsing it would hide a half-finished migration.
 function looksLikePhoneNumber(seg: string): boolean {
   if (DATE_VERSION_RE.test(seg)) return false;
   // Digits and the punctuation people write numbers with — nothing else.
@@ -114,15 +79,7 @@ function looksLikePhoneNumber(seg: string): boolean {
   return digits.length >= 7 && digits.length <= 15;
 }
 
-/**
- * Collapse the volatile parts of a path so calls to the same endpoint group into
- * one row. `/call/abc123/recording` and `/call/def456/recording` are the same
- * endpoint for every question the API Center asks; without this the Errors and
- * Logs screens degenerate into a list of unique URLs.
- *
- * Query strings are dropped entirely — they routinely carry keys and phone
- * numbers, and nothing on the API Center groups by them.
- */
+/** Collapses ids in a path so calls to one endpoint group into one row. Query strings are dropped entirely — they routinely carry keys and phone numbers. */
 export function normalizeEndpoint(raw: string): string {
   if (!raw) return "";
   let path = raw;
@@ -164,11 +121,8 @@ let priceCache: Map<string, PriceRow> | null = null;
 let priceCacheAt = 0;
 const PRICE_TTL_MS = 60_000;
 
-/**
- * Per-provider overrides, cached for a minute. Cost has to be computed on the
- * write path (prices change, so a row must record what it cost at the time),
- * and a database read per outbound call would defeat the point of the buffer.
- */
+// Price overrides, cached a minute. Cost is computed on the write path (a row must record
+// what it cost at the time), and a DB read per call would defeat the buffer.
 async function priceRows(): Promise<Map<string, PriceRow>> {
   const now = Date.now();
   if (priceCache && now - priceCacheAt < PRICE_TTL_MS) return priceCache;
@@ -195,15 +149,8 @@ export function invalidateProviderPriceCache(): void {
   priceCacheAt = 0;
 }
 
-/**
- * Micro-USD for one call.
- *
- * `units` is what the vendor actually bills for, and its meaning comes from the
- * provider's {@link ProviderDef.unit}. When the call site couldn't measure units
- * we fall back to one unit per request — right for per-request pricing, and for
- * anything else the provider's `costConfidence` already tells the UI to present
- * the figure as an estimate rather than a bill.
- */
+// Micro-USD for one call. Unmeasured units fall back to one per request; costConfidence
+// already tells the UI to treat that as an estimate.
 function computeCostMicroUsd(def: ProviderDef, units: number, override: number | null | undefined): number {
   const perUnitMicro =
     override ?? (def.defaultUnitCostUsd !== undefined ? Math.round(def.defaultUnitCostUsd * 1_000_000) : 0);
@@ -280,14 +227,7 @@ function scheduleFlush(): void {
   flushTimer.unref?.();
 }
 
-/**
- * Write buffered rows. Safe to call at any time; concurrent calls collapse into
- * one because a second caller sees `flushing` and returns.
- *
- * On failure the batch is DISCARDED rather than requeued: the common cause is a
- * database that is down or slow, and requeueing turns one bad flush into an
- * ever-growing retry loop that competes with real traffic for connections.
- */
+/** Writes buffered rows; concurrent calls collapse into one. A failed batch is DISCARDED, not requeued — retrying against a down DB becomes a retry loop competing with real traffic. */
 export async function flushTraces(): Promise<void> {
   if (flushing || buffer.length === 0) return;
   flushing = true;
@@ -309,9 +249,7 @@ export async function flushTraces(): Promise<void> {
         errorCode: row.errorCode,
         errorMessage: row.errorMessage,
         units: row.units,
-        // Only successful calls are charged for — a 500 from a vendor is not a
-        // billable token, and counting it would quietly inflate the spend figure
-        // exactly when a provider is misbehaving.
+        // Only successful calls cost anything — counting a vendor 500 would inflate spend exactly when they misbehave.
         costMicroUsd: row.ok ? computeCostMicroUsd(def, row.units, override) : 0,
         rateLimit: row.rateLimit,
         rateRemaining: row.rateRemaining,
@@ -329,12 +267,7 @@ export async function flushTraces(): Promise<void> {
 
 /* ------------------------------ Record ----------------------------- */
 
-/**
- * Record one outbound API call. Synchronous, non-throwing, and cheap: it updates
- * the live snapshot and appends to the flush buffer.
- *
- * Call sites should prefer {@link traceFetch}, which fills most of this in.
- */
+/** Records one outbound call. Synchronous, non-throwing and cheap; prefer traceFetch, which fills most of this in. */
 export function recordApiCall(input: TraceInput): void {
   try {
     const provider = input.provider;
@@ -395,11 +328,8 @@ function toInt(value: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Vendors express "reset" three different ways: a unix timestamp, seconds from
- * now, or an ISO date. Guess by magnitude — a value under a day's worth of
- * seconds is a duration, anything larger is an absolute time.
- */
+// "Reset" arrives as a unix timestamp, seconds-from-now, or ISO date. Guess by magnitude:
+// under a day's worth of seconds is a duration, anything larger is absolute.
 function parseReset(value: string | null): Date | null {
   if (!value) return null;
   const n = Number(value);
@@ -415,16 +345,8 @@ function parseReset(value: string | null): Date | null {
 
 const NO_RATE_LIMIT = { rateLimit: null, rateRemaining: null, rateResetAt: null };
 
-/**
- * Pull whatever rate-limit headroom this vendor advertises, per its registry entry.
- *
- * Defensive about the response object on purpose. `traceFetch` must never throw
- * into the call it is measuring (rule 1 in this file's header), and it does not
- * always receive a spec-complete `Response`: a test double, an SDK's
- * fetch-alike, or a polyfill may omit `headers` entirely. Reading headroom is
- * the least important thing this function does — losing it must never cost the
- * caller its result.
- */
+// Defensive on purpose: SDK fetch-alikes and test doubles may omit `headers` entirely,
+// and the tracer must never throw into the call it measures.
 function readRateLimitHeaders(def: ProviderDef, headers: Headers | undefined | null) {
   const spec = def.rateLimitHeaders;
   if (!spec || !headers || typeof headers.get !== "function") return NO_RATE_LIMIT;
@@ -451,18 +373,7 @@ export interface TraceFetchOptions {
   endpoint?: string;
 }
 
-/**
- * `fetch` that records itself. A drop-in replacement at any vendor call site:
- *
- *   const res = await traceFetch("vapi", `${VAPI_BASE}/assistant`, { method: "POST", … });
- *
- * The response is returned untouched and errors propagate unchanged, so wrapping
- * an existing call is a one-word edit and cannot alter its behaviour. A transport
- * failure (DNS, TLS, timeout) is recorded as status 0 and re-thrown.
- *
- * `unitsFromResponse` clones the response before reading it, so the caller still
- * gets an unconsumed body.
- */
+/** Drop-in `fetch` that records itself. Response and errors pass through untouched; transport failures record as status 0 and re-throw; unitsFromResponse reads a clone so the body stays unconsumed. */
 export async function traceFetch(
   provider: string,
   url: string,
@@ -533,13 +444,7 @@ export async function traceFetch(
   }
 }
 
-/**
- * Time an arbitrary async operation and record it — for vendors reached through
- * an SDK rather than `fetch` (Stripe, nodemailer, the Twilio client), where
- * there is no Response to inspect.
- *
- * The operation's result and errors pass through untouched.
- */
+/** Times and records an SDK call (Stripe, nodemailer, Twilio) where there's no Response to inspect. Result and errors pass through untouched. */
 export async function traceCall<T>(
   provider: string,
   endpoint: string,
@@ -580,10 +485,7 @@ export async function traceCall<T>(
 
 /* ----------------------------- Retention --------------------------- */
 
-/**
- * Drop request rows past the retention window. Called by the daily scheduler.
- * Returns the number deleted so the sweep can be logged.
- */
+/** Drops request rows past the retention window; returns the count so the sweep can be logged. */
 export async function pruneApiRequestLogs(days = RETENTION_DAYS): Promise<number> {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   try {

@@ -18,15 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { api, ApiError, type Brand, type BrandAdmin } from "@/lib/api";
 
-/**
- * Who runs this brand day to day.
- *
- * A brand ADMIN is scoped to their own tenant: they manage that brand's
- * customers, plans and staff, and cannot see another brand or the platform's
- * integration keys. Removing someone here detaches them from the brand rather
- * than deleting the account — the person keeps their login, they just leave the
- * tenant.
- */
+/** Brand admins — scoped to their own tenant, never other brands or platform keys. Removing detaches from the brand; the account survives. */
 export function BrandAdminsSection({ brand }: { brand: Brand }) {
   const [rows, setRows] = useState<BrandAdmin[] | null>(null);
   const [adding, setAdding] = useState(false);

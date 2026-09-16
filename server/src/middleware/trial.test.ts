@@ -6,11 +6,8 @@ vi.mock("../services/trial.js", async () => {
   return {
     ...actual,
     getEntitlement: vi.fn(),
-    // Mocked too, or this suite silently needs a live database: validateTrial
-    // calls it before deciding, it does a real Prisma read (and a Stripe
-    // round-trip), and when that throws the middleware takes its catch branch —
-    // so the 403 assertions failed for a reason that had nothing to do with the
-    // logic under test. What this file tests is the decision, not the reconcile.
+    // Mocked too, or the suite needs a live DB: the real reconcile throws, the middleware takes its catch
+    // branch, and the 403 assertions fail for an unrelated reason.
     reconcileSubscription: vi.fn(async () => undefined),
   };
 });

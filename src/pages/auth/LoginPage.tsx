@@ -54,17 +54,13 @@ export default function LoginPage() {
   const suspendedNotice = useAuthStore((s) => s.suspendedNotice);
   const clearSuspendedNotice = useAuthStore((s) => s.clearSuspendedNotice);
   const resetOnboarding = useOnboardingStore((s) => s.reset);
-  // The white-label tenant this door belongs to (null on the platform's own).
-  // It may close self-serve sign-up and put its own words on this screen. The
-  // platform's own door takes no sign-ups at all — every customer is some
-  // brand's — so it reads as closed too, once the branding fetch has settled.
+  // Brand door (null on the platform's own). A brand may close self-serve sign-up; the platform
+  // door takes no sign-ups at all (every customer is some brand's), so it reads closed once branding loads.
   const brand = useBrandingStore((s) => s.brand);
   const brandLoaded = useBrandingStore((s) => s.loaded);
   const inviteOnly = brand ? brand.signupMode === "invite" : brandLoaded;
 
-  // /login must stay out of search results — X-Robots-Tag in vercel.json is the
-  // server-side signal; this meta covers dev and any non-Vercel serving. Removed
-  // on unmount so it never leaks onto other routes.
+  // Keep /login out of search results (vercel.json X-Robots-Tag covers prod; this covers dev/non-Vercel). Removed on unmount so it doesn't leak to other routes.
   useEffect(() => {
     const meta = document.createElement("meta");
     meta.name = "robots";
@@ -94,9 +90,7 @@ export default function LoginPage() {
   const clearError = (field: string) =>
     setErrors((e) => (e[field] ? { ...e, [field]: "" } : e));
 
-  // If a session already exists (e.g. logged in in another tab), resolve it
-  // and bounce straight to the dashboard — never show the login form to an
-  // already-authenticated user.
+  // Existing session (e.g. another tab) → resolve and bounce; never show the form to an authed user.
   useEffect(() => {
     if (status === "idle") void loadMe();
   }, [status, loadMe]);
@@ -150,9 +144,8 @@ export default function LoginPage() {
     if (path === "/onboarding") {
       const ob = useOnboardingStore.getState();
       ob.markAccountCreated();
-      // Sign-out cleared the client-only onboarding cache, so rebuild the business
-      // context from the saved account/profile — otherwise the resumed steps show
-      // up empty (or the website guard bounces the page into a blank loop).
+      // Sign-out wiped the client-only onboarding cache; rebuild it from the profile or the
+      // resumed steps come up empty (and the website guard can loop).
       const p = user?.profile;
       if (p) {
         const website = p.website?.trim() ?? "";

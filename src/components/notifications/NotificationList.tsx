@@ -34,11 +34,7 @@ import {
   type NotificationFilter,
 } from "./notificationGroups";
 
-/* ------------------------------------------------------------------ *
- *  Shared building blocks for the notifications slide-over and the
- *  "View all" page: the per-type icon, the filter chips, the grouped
- *  list, and the click handler that opens a notification's deep link.
- * ------------------------------------------------------------------ */
+// Shared pieces for the notifications slide-over and the "View all" page.
 
 /* Per-type icon in a soft tinted circle — the same treatment everywhere, so a
  * missed call always reads red, billing amber, a system notice blue. */
@@ -172,11 +168,7 @@ export function NotificationFilterChips({
 
 /* ---------- Opening a notification ---------- */
 
-/**
- * Mark a notification read and follow its deep link. Admin links are written
- * as `/dashboard/admin/...`; the platform owner's admin pages live under
- * `/superadmin`, so rewrite onto their base (a no-op for everyone else).
- */
+/** Mark read and follow the deep link. Admin links get rewritten to /superadmin for the platform owner. */
 export function useOpenNotification() {
   const navigate = useNavigate();
   const role = useAuthStore((s) => s.user?.role);

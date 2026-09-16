@@ -1,18 +1,5 @@
-/* ------------------------------------------------------------------ *
- *  Marketing analytics — GTM data layer helper.
- *
- *  Pushes a NAMED custom event onto window.dataLayer so Google Tag Manager can
- *  trigger GA4 / Google Ads tags on it. We push our own events (instead of
- *  relying on GTM's generic auto events like `gtm.formSubmit`) so each key
- *  interaction has a unique, trackable name and can't be confused with any other
- *  form on the site.
- *
- *  The GTM container itself is NOT in this codebase — it is pasted into Admin →
- *  Settings → SEO & Scripts and injected at runtime by SeoManager. This only
- *  feeds the data layer, which is safe to do before GTM loads: the array is
- *  created here if missing and GTM replays everything already queued in it once
- *  the container boots, so no event is lost to the injection delay.
- * ------------------------------------------------------------------ */
+// GTM data layer helper. Named events (not GTM's generic auto events) so each interaction is unique. The
+// container itself is pasted in Admin > Settings and injected by SeoManager; GTM replays queued events on boot.
 
 declare global {
   interface Window {
@@ -20,18 +7,10 @@ declare global {
   }
 }
 
-/**
- * Which path through the funnel an event happened on — the standalone /subscribe
- * page or the in-dashboard quick-setup wizard. Both render the same plan/card
- * components, so this is pushed as `plan_context` to keep them apart in a report.
- */
+/** Funnel path an event came from; pushed as `plan_context` since both render the same plan/card components. */
 export type FunnelContext = "subscribe_page" | "quick_setup";
 
-/**
- * Push a custom event to the GTM data layer. Safe to call anywhere — if GTM /
- * the data layer isn't present yet, this initialises the array so the event
- * isn't lost, and it never throws (analytics must never break a user flow).
- */
+/** Push a GTM event. Creates the data layer if GTM hasn't loaded yet and never throws; analytics must not break a flow. */
 export function trackEvent(event: string, params: Record<string, unknown> = {}): void {
   if (typeof window === "undefined") return;
   try {
@@ -42,11 +21,7 @@ export function trackEvent(event: string, params: Record<string, unknown> = {}):
   }
 }
 
-/**
- * SHA-256 hex of a value, normalised (trimmed + lowercased) the way Google's
- * Enhanced Conversions expects. Returns "" for an empty value, and "" (never
- * throws) if Web Crypto isn't available — analytics must never break a flow.
- */
+/** SHA-256 hex, trimmed + lowercased as Enhanced Conversions expects. "" for empty or when Web Crypto is missing; never throws. */
 export async function sha256Hex(value: string): Promise<string> {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return "";
@@ -60,12 +35,8 @@ export async function sha256Hex(value: string): Promise<string> {
   }
 }
 
-/**
- * Build a hashed copy of the signup fields for Enhanced Conversions — SHA-256
- * so the raw PII never leaves the browser in the clear. Phone/business numbers
- * are stripped to digits (+) first so the hash matches Google's normalisation.
- * Never throws; unavailable-crypto just yields empty strings.
- */
+/** Hashed signup fields for Enhanced Conversions so raw PII never leaves the browser; phone numbers are
+ *  stripped to digits/+ first to match Google's normalisation. Never throws. */
 export async function hashUserData(u: {
   name?: string;
   email?: string;

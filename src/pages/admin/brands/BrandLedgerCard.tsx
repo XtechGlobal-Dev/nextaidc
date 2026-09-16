@@ -6,11 +6,7 @@ import { api, type BrandLedger } from "@/lib/api";
 import { formatMoney } from "@/lib/currency";
 import { formatDateDMY } from "@/lib/utils";
 
-/**
- * What this brand's customers paid, and how each payment split between the
- * platform and the brand — read from the platform ledger, the one place the
- * split is written down. The wallet above is credited from these rows.
- */
+/** Platform/brand split per payment, from the platform ledger. The wallet is credited from these rows. */
 export function BrandLedgerCard({ brandId }: { brandId: string }) {
   const [ledger, setLedger] = useState<BrandLedger | null>(null);
 

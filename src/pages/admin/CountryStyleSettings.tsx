@@ -29,9 +29,7 @@ function Flag({ code }: { code: string }) {
   );
 }
 
-/** Searchable dropdown for picking a country to add. The panel is PORTALED to
- *  <body> with fixed positioning so the card's `overflow-hidden` (and the cards
- *  below it) can never clip it — the same approach Radix Select uses. */
+// Country picker. Panel is portaled to <body> with fixed positioning so the card's overflow-hidden can't clip it.
 function AddCountryPicker({
   options,
   onPick,
@@ -150,13 +148,7 @@ function AddCountryPicker({
   );
 }
 
-/**
- * Admin editor for per-country "regional style" blocks. Each block is appended
- * to a customer's live assistant prompt based on the customer's country, so the
- * assistant sounds local (e.g. an Australian receptionist for AU callers). The
- * built-in defaults ship for the main English-speaking markets; an admin can
- * tweak them or add any other country here.
- */
+/** Per-country "regional style" blocks appended to the assistant prompt by customer country. */
 export function CountryStyleSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

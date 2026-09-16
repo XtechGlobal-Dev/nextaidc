@@ -14,12 +14,8 @@ import {
   normalizeIndustryWhitespace,
 } from "../lib/industries.js";
 
-/* ------------------------------------------------------------------ *
- *  Platform settings — integration API keys.
- *  Effective value = DB override → env fallback. Kept in an in-memory
- *  cache (loaded at startup, refreshed on save) so services read it
- *  synchronously. Secrets are encrypted at rest and never returned raw.
- * ------------------------------------------------------------------ */
+// Platform settings: DB override -> env fallback, held in an in-memory cache so reads
+// are synchronous. Secrets are encrypted at rest and never returned raw.
 
 export interface FieldDef {
   key: string; // e.g. "vapi.apiKey"
@@ -77,9 +73,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       { key: "openai.model", label: "Model", secret: false, envVar: "OPENAI_MODEL", placeholder: "gpt-5" },
     ],
   },
-  // Stripe is intentionally NOT listed here — it's configured via the server
-  // environment only (STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET), never from the
-  // admin Settings UI. See services/stripe.ts, which reads env directly.
+  // Stripe is deliberately absent — env-only, never editable from the admin UI.
   {
     id: "email",
     name: "Email (SMTP)",
@@ -150,9 +144,7 @@ const effective: Record<string, string> = {};
 /** Keys whose effective value came from a DB row (i.e. an admin saved it). */
 const dbKeys = new Set<string>();
 
-/** (Re)load effective settings: env defaults overlaid with DB values. Retries a
- *  few times so a cold/​waking DB (e.g. Neon scale-to-zero) at boot doesn't leave
- *  every integration showing "not configured". */
+/** (Re)loads the cache. Retries so a cold Neon DB at boot doesn't leave everything "not configured". */
 export async function loadSettings(): Promise<void> {
   dbKeys.clear();
   for (const f of ALL_FIELDS.values()) {
@@ -180,18 +172,8 @@ export async function loadSettings(): Promise<void> {
   }
 }
 
-/* --------------------- Per-brand setting overrides ----------------------- *
- *  A white-label brand can bring its OWN sending identity — its SMTP relay, its
- *  Twilio sender, its WhatsApp number — so mail and messages a tenant's
- *  customers receive come from the tenant, not from the platform. Overrides use
- *  the SAME key namespace as the platform settings above, so a brand only
- *  stores what it actually white-labels and anything it leaves blank keeps
- *  falling through to the platform value.
- *
- *  Held in the same style of in-memory cache as the platform settings (loaded
- *  at boot, refreshed on save) so every read stays synchronous — services deep
- *  in a call path can resolve a brand's sender without becoming async.
- * ------------------------------------------------------------------------- */
+// Per-brand overrides (SMTP, Twilio, WhatsApp sender) in the same key namespace; blank
+// falls through to the platform value. Cached in memory so reads stay synchronous.
 const brandEffective = new Map<string, Record<string, string>>();
 
 /** (Re)load every brand's setting overrides into the cache. */
@@ -216,14 +198,7 @@ export async function loadBrandSettings(): Promise<void> {
   }
 }
 
-/**
- * Synchronous effective value.
- *
- * Resolution order: this brand's override → platform DB override → env
- * fallback. Passing no brand (or a brand with nothing set for the key) gives
- * exactly the platform behaviour that existed before brands, so every existing
- * call site keeps working unchanged.
- */
+/** Sync effective value: brand override -> platform DB -> env. No brand = plain platform behaviour. */
 export function getEffective(key: string, brandId?: string | null): string {
   if (brandId) {
     const own = brandEffective.get(brandId)?.[key];
@@ -238,11 +213,8 @@ export function getBrandOverride(brandId: string, key: string): string {
   return brandEffective.get(brandId)?.[key] ?? "";
 }
 
-/* --------------------- Global master-prompt template --------------------- *
- *  Admin-editable scaffold wrapped around every assistant's compiled prompt.
- *  Stored as a plain (non-field) platform setting; empty string means "use the
- *  built-in DEFAULT_PROMPT_TEMPLATE". Reads are synchronous off the cache so the
- *  prompt compiler stays a pure, sync function. */
+// Master-prompt template: admin scaffold around every compiled prompt. "" = built-in default.
+// Read synchronously so the prompt compiler stays pure.
 const PROMPT_TEMPLATE_KEY = "prompt.masterTemplate";
 const PROMPT_TEMPLATE_HISTORY_KEY = "prompt.masterTemplateHistory";
 /** How many replaced template versions we keep for the admin to revert to. */
@@ -268,9 +240,7 @@ export function getDisplayPromptTemplate(): string {
   return getPromptTemplate().trim() || DEFAULT_PROMPT_TEMPLATE;
 }
 
-/** The template live-call prompts are compiled with on the wire (Vapi/WhatsApp):
- *  always the compact token-efficient scaffold. Customers never see this — the
- *  per-customer sections (identity, services, FAQs, rules) are still included. */
+/** Template for live prompts on the wire: always the compact scaffold (customers never see it). */
 export function getVapiPromptTemplate(): string {
   return DEFAULT_PROMPT_TEMPLATE_SHORT;
 }
@@ -287,9 +257,7 @@ export function getPromptTemplateHistory(): PromptTemplateVersion[] {
   }
 }
 
-/** Save (or, with an empty string, reset) the master-prompt template, then
- *  refresh the in-memory cache so live compiles pick it up immediately.
- *  The version being replaced is pushed onto the history trail first. */
+/** Saves (or resets with "") the template, pushing the replaced version onto the history trail first. */
 export async function setPromptTemplate(value: string, savedBy = ""): Promise<void> {
   const v = (value ?? "").trim();
   const prev = getPromptTemplate().trim();
@@ -312,12 +280,8 @@ export async function setPromptTemplate(value: string, savedBy = ""): Promise<vo
   await loadSettings();
 }
 
-/* --------------------- Per-country regional styles ----------------------- *
- *  Admin-editable per-country persona blocks appended to the live assistant's
- *  prompt so it sounds local to the caller's country. Stored as a JSON map
- *  { ISO: text } of OVERRIDES only; a country absent from the map uses the
- *  built-in default (lib/countryStyles.ts). An empty-string entry deliberately
- *  disables that country's block. Reads are synchronous off the cache. */
+// Per-country persona blocks. Stored as a JSON map of OVERRIDES only (absent = built-in
+// default; "" deliberately disables that country).
 const COUNTRY_STYLES_KEY = "prompt.countryStyles";
 
 /** The admin's raw override map (ISO → text), keys normalised to uppercase.
@@ -344,9 +308,7 @@ export function getEffectiveCountryStyles(): Record<string, string> {
   return { ...BUILTIN_COUNTRY_STYLES, ...getCountryStyleOverrides() };
 }
 
-/** Resolve the effective regional style text for one country: the admin
- *  override wins (including a deliberate empty string), else the built-in,
- *  else "" (→ no regional block appended). */
+/** Effective style for one country: override wins (even a deliberate ""), else built-in, else "". */
 export function getCountryStyle(iso: string): string {
   const code = normalizeCountry(iso);
   if (!code) return "";
@@ -355,9 +317,7 @@ export function getCountryStyle(iso: string): string {
   return BUILTIN_COUNTRY_STYLES[code] ?? "";
 }
 
-/** Save the per-country override map, then refresh the cache. Only entries that
- *  differ from the built-in default are kept, so the stored map stays minimal
- *  and future default changes still flow through for untouched countries. */
+/** Saves the override map, keeping only entries that differ from the built-in so future default changes still flow through. */
 export async function setCountryStyles(map: Record<string, string>, _savedBy = ""): Promise<void> {
   const overrides: Record<string, string> = {};
   for (const [k, val] of Object.entries(map ?? {})) {
@@ -377,12 +337,8 @@ export async function setCountryStyles(map: Record<string, string>, _savedBy = "
   await loadSettings();
 }
 
-/* ----------------------------- Industry list ----------------------------- *
- *  The AI Brain "Industry / Niche" options = the built-in taxonomy plus any
- *  admin-approved custom entries. A customer can propose a new industry when
- *  none fits; proposals wait in a pending queue until an admin approves (then it
- *  joins the public list everyone sees) or rejects it. Both lists live as JSON
- *  arrays in platform settings; reads are synchronous off the settings cache. */
+// Industry list: built-ins plus admin-approved customs. Customer proposals sit in a
+// pending queue until approved or rejected. Both lists are JSON in platform settings.
 const INDUSTRIES_APPROVED_KEY = "industries.approved";
 const INDUSTRIES_PENDING_KEY = "industries.pending";
 /** Safety cap so the queue can't grow unbounded from spam submissions. */
@@ -443,10 +399,7 @@ export function getIndustryAdminView(): { approved: string[]; pending: PendingIn
 
 export type IndustrySuggestOutcome = "submitted" | "exists" | "pending";
 
-/** A customer proposes a custom industry (already sanitized by the caller).
- *  - "exists":  already a built-in / approved option → nothing to do
- *  - "pending": already awaiting review → deduped, nothing added
- *  - "submitted": queued for admin review */
+/** Customer proposes an industry (caller sanitizes). "exists" / "pending" mean nothing was added. */
 export async function suggestIndustry(
   cleaned: string,
   user: { id: string; email: string },
@@ -488,11 +441,7 @@ export async function removeApprovedIndustry(value: string): Promise<void> {
   await writePlatformJson(INDUSTRIES_APPROVED_KEY, approved);
 }
 
-/* -------------- Gender-matched default assistant names ------------------- *
- *  At onboarding, an assistant whose name is still the default is renamed to
- *  match its picked voice's gender — a male voice → the "male" name, a female
- *  voice → the "female" name. Both are admin-editable; blank falls back to the
- *  built-in defaults below. */
+// Gender-matched default assistant names at onboarding. Admin-editable; blank = built-in.
 const AGENT_NAME_MALE_KEY = "agent.defaultNameMale";
 const AGENT_NAME_FEMALE_KEY = "agent.defaultNameFemale";
 export const DEFAULT_AGENT_NAME_MALE = "Mark";
@@ -523,19 +472,11 @@ export async function setAgentDefaultNames(male: string, female: string): Promis
   await loadSettings();
 }
 
-/* --------------------- Global default agent LLM model -------------------- *
- *  The provider + model every provisioned Vapi assistant is created/synced with.
- *  Stored as two plain platform settings; read synchronously off the cache so
- *  the assistant-payload builder stays a pure, sync function. Falls back to the
- *  built-in default (Claude Haiku 4.5) when unset, or if a previously-saved value
- *  is no longer in the catalogue (e.g. an option was removed). */
+// Default agent LLM for every provisioned assistant. Read synchronously so the payload builder stays pure.
 const AGENT_LLM_PROVIDER_KEY = "agent.llmProvider";
 const AGENT_LLM_MODEL_KEY = "agent.llmModel";
 
-/** Effective default LLM for new/synced assistants (admin override → built-in).
- *  Returns whatever the admin saved (the PUT route validates it against Vapi's
- *  live catalogue at save time), falling back to the built-in default when unset.
- *  Kept synchronous so the assistant-payload builder stays a pure, sync function. */
+/** Default LLM: admin override (validated against Vapi's catalogue at save time) -> built-in. */
 export function getAgentLlm(): { provider: string; model: string } {
   const provider = getEffective(AGENT_LLM_PROVIDER_KEY).trim();
   const model = getEffective(AGENT_LLM_MODEL_KEY).trim();
@@ -560,11 +501,8 @@ export async function setAgentLlm(provider: string, model: string): Promise<void
   await loadSettings();
 }
 
-/* ----------------------- Transcriber (STT) fallback ---------------------- *
- *  The PRIMARY transcriber stays auto-chosen by language. These settings add
- *  the admin's fallback: an optional preferred provider/model (tried first) and
- *  an "auto fallback" toggle (we then also auto-pick a capable backup). Applied
- *  to every assistant's transcriber.fallbackPlan on create/sync. */
+// Transcriber fallback: the primary stays auto-chosen by language; these add the admin's
+// preferred fallback and an auto-fallback toggle, applied to every assistant's fallbackPlan.
 const TRANSCRIBER_AUTO_FALLBACK_KEY = "transcriber.autoFallback";
 const TRANSCRIBER_FALLBACK_PROVIDER_KEY = "transcriber.fallbackProvider";
 const TRANSCRIBER_FALLBACK_MODEL_KEY = "transcriber.fallbackModel";
@@ -601,20 +539,8 @@ export async function setTranscriberFallback(input: {
   await loadSettings();
 }
 
-/* --------------------------- Onboarding: card wall ------------------------ *
- *  Whether a NEW signup must put a card on file before the dashboard opens.
- *
- *  Read ONCE per signup (auth.routes.ts) and snapshotted onto the Profile row as
- *  `cardRequiredAtSignup` — never consulted at runtime by any gate. That is what
- *  makes the policy non-retroactive: flipping this toggle changes what the NEXT
- *  signup gets and nothing else, so a customer already using the app can never be
- *  walled off by an admin click.
- *
- *  Deliberately async and reading the row directly rather than going through the
- *  sync `getEffective` cache: that cache only refreshes at boot and after a local
- *  save, so on a multi-instance deploy a flip on one instance would keep stamping
- *  the stale value on the others until restart. The signup handler is already
- *  async and DB-bound, so the extra read costs nothing that matters. */
+// Card wall for NEW signups, snapshotted onto the profile at signup and never read by a runtime
+// gate — flipping it can't wall an existing customer. Reads the row, not the cache, for multi-instance.
 export const ONBOARDING_CARD_REQUIRED_KEY = "onboarding.cardRequired";
 
 /** True when new signups must add a card before they get dashboard access.
@@ -622,10 +548,7 @@ export const ONBOARDING_CARD_REQUIRED_KEY = "onboarding.cardRequired";
 export async function getOnboardingCardRequired(
   brandId: string | null | undefined = currentBrandId(),
 ): Promise<boolean> {
-  // A white-label brand may set its own policy for its sign-ups; the platform
-  // setting is the fallback. Resolved through a dynamic import because
-  // brands.ts imports this module — a static import back would be a cycle for
-  // the sake of one lookup.
+  // Brand policy first, platform as fallback. Dynamic import because brands.ts imports this module.
   if (brandId) {
     const { cachedBrand } = await import("./brands.js");
     const own = brandCardRequired(cachedBrand(brandId));
@@ -638,9 +561,7 @@ export async function getOnboardingCardRequired(
   return row?.value.trim() === "true";
 }
 
-/** Save the card-required policy for FUTURE signups, then refresh the cache so
- *  anything reading it synchronously stays coherent. Existing accounts are
- *  untouched by design — their snapshot already decided their treatment. */
+/** Saves the card policy for FUTURE signups only — existing accounts keep their snapshot. */
 export async function setOnboardingCardRequired(enabled: boolean): Promise<void> {
   const value = enabled ? "true" : "false";
   await prisma.platformSetting.upsert({
@@ -656,15 +577,7 @@ function isConfigured(integ: IntegrationDef, brandId?: string | null): boolean {
   return integ.required.every((k) => getEffective(k, brandId).trim().length > 0);
 }
 
-/**
- * Is this integration usable for the given tenant?
- *
- * The brand-aware form of `integrationsStatus()[id]`, and the one every SENDER
- * must gate on. A white-label brand can bring its own SMTP relay or Twilio
- * account while the platform has none configured at all — checking only the
- * platform would refuse to send for a brand that is, in fact, fully set up.
- * With no brand it answers exactly as before.
- */
+/** Brand-aware `integrationsStatus()[id]` — every SENDER must gate on this, since a brand may be fully set up while the platform has nothing configured. */
 export function integrationConfiguredFor(id: string, brandId?: string | null): boolean {
   const integ = INTEGRATIONS.find((i) => i.id === id);
   return integ ? isConfigured(integ, brandId) : false;
@@ -710,10 +623,7 @@ export function integrationsView() {
   }));
 }
 
-/**
- * Save submitted field values. An empty or mask-looking value means "unchanged"
- * and is skipped (all fields are masked now). Refreshes the cache afterwards.
- */
+/** Saves field values. Empty or mask-looking values mean "unchanged" and are skipped. */
 export async function saveIntegrations(updates: Record<string, string>): Promise<void> {
   for (const [key, raw] of Object.entries(updates)) {
     const f = ALL_FIELDS.get(key);
@@ -744,11 +654,7 @@ export async function setSettingValue(key: string, value: string): Promise<void>
   await loadSettings();
 }
 
-/* ------------------------------ Voice provider ---------------------------- *
- *  Both TTS providers (Deepgram + ElevenLabs) run side-by-side via Vapi — there is
- *  no global toggle. The provider for any voice is decided by the voice id itself
- *  (see providerForVoiceId in services/voices.ts). This type is the shared union.
- * -------------------------------------------------------------------------- */
+// Both TTS providers run side-by-side; the voice id decides (providerForVoiceId), no global toggle.
 export type VoiceProvider = "deepgram" | "elevenlabs";
 
 /** Remove an integration's stored values from the DB, reverting to env fallback. */
@@ -761,13 +667,8 @@ export async function clearIntegration(integrationId: string): Promise<void> {
   await loadSettings();
 }
 
-/* -------------------- Brand-level messaging integrations ------------------ *
- *  Which integrations a brand may white-label. Deliberately NOT every one:
- *  Vapi, OpenAI, Deepgram/ElevenLabs and the CRM are platform infrastructure
- *  billed to the platform and are configured once by the SUPER_ADMIN. What a
- *  brand overrides is the part its customers actually SEE — the address mail
- *  arrives from, the number texts come from, the WhatsApp sender.
- * ------------------------------------------------------------------------- */
+// What a brand may white-label: only the sender identity its customers SEE. Vapi, OpenAI,
+// TTS and the CRM are platform infrastructure billed to the platform, so they're excluded.
 export const BRAND_INTEGRATION_IDS = ["email", "twilio", "whatsapp"] as const;
 export type BrandIntegrationId = (typeof BRAND_INTEGRATION_IDS)[number];
 
@@ -783,12 +684,7 @@ export function isBrandOverridableKey(key: string): boolean {
   return BRAND_FIELDS.has(key);
 }
 
-/**
- * Admin-facing view of ONE brand's messaging overrides. Every field reports
- * both what the brand set (masked, never raw) and whether it is currently
- * inheriting the platform value — so the operator can see at a glance which
- * channels are genuinely white-labelled and which still send as the platform.
- */
+/** Admin view of one brand's overrides: masked value plus whether it's inheriting the platform's. */
 export function brandIntegrationsView(brandId: string) {
   return BRAND_INTEGRATIONS.map((i) => {
     const fields = i.fields.map((f) => {
@@ -816,12 +712,7 @@ export function brandIntegrationsView(brandId: string) {
   });
 }
 
-/**
- * Save a brand's overrides. Same masked-field contract as the platform form: an
- * empty or mask-looking value means "unchanged" and is skipped. To hand a key
- * back to the platform, pass the sentinel "__inherit__" — that deletes the row
- * rather than storing a blank that would read as a deliberately empty sender.
- */
+/** Sentinel that deletes a brand override row — storing a blank would read as a deliberately empty sender. */
 export const INHERIT_SENTINEL = "__inherit__";
 
 export async function saveBrandIntegrations(

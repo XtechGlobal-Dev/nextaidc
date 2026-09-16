@@ -74,9 +74,7 @@ export default function AdminResellersPage() {
   const [saving, setSaving] = useState(false);
   const [toDelete, setToDelete] = useState<Reseller | null>(null);
 
-  // Capability gates — ADMIN passes all; STAFF only where the role grants it.
-  // Denied buttons are omitted from the DOM (not just hidden) and the mutating
-  // handlers no-op as a defensive backstop.
+  // Capability gates (ADMIN passes all). Denied buttons are omitted from the DOM and handlers no-op.
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreate = hasPermission("resellers.create");
   const canEdit = hasPermission("resellers.edit");
@@ -93,9 +91,7 @@ export default function AdminResellersPage() {
     setPageSize,
   } = usePagination(rows ?? EMPTY_RESELLERS);
 
-  // Re-runs on each live tick. On a background refresh (liveTick > 0) we keep the
-  // existing rows on failure and stay quiet, so a transient error never wipes the
-  // table or spams toasts.
+  // Background refreshes (liveTick > 0) keep existing rows and stay quiet on failure.
   const liveTick = useLiveTick();
   useEffect(() => {
     let active = true;

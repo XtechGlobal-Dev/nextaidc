@@ -1,12 +1,6 @@
 import "dotenv/config";
 
-/** One-off sweep: move accounts still on the OLD default business hours
- *  (7:00am–5:00pm) to the new 9:00am–5:00pm default. Only exact-match configs
- *  are touched, so any owner who set custom hours is left untouched.
- *
- *  Note: this updates the structured rules.businessHours field. The compiled
- *  master prompt (and the live Vapi agent) refresh on the account's next
- *  Save Changes / sync, same as the other agent-config backfills. */
+// One-off: move exact old-default hours (7–5) to 9–5. Custom hours untouched; prompt refreshes on next save/sync.
 // A brand's workspace lives in the brand's database (phase 6): BRAND=<slug> picks it.
 import { prisma } from "./_brandDb.js";
 

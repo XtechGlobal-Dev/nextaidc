@@ -1,6 +1,4 @@
-/** Pure paging maths shared by the `<Pagination>` control and `usePagination`.
- *  Kept free of React so both the client-side (slice an array) and server-side
- *  (send page + pageSize to the API) callers can use the same rules. */
+// Pure paging maths, React-free so client-side slicing and server-side page/pageSize callers share one set of rules.
 
 /** Record-count choices offered by the "Rows per page" selector. */
 export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
@@ -46,15 +44,8 @@ function span(from: number, to: number): number[] {
   return Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
 }
 
-/** Which page buttons to render, at most `maxButtons` slots wide.
- *
- *  The first and last page are always reachable; a run around the current page
- *  slides between them and anything skipped collapses into a "gap":
- *
- *    pageWindow(1, 10)  → [1, 2, 3, 4, 5, "gap", 10]
- *    pageWindow(5, 10)  → [1, "gap", 4, 5, 6, "gap", 10]
- *    pageWindow(10, 10) → [1, "gap", 6, 7, 8, 9, 10]
- */
+/** Page buttons to render, at most `maxButtons` wide. First/last always present, a run slides around the
+ *  current page, skipped pages collapse to "gap": pageWindow(5, 10) -> [1, "gap", 4, 5, 6, "gap", 10]. */
 export function pageWindow(page: number, totalPages: number, maxButtons = 7): PageToken[] {
   const last = Math.max(1, Math.floor(totalPages) || 1);
   // Below 5 slots there's no room for first + gap + current + gap + last.

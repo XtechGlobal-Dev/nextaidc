@@ -31,12 +31,7 @@ interface Props {
   className?: string;
 }
 
-/**
- * Guided call-forwarding instructions. Shows the "existing number → AI number"
- * summary, a mode toggle (all vs overflow), country + carrier selectors, and the
- * exact copy-paste dial codes with steps. Pure UI over the buildForwarding()
- * engine — reused in Settings, the go-live step and the sidebar help dialog.
- */
+/** Guided call-forwarding instructions with copy-paste dial codes. Pure UI over buildForwarding(). */
 export default function ForwardingInstructions({
   aiNumber,
   businessNumber,

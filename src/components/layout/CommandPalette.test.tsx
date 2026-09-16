@@ -7,16 +7,8 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { ENTITLEMENTS_CACHE_KEY } from "@/lib/planFeatures";
 import type { AuthUser } from "@/lib/api";
 
-/* The palette is a second copy of the navigation, so it can drift from the
- * sidebar and from the route guards. These tests pin the rule that matters:
- * a row is offered ONLY when that role could actually open the page.
- *
- *   - STAFF have no customer profile  → RequireCustomer bounces them off every
- *     customer module, so none may be listed.
- *   - ADMIN owns no subscription      → Plans & Billing is hidden (sidebar too).
- *   - STAFF see only their granted sections; ADMIN-only areas (Roles, Staff,
- *     API Center, Platform Settings) never appear for them.
- */
+// The palette duplicates the nav and can drift from the sidebar and route guards. These pin the rule:
+// a row is offered only when that role could actually open the page.
 
 // jsdom has no layout engine, so the 'scroll the active row into view' ref
 // call has nothing to implement. Stub it — it is decoration, not behaviour.
@@ -93,10 +85,7 @@ describe("CommandPalette — what each role is offered", () => {
       expect(has(label), label).toBe(true);
     }
 
-    // The platform owner's own areas, refused to a brand admin: the API Center
-    // exposes the platform's provider spend and keys, the Audit Log is a weak
-    // audit log if a tenant's own admin can read it, and Brands is the tenant
-    // panel itself. See PLATFORM_ONLY_SECTIONS / superAdminOnly.
+    // Platform-owner areas refused to a brand admin (see PLATFORM_ONLY_SECTIONS / superAdminOnly).
     for (const label of ["API Center", "Audit Log", "Brands"]) {
       expect(has(label), label).toBe(false);
     }

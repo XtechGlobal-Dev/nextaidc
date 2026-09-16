@@ -8,24 +8,7 @@ import { api } from "@/lib/api";
 import { ENTITLEMENTS_CACHE_KEY, cachedSmsToCallerEntitlement } from "@/lib/planFeatures";
 import { CallerInfoSmsCard } from "./CallerInfoSmsCard";
 
-/**
- * SMS to Caller — the details the AI may text a caller who asks for one
- * mid-call (website, email, address…).
- *
- * Its own module rather than a block inside AI Brain → Notifications: that
- * screen is about summaries sent to the OWNER after a call, while this is a
- * capability aimed at the CALLER during one. It sits with the other in-call
- * capabilities (Call Transfer, Booking) in the sidebar.
- *
- * The data has deliberately NOT moved — it still lives in
- * `config.automations.smsOnRequest`, saved through the shared agent store, so
- * this is a UI move with no migration and no new endpoint.
- *
- * Gated by its own plan flag (`smsToCallerEnabled`). The page stays reachable
- * when the plan doesn't include it — same call the plan cards make, where
- * excluded features are shown struck through rather than hidden — but it says
- * so plainly and offers the upgrade instead of just rendering a dead card.
- */
+/** SMS to Caller page. Data still lives in `config.automations.smsOnRequest` via the agent store (UI-only split from AI Brain, no migration); gated by `smsToCallerEnabled` but stays reachable with an upgrade prompt. */
 export default function SmsToCallerPage() {
   const navigate = useNavigate();
   const dirty = useAgentStore((s) => s.dirty);

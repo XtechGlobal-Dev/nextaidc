@@ -1,11 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 
-/* ------------------------------------------------------------------ *
- *  The brand wallet: the brand's share of a paid invoice — decided on the
- *  platform ledger's row — lands as a credit, exactly once; a payout is a negative entry that can never
- *  exceed the balance.
- * ------------------------------------------------------------------ */
+// Brand wallet: a paid invoice's brand share (decided on the platform ledger row) lands as a
+// credit exactly once; a payout is a negative entry that can never exceed the balance.
 
 const h = vi.hoisted(() => ({
   profileFindFirst: vi.fn(),

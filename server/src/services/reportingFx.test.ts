@@ -16,9 +16,8 @@ import {
 
 const findUnique = prisma.platformSetting.findUnique as unknown as ReturnType<typeof vi.fn>;
 
-/* Revenue used to be summed straight off `priceCents` regardless of currency,
- * so A$89 + $299 reported as "388" — a number in no currency at all. These pin
- * the normalisation that replaced it. */
+// Revenue used to sum priceCents regardless of currency, so A$89 + $299 reported
+// as "388" — a number in no currency at all.
 
 describe("toReportingCents", () => {
   const rates = { aud: 0.71 };

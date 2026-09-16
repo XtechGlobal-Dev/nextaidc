@@ -44,21 +44,14 @@ import {
 import { copyTranscript } from "./CallTable";
 import { Waveform } from "./Waveform";
 
-/** Per-session, in-memory cache of transcript/summary translation requests, keyed
- *  by call id + language. Re-opening a call (or StrictMode's double-invoke in dev)
- *  reuses the same promise instead of re-hitting the API. Caching the PROMISE also
- *  dedupes concurrent opens before the first response lands. */
+// Translation cache keyed by call id + language. Caching the PROMISE (not the result) also dedupes
+// concurrent opens and StrictMode's double-invoke before the first response lands.
 const translationCache = new Map<
   string,
   Promise<{ lang: string; transcript: TranscriptTurn[]; summary: string }>
 >();
 
-/**
- * The call's category, as an editable pill. The AI gets it right most of the
- * time; this exists for the rest. Without a way to correct a wrong badge, one
- * bad classification makes an owner distrust every badge on the page — and each
- * correction is a labelled example we can tune the classifier against.
- */
+// Editable intent pill — lets the owner fix a wrong AI classification, and each fix is a labelled example for tuning.
 function IntentPicker({ call }: { call: CallLog }) {
   const setIntent = useCallsStore((s) => s.setIntent);
   const [saving, setSaving] = useState(false);
@@ -152,12 +145,8 @@ export function CallDetailPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Stream the recording through our own backend (same proxy emails use) so the
-  // player + download show our domain instead of storage.vapi.ai. The proxy path
-  // is a SIGNED, short-lived token (not the raw call id), and the <audio> element
-  // can't send an auth header — so we ask the server (authenticated, scoped to
-  // our own calls) to mint a fresh playback URL each time we open the call. The
-  // proxy handles both a stored URL (legacy) and the Vapi call id internally.
+  // Recording streams via our proxy (our domain, not storage.vapi.ai). The path is a SIGNED short-lived
+  // token and <audio> can't send an auth header, so the server mints a fresh URL every time the panel opens.
   const [playbackUrl, setPlaybackUrl] = useState<string | undefined>(undefined);
   useEffect(() => {
     let active = true;
@@ -175,11 +164,8 @@ export function CallDetailPanel({
     };
   }, [call.id]);
 
-  // Copying a link to send to someone else mints a SEPARATE, longer-lived token
-  // rather than reusing `playbackUrl` — that one is short-lived by design (it is
-  // re-minted every time the panel opens), so a pasted copy of it would die
-  // within hours. Minted on click, not up front, so a link only exists once the
-  // owner has actually decided to share it.
+  // Share mints a SEPARATE longer-lived token — `playbackUrl` dies within hours by design. Minted on
+  // click, not up front, so a link only exists once the owner has decided to share.
   const [sharing, setSharing] = useState(false);
   const shareRecording = async () => {
     if (sharing) return;
@@ -200,11 +186,8 @@ export function CallDetailPanel({
     }
   };
 
-  // Calls past the archive window come out of the list without their transcript
-  // — cold storage holds it, and fetching one per row would have made opening
-  // the inbox far more expensive than opening a call. Pull it back the moment
-  // the panel opens; the store swaps the fuller record in, which re-renders us
-  // with the transcript. A no-op for any call still holding its blobs inline.
+  // Archived calls arrive without their transcript (cold storage; fetching per row would make the
+  // inbox too expensive). Pull it when the panel opens — the store swaps in the fuller record.
   const ensureTranscript = useCallsStore((s) => s.ensureTranscript);
   useEffect(() => {
     if (call.blobArchived) void ensureTranscript(call.id);

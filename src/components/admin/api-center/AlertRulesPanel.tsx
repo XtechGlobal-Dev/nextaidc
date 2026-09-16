@@ -13,14 +13,7 @@ import { useApiCenter } from "./ApiCenterContext";
 import { SectionHeading } from "./shared";
 import type { AlertMetric, AlertRule } from "@/types/apiCenter";
 
-/* ------------------------------------------------------------------ *
- *  Alert rules — the thresholds that raise a flag.
- *
- *  Lives under Settings rather than on its own screen: writing a rule is
- *  configuration, and it belongs beside the quotas and prices those rules
- *  measure against. What the rules *produced* shows up on Overview, where
- *  someone will actually see it.
- * ------------------------------------------------------------------ */
+// Alert rule thresholds. Lives under Settings (it's configuration); what the rules fire shows on Overview.
 
 const METRICS: { key: AlertMetric; label: string; unit: string; comparator: "gt" | "lt"; hint: string }[] = [
   { key: "error_rate", label: "Error rate", unit: "%", comparator: "gt", hint: "share of calls that failed" },

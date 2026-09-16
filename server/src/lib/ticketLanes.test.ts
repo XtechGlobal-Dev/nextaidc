@@ -8,18 +8,8 @@ import {
   requesterLane,
 } from "./ticketLanes.js";
 
-/* ------------------------------------------------------------------ *
- *  The lane wall.
- *
- *  These four functions are the ONLY thing deciding which support
- *  conversation an account can reach, and they are driven purely by
- *  role — never by a request body. So the table below is the security
- *  property of the whole ticket system, stated once:
- *
- *    a customer talks UP to their brand, and nowhere else
- *    a brand admin talks UP to the platform, and DOWN to its customers
- *    the platform owner talks DOWN to the brands, and nowhere else
- * ------------------------------------------------------------------ */
+// The lane wall: these functions alone decide which support conversation an account reaches, by role
+// only. Customer → brand; brand admin → platform (and down to customers); platform owner → brands.
 
 describe("requesterLane — who asks, and whom", () => {
   it("sends a customer's request up to their own brand", () => {
@@ -61,16 +51,12 @@ describe("handlerLane — who answers, and whose", () => {
   });
 
   it("gives the platform owner the brands' queue, and only that", () => {
-    // The one line that keeps a tenant's customer conversations out of the
-    // platform owner's inbox: their lane is `brand`, so a `support` ticket is
-    // not merely hidden from them, it is unreachable.
+    // Keeps tenant customer conversations unreachable (not just hidden) from the platform owner.
     expect(handlerLane("SUPER_ADMIN", null)).toBe("brand");
   });
 
   it("puts the platform's own staff on the platform's inbox, beside the owner", () => {
-    // Staff with no brand are the super admin's support team. Their lane is
-    // the one the super admin works — never a tenant's customer queue, which
-    // is what "no brand" used to fall through to.
+    // Brand-less staff are the platform's team — "no brand" used to fall through to tenant customer queues.
     expect(handlerLane("STAFF", null)).toBe("brand");
     expect(handlerLane("STAFF", undefined)).toBe("brand");
   });
@@ -114,10 +100,8 @@ describe("handlerSection — which permission gate each inbox sits behind", () =
 });
 
 describe("departmentTenant — who owns the queue, vs who is asking", () => {
-  // This one is worth stating plainly because getting it wrong is invisible in
-  // types and obvious in use: a brand admin's platform request picker came back
-  // EMPTY, because it looked for brand-lane queues owned by their own tenant.
-  // The queue belongs to whoever ANSWERS; the ticket carries whoever ASKS.
+  // The queue belongs to whoever ANSWERS; the ticket carries whoever ASKS. Getting this wrong once left
+  // a brand admin's platform request picker empty.
   it("files a customer's request into their own brand's queues", () => {
     expect(departmentTenant("support", "b_acme")).toBe("b_acme");
   });

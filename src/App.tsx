@@ -67,11 +67,8 @@ const AdminStaffDetailPage = lazy(() => import("@/pages/admin/AdminStaffDetailPa
 const AdminRolesPage = lazy(() => import("@/pages/admin/AdminRolesPage"));
 const AdminRoleDetailPage = lazy(() => import("@/pages/admin/AdminRoleDetailPage"));
 
-// The support inbox. Mounted once in `adminRoutes` and therefore present under
-// both prefixes — which is exactly right: a brand admin's /dashboard/admin
-// inbox holds their customers' requests, the platform owner's /superadmin one
-// holds their brands'. The API picks the lane from the caller's role, so one
-// page serves both without either being able to see the other's.
+// Support inbox — one page under both prefixes; the API picks the lane from the caller's role,
+// so a brand admin sees their customers' requests and the platform owner sees their brands'.
 const AdminTicketsPage = lazy(() => import("@/pages/admin/tickets/AdminTicketsPage"));
 const AdminTicketRatingsPage = lazy(
   () => import("@/pages/admin/tickets/AdminTicketRatingsPage"),
@@ -99,9 +96,8 @@ function PageFallback() {
   );
 }
 
-// Single Suspense boundary for the lazily-loaded route components. Using a data
-// router (createBrowserRouter) instead of <BrowserRouter> so pages can guard
-// navigation with useBlocker (e.g. the AI Brain unsaved-changes prompt).
+// Data router (createBrowserRouter), not <BrowserRouter>, so pages can guard navigation
+// with useBlocker (AI Brain unsaved-changes prompt).
 function RootLayout() {
   return (
     <>
@@ -114,14 +110,8 @@ function RootLayout() {
   );
 }
 
-/**
- * The admin panel's routes, mounted under a prefix.
- *
- * Two prefixes, one tree: brand admins work at `/dashboard/admin/*` and the
- * platform owner at `/superadmin/*`. Defining the routes once means the two can
- * never drift — a page added for one is automatically there for the other, with
- * the same per-page guards deciding who actually gets in.
- */
+// Admin routes, mounted under both `/dashboard/admin` and `/superadmin` so the two trees can
+// never drift; the per-page guards decide who gets in.
 function adminRoutes(base: string) {
   return (
     <>
@@ -187,9 +177,8 @@ function adminRoutes(base: string) {
           path={`${base}/resellers`}
           element={<RequireAdmin><AdminResellersPage /></RequireAdmin>}
         />
-        {/* Platform Settings is open to admins, minus its Integrations tab —
-            the page hides that tab for them and `/admin/integrations*` stays on
-            requireSuperAdmin, so the credentials are refused either way. */}
+        {/* Open to admins minus the Integrations tab — the page hides it and `/admin/integrations*`
+            stays on requireSuperAdmin, so credentials are refused either way. */}
         <Route
           path={`${base}/settings`}
           element={<RequireAdmin><AdminSettingsPage /></RequireAdmin>}
@@ -221,9 +210,8 @@ function adminRoutes(base: string) {
           path={`${base}/webhooks`}
           element={<RequireAdmin><AdminWebhookLogsPage /></RequireAdmin>}
         />
-        {/* API Center — the layout owns the shared snapshot, filters and drawer;
-            sections render into its outlet, so switching tabs is instant and
-            every screen describes the same moment. */}
+        {/* The layout owns the shared snapshot/filters/drawer; sections render into its outlet so
+            every tab describes the same moment. */}
         <Route
           path={`${base}/api-center`}
           element={<RequireSuperAdmin><ApiCenterLayout /></RequireSuperAdmin>}
@@ -233,11 +221,8 @@ function adminRoutes(base: string) {
           <Route path="activity" element={<ApiCenterActivityPage />} />
           <Route path="costs" element={<ApiCenterCostsPage />} />
           <Route path="settings" element={<ApiCenterSettingsPage />} />
-          {/* The twelve-section layout that shipped first folded into five. Old
-              links (and anyone's bookmarks) land on the section that absorbed
-              them rather than a 404. Absolute targets on purpose: a relative
-              `to` resolves against the redirecting route's own path, which would
-              send /…/connections to /…/connections/providers. */}
+          {/* Redirects for the old twelve-section URLs. Absolute targets on purpose: a relative `to`
+              resolves against the redirecting route, sending /…/connections to /…/connections/providers. */}
           <Route path="connections" element={<Navigate to={`${base}/api-center/providers`} replace />} />
           <Route path="health" element={<Navigate to={`${base}/api-center/providers`} replace />} />
           <Route path="quotas" element={<Navigate to={`${base}/api-center/providers`} replace />} />
@@ -321,9 +306,8 @@ function buildRouter(basename?: string) {
       <Route
         element={
           <RequireAuth>
-            {/* A signed-in account belongs on its own front door: a brand's
-                users under /{slug}, platform-level accounts on the bare path.
-                See RequireBrandFrontDoor for why this is a full page load. */}
+            {/* Brand users belong under /{slug}, platform accounts on the bare path — see
+                RequireBrandFrontDoor for why this is a full page load. */}
             <RequireBrandFrontDoor>
               <AppLayout />
             </RequireBrandFrontDoor>
@@ -342,10 +326,8 @@ function buildRouter(basename?: string) {
         <Route path="/dashboard/booking" element={<RequireCustomer><BookingPage /></RequireCustomer>} />
         <Route path="/dashboard/sms-to-caller" element={<RequireCustomer><SmsToCallerPage /></RequireCustomer>} />
         <Route path="/dashboard/settings" element={<SettingsPage />} />
-        {/* Reachable by every signed-in role (no customer guard), like Settings.
-            Which conversation it shows is the account's own: a customer's
-            requests to their brand, or a brand admin's to the platform. Staff
-            and the platform owner raise none, and the page says so. */}
+        {/* No customer guard — every role gets its own requests (customer → brand, brand admin →
+            platform); staff and the owner raise none and the page says so. */}
         <Route path="/dashboard/support" element={<SupportPage />} />
         <Route path="/dashboard/notifications" element={<NotificationsPage />} />
 
@@ -358,9 +340,8 @@ function buildRouter(basename?: string) {
         {/* Brand admins. */}
         {adminRoutes("/dashboard/admin")}
 
-        {/* The platform owner's own URL space. Same pages, same per-page
-            guards, behind one more check so nothing here is reachable without
-            being the super admin — and so /superadmin can never be a brand. */}
+        {/* Same pages behind one more guard, so nothing here is reachable without being the
+            super admin — and /superadmin can never be a brand. */}
         <Route element={<RequireSuperAdmin><Outlet /></RequireSuperAdmin>}>
           <Route path="/superadmin" element={<Navigate to="/superadmin/platform" replace />} />
           {adminRoutes("/superadmin")}
@@ -369,18 +350,15 @@ function buildRouter(basename?: string) {
       <Route path="*" element={<NotFoundPage />} />
     </Route>,
   ),
-  // Path routing: on example.com/acme the router is created with basename
-  // "/acme", so every Link, redirect and navigate() in the app keeps the brand
-  // prefix without a single one of them knowing it exists.
+  // On example.com/acme the basename is "/acme", so every Link/redirect/navigate() keeps
+  // the brand prefix without knowing it exists.
   { basename },
   );
 }
 
 export function App() {
-  // The router can't be built until we know whether the first path segment is a
-  // brand, because that segment becomes its basename. One request answers it:
-  // the slug is set provisionally, /api/config echoes back whichever brand the
-  // server resolved, and a segment that wasn't one is dropped again.
+  // Can't build the router until we know whether the first path segment is a brand (it becomes
+  // the basename). Set the slug provisionally, let /api/config confirm or drop it.
   const [router, setRouter] = useState<ReturnType<typeof buildRouter> | null>(null);
 
   useEffect(() => {
@@ -392,16 +370,12 @@ export function App() {
       await useBrandingStore.getState().refresh();
       const brand = useBrandingStore.getState().brand;
       if (brand && brand.slug !== slug) {
-        // The HOST named the brand — a subdomain (acme.hello22.ai) or the
-        // brand's own verified domain — and the server resolved it from the
-        // request's Origin, ignoring any path segment. No basename then: on a
-        // brand's own domain the app lives at plain /dashboard, and a segment
-        // that happened to be there stays part of the route.
+        // The HOST (subdomain / verified domain) named the brand, resolved from Origin. No basename
+        // then — the app lives at plain /dashboard and any path segment stays part of the route.
         setHostBrand(brand.slug);
       } else if (slug && !brand) {
-        // Not a live brand after all (a typo, a suspended tenant, a 404 path) —
-        // forget it, so the segment stays part of the route and resolves to the
-        // not-found page instead of being silently swallowed by the basename.
+        // Not a live brand (typo, suspended tenant) — keep the segment in the route so it hits
+        // not-found instead of being swallowed by the basename.
         setActiveBrandSlug(null);
       }
       if (!active) return;

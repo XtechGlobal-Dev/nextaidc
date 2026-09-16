@@ -46,19 +46,13 @@ export default function Step7Finish() {
     await applyToAccount(); // seeds the agent config + persists it to the DB
     resetSetup(); // so the in-dashboard Quick Setup opens fresh
     if (cardWallActive(useAuthStore.getState().user)) {
-      // Card was required at signup: onboarding is NOT finished here — the plan +
-      // card step still remains. Park them on the pricing step so a later login
-      // resumes at the card screen instead of the dashboard. Marking it complete
-      // would be untrue and would also hide them from the admin's "under
-      // onboarding" list, which is exactly who support needs to chase.
+      // Card-walled: onboarding is NOT done yet. Park on the pricing step so login resumes at the card
+      // screen; marking complete would also hide them from the admin's "under onboarding" list.
       void api.profile.onboardingProgress({ step: ONBOARDING_PRICING_STEP }).catch(() => {});
       navigate("/subscribe", { replace: true });
       return;
     }
-    // Card-less signup: onboarding is done here — no plan/card wall. Mark it
-    // complete so future logins go straight to the dashboard. Plan + card are
-    // collected later, in the "tap to set up" number wizard, only when the user
-    // claims a number.
+    // Card-less signup: done here. Plan + card are collected later in the number wizard, when they claim a number.
     void api.profile.onboardingProgress({ completed: true }).catch(() => {});
     toast.success("Setup complete 🎉");
     // Land the freshly-onboarded user on the AI Brain so they can review/tune

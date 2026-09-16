@@ -19,14 +19,8 @@ import { callDb } from "../services/tenantDb.js";
 import { updateCall } from "../services/callWrite.js";
 import type { Prisma as TenantPrisma } from "@prisma/tenant-client";
 
-/* ------------------------------------------------------------------ *
- *  Public (no-auth) conversation page.
- *  Reached from the "More info" link in the post-call summary SMS.
- *  Keyed by an unguessable slug (CallLog.publicId) with an optional
- *  expiry (shareExpiresAt). Renders a self-contained page — caller,
- *  purpose, summary, recording and transcript — so it works from any
- *  phone without loading the SPA. Never indexed.
- * ------------------------------------------------------------------ */
+// Public (no-auth) conversation page from the summary SMS "More info" link. Keyed by
+// an unguessable slug with optional expiry; self-contained HTML, never indexed.
 
 const router = Router();
 
@@ -105,10 +99,8 @@ function notice(title: string, message: string): string {
 router.get(
   "/:publicId",
   asyncHandler(async (req, res) => {
-    // The call is in the owning brand's own database, and this route is served
-    // from the platform's API host for every brand — so the slug alone can't
-    // say where to look. The control plane's share index can: it names the
-    // brand and the call's full partitioned key.
+    // Served from the platform host for every brand, so the slug alone can't say which
+    // tenant DB to open — the Main share index names the brand and the partitioned key.
     const share = await prisma.callShare.findUnique({ where: { publicId: req.params.publicId } });
     const db = share ? await callDb(share.brandId).catch(() => null) : null;
     const found =
@@ -143,9 +135,7 @@ router.get(
       res.status(404).type("text/html").send(notice("Conversation not found", "This link is invalid or the conversation has been removed."));
       return;
     }
-    // A "More info" link can be years old by the time someone opens it, long
-    // after the transcript aged out to S3 — pull it back so a shared link always
-    // shows the conversation it promised.
+    // The link may be years old and the transcript aged out to S3 — pull it back.
     const call = await hydrateCall(found);
     // Paint everything from here on as the brand that owns the call, not as
     // whatever the API host resolves to — which is the platform, for everyone.
@@ -207,9 +197,8 @@ router.get(
 
       // Persist whatever we translated fresh so later views (and the portal) are free.
       if (freshSummary !== undefined || freshTranscript !== undefined) {
-        // Cached beside the originals in the brand's database, with the marker
-        // that says which language is cached. The page already read createdAt,
-        // so the write prunes to the call's own monthly partition.
+        // Cache in the brand's DB with the language marker; createdAt is passed so the
+        // write hits the call's own monthly partition.
         await updateCall(
           share.brandId,
           { id: call.id, createdAt: call.createdAt },
@@ -238,10 +227,8 @@ router.get(
     add("When", call.createdAt.toUTCString());
 
     let recording = "";
-    // Show the player when we can serve audio — a stored URL (legacy) or a Vapi
-    // call id we can stream via the proxy. The proxy path is a signed, expiring
-    // recording token (not the raw id) so this page can't be scraped for a
-    // permanent, id-only audio link.
+    // Proxy path uses a signed, expiring token, not the raw call id, so this page
+    // can't be scraped for a permanent audio link.
     const hasRecording = Boolean(call.recordingUrl) || Boolean(vapiCallIdOf(call));
     if (hasRecording) {
       const src = `${publicApiBaseUrl}/api/calls/recording-file/${signRecording(call.id, share.brandId, "30d")}`;

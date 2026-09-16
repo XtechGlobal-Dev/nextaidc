@@ -1,12 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-/**
- * Mobile "table row → card" primitives. Below md, data tables render each row as
- * one of these cards: an avatar/icon-led header (with the row actions tucked in
- * the top-right), an optional pill row for status/type badges, and a 2-column
- * meta grid for the remaining fields. Matches the Customers list card design.
- */
+/** Mobile "table row as card" primitives: header with actions, optional pill row, 2-column meta grid. */
 export function DataCard({
   onClick,
   className,

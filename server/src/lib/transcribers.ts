@@ -1,31 +1,10 @@
-/* ------------------------------------------------------------------ *
- *  Transcriber (speech-to-text) fallback catalogue + plan builder.
- *
- *  The PRIMARY transcriber for an agent is still chosen automatically by
- *  language (see transcriberFor() in agentConfig.ts) — Deepgram for the
- *  set it covers, Google for the wider set. This module adds the admin-
- *  configurable FALLBACK that Vapi tries when the primary STT fails.
- *
- *  Vapi expresses fallbacks as `transcriber.fallbackPlan.transcribers`
- *  (an ordered list) — there is no per-assistant "auto" flag in the API,
- *  so our "Auto Fallback" toggle is implemented by auto-PICKING a sensible
- *  capable backup ourselves and appending it to that same list.
- *
- *  SAFETY: a fallback is only ever applied when its provider can actually
- *  transcribe the agent's language tier. Attaching e.g. an English-only
- *  Deepgram fallback to a Mandarin agent would transcribe the caller as
- *  confident nonsense — worse than a clean failure — so we skip it.
- * ------------------------------------------------------------------ */
+// STT fallback catalogue + Vapi fallbackPlan builder (Vapi has no "auto" flag, so we pick the backup).
+// A fallback that can't hear the agent's tier is skipped — confident nonsense is worse than a clean failure.
 
-/** How wide an agent's speech coverage must be, derived from its languages:
- *   - "en"   → English only
- *   - "multi"→ English + common languages Deepgram's nova-3 "multi" covers
- *   - "wide" → beyond that (e.g. Mandarin), which only Google covers today */
+/** Coverage tier: "en", "multi" (Deepgram nova-3 multi set), "wide" (beyond — only Google today). */
 export type TranscriberTier = "en" | "multi" | "wide";
 
-/** How a provider expresses "transcribe this tier" in the Vapi payload. Most take
- *  a single `language` value; some (Soniox) take a `languages` array where `[]`
- *  means auto-detect every language. Verified against Vapi's schema. */
+/** Per-provider tier shape: most take `language`; Soniox takes `languages` where `[]` = auto-detect. */
 export type TierLanguage = { language: string } | { languages: string[] };
 
 /** A transcriber provider we let an admin choose as a fallback. */
@@ -45,9 +24,7 @@ export interface TranscriberProviderDef {
   lang: Partial<Record<TranscriberTier, TierLanguage>>;
 }
 
-/** Curated fallback providers. Kept to the ones whose provider/model/language we
- *  can verify against Vapi's OpenAPI schema, so a saved fallback never 400s an
- *  assistant sync. Order = display order. */
+/** Only providers verifiable against Vapi's OpenAPI schema, so a saved fallback never 400s a sync. Order = display order. */
 export const TRANSCRIBER_PROVIDERS: TranscriberProviderDef[] = [
   {
     id: "deepgram",
@@ -78,9 +55,7 @@ export const TRANSCRIBER_PROVIDERS: TranscriberProviderDef[] = [
     lang: { en: { language: "en" } },
   },
   {
-    // Soniox covers 185 languages (incl. Mandarin/Hindi), so it's wide-capable.
-    // Multilingual is expressed via `languages: []` (auto-detect), not a `language`
-    // value — hence the array form for multi/wide.
+    // Soniox is wide-capable (185 languages); multilingual is `languages: []` (auto-detect), hence the array form.
     id: "soniox",
     label: "Soniox",
     fallbackSchema: "FallbackSonioxTranscriber",
@@ -137,13 +112,8 @@ export interface VapiTranscriberFallbackPlan {
   transcribers: VapiFallbackTranscriber[];
 }
 
-/**
- * Assemble the Vapi `fallbackPlan` for an agent's tier from the admin setting.
- * Order: the admin's manual preferred fallback first (tried before auto), then —
- * if Auto Fallback is on — one auto-picked capable backup. Providers that can't
- * hear the tier are skipped, and the primary provider is never used as its own
- * fallback. Returns null when nothing capable applies (no fallbackPlan is sent).
- */
+/** Vapi `fallbackPlan` for a tier: manual preference first, then one auto-picked capable backup.
+ *  Incapable providers and the primary are skipped; null when nothing applies. */
 export function buildTranscriberFallbackPlan(
   setting: TranscriberFallbackSetting,
   tier: TranscriberTier,

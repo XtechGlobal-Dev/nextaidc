@@ -1,12 +1,8 @@
 import { prisma } from "../prisma.js";
 import { uploadObject, deleteObject, type UploadResult } from "./storage.js";
 
-/* ------------------------------------------------------------------ *
- *  Platform branding — admin-uploaded logos + favicon stored in S3.
- *  Each slot keeps its public URL (shown to all clients) plus the S3
- *  object key (so a replaced asset can be deleted). Persisted as plain,
- *  non-secret rows in platform_settings.
- * ------------------------------------------------------------------ */
+// Platform branding: admin-uploaded logos/favicon in S3. Each slot keeps the public URL plus the
+// object key so a replaced asset can be deleted. Stored as non-secret platform_settings rows.
 
 export type BrandingSlot =
   | "logoLight"

@@ -16,3 +16,6 @@ server/.env
 
 # Local-only Claude Code config & skills (kept on disk, out of the repo)
 .claude/
+
+# Playwright MCP session output (snapshots, screenshots)
+.playwright-mcp/

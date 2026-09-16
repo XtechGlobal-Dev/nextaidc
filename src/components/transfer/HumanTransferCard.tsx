@@ -32,9 +32,7 @@ const DEFAULT_RING_SEC = 15;
 const DEFAULT_FALLBACK_MESSAGE =
   "Our team isn't available right now. We've recorded your request and will contact you as soon as possible. Thank you for calling.";
 
-/** A department being edited locally. `uid` is a stable client key (the server
- *  id for saved rows, a generated key for unsaved ones). Each department carries
- *  its own waiting time and end message. */
+/** Department draft. `uid` is a stable client key: the server id for saved rows, generated for unsaved. */
 interface DraftDept {
   uid: string;
   name: string;
@@ -56,17 +54,8 @@ const toDraft = (departments: TransferDepartment[]): DraftDept[] =>
     fallbackMessage: d.fallbackMessage,
   }));
 
-/**
- * The tenant-side "Human Call Transfer" card. Callers who ask for a person are
- * routed by department: the AI asks which one they need, then warm-transfers to
- * that department's number. Each department (with its own waiting time + end
- * message) is added, edited, toggled, or deleted through the modal and saved
- * immediately — there's no separate Save button.
- *
- * `maxDepartments` is the plan's allowance (Infinity while it is still being
- * resolved). It only shapes the UI — every write is capped again server-side,
- * so a stale entitlement here can't buy anyone extra departments.
- */
+/** Human Call Transfer card: departments edited via modal, saved immediately. `maxDepartments` only shapes
+ *  the UI; the server caps every write, so a stale entitlement can't buy extra departments. */
 export function HumanTransferCard({
   className,
   locked = false,
@@ -83,9 +72,7 @@ export function HumanTransferCard({
   const updateSettings = useTransferStore((s) => s.updateSettings);
   const saveDraft = useTransferStore((s) => s.saveDraft);
 
-  // Local mirror of the server list, used only for rendering the rows. Every
-  // add/edit/toggle/delete is persisted immediately (there's no separate Save
-  // button), so the draft always re-syncs from the store after each change.
+  // Local mirror for rendering; every change persists immediately and re-syncs from the store.
   const [draft, setDraft] = useState<DraftDept[]>([]);
   const [saving, setSaving] = useState(false);
   const uidRef = useRef(0);
@@ -98,13 +85,10 @@ export function HumanTransferCard({
     setDraft(toDraft(departments));
   }, [departments]);
 
-  // There's no on/off toggle — transfer is driven entirely by the departments
-  // below. Keep the master flag on so the tool is pushed to the live assistant
-  // (it only actually transfers when a valid, enabled department exists).
+  // No on/off toggle; keep the master flag on so the tool reaches the live assistant (it only transfers
+  // when an enabled department exists).
   useEffect(() => {
-    // Skipped while locked: the PATCH is refused for a plan without transfer, so
-    // firing it on mount would surface a 403 toast on a page the customer only
-    // opened to read.
+    // Skipped while locked: the PATCH is refused without transfer, so mount would surface a 403 toast.
     if (locked) return;
     if (settings && !settings.enabled) void updateSettings({ enabled: true });
   }, [settings, updateSettings, locked]);
@@ -217,11 +201,7 @@ interface DepartmentsSectionProps {
   onRemove: (uid: string) => Promise<boolean>;
 }
 
-/**
- * Departments editor. Each row is a compact summary with edit/delete actions.
- * Adding and editing both happen through a modal dialog, and every change is
- * saved immediately (there's no separate Save button).
- */
+/** Departments editor. Add/edit go through a modal; every change saves immediately, no separate Save button. */
 function DepartmentsSection({
   draft,
   saving,
@@ -258,9 +238,7 @@ function DepartmentsSection({
     setNumber("");
     setDescription("");
     setRing(DEFAULT_RING_SEC);
-    // Prefill the standard line rather than leaving the box empty: it's what the
-    // AI says anyway, and as a greyed-out placeholder it read as "nothing will be
-    // said". The owner can edit or replace it before adding.
+    // Prefill the default line; as a greyed placeholder it read as "nothing will be said".
     setFallback(DEFAULT_FALLBACK_MESSAGE);
     setErrors({});
     setModalOpen(true);
@@ -321,10 +299,7 @@ function DepartmentsSection({
         that department's number.
       </p>
 
-      {/* Over the plan's allowance — reachable by an account that configured
-          departments before the limits existed, or whose plan was lowered under
-          them. Say so plainly: the assistant already uses only the first N, and
-          without this the extras look live while silently never being offered. */}
+      {/* Over the allowance (legacy config or a lowered plan): the assistant only uses the first N, so say so or the extras look live. */}
       {!locked && Number.isFinite(maxDepartments) && draft.length > maxDepartments && (
         <div className="rounded-md border border-warning/40 bg-warning-tint px-3 py-2">
           <p className="text-xs text-warning">

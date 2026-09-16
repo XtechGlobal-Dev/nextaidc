@@ -4,11 +4,7 @@ interface IconProps {
   className?: string;
 }
 
-/**
- * Decorative "lead flows into your CRM" art shown on the selected provider card:
- * a dotted source node, a dashed hop, and a little app window holding the
- * provider's icon. Purely ornamental — hidden on small screens.
- */
+/** Decorative "lead flows into your CRM" art for the selected provider card; ornamental, hidden on small screens. */
 export function ProviderFlowArt({ icon: Icon }: { icon: ComponentType<IconProps> }) {
   return (
     <div

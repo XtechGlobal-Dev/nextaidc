@@ -1,6 +1,5 @@
-// A call, the CRM settings it is delivered with, and the delivery log, as they
-// are stored: in the brand's own database — which is why the brand travels
-// beside the call here rather than on it.
+// Calls, CRM settings and delivery logs all live in the brand's DB, so the brand
+// travels beside the call here rather than on it.
 import type { CallLog, CrmIntegration, WebhookDelivery } from "@prisma/tenant-client";
 import { tenantForUser, tenantsFor, type TenantClient } from "./tenantDb.js";
 import { getEffective, integrationsStatus } from "./settings.js";
@@ -19,15 +18,8 @@ interface DeliveryResult {
   durationMs: number;
 }
 
-/**
- * The recording link we hand to a customer's CRM. Vapi's raw storage.vapi.ai URL
- * is no longer publicly fetchable, so we point downstream systems at our own
- * authenticated proxy (which streams the audio via Vapi's API). The proxy path is
- * a signed, expiring recording token (not the raw call-log id), so a lead sitting
- * in a CRM doesn't carry a permanent, guessable-id audio link. Returns null when
- * there's no recording to serve, or falls back to the raw URL if no public base
- * is configured.
- */
+// Recording link for the CRM: our proxy with a signed, expiring token, not the raw
+// call id — Vapi's storage URL isn't public, and a CRM lead shouldn't carry a permanent audio link.
 function crmRecordingUrl(call: CallLog, brandId: string | null | undefined): string | null {
   const hasRecording = Boolean(call.recordingUrl) || Boolean(vapiCallIdOf(call));
   if (!hasRecording) return null;
@@ -38,12 +30,7 @@ function crmRecordingUrl(call: CallLog, brandId: string | null | undefined): str
   return `${base}/api/calls/recording-file/${signRecording(call.id, brandId, "30d")}`;
 }
 
-/**
- * Identity of the Hello22 member (tenant) a call belongs to. Attached to every
- * lead pushed to Perfex so leads from different members are distinguishable in
- * the shared CRM — the businessName lands in Perfex's "Company" column and the
- * full identity is echoed in the lead description as a stable fallback.
- */
+/** The member a call belongs to, attached to Perfex leads so members are distinguishable in the shared CRM. */
 export interface LeadOwner {
   userId: string;
   businessName: string;
@@ -75,9 +62,7 @@ function ownerLabel(owner: LeadOwner): string {
   return owner.businessName || owner.fullName || owner.email || `Member ${owner.userId}`;
 }
 
-/** Marker put on leads that came from an in-app test call rather than a real
- *  customer. Loud on purpose: these land in the owner's REAL pipeline, so they
- *  have to be obvious at a glance and trivial to filter/delete. */
+// Test-call leads land in the owner's REAL pipeline, so mark them loudly.
 const TEST_LEAD_PREFIX = "[TEST]";
 
 function buildLeadPayload(call: CallLog, brandId: string | null | undefined, test = false) {
@@ -187,18 +172,8 @@ async function postForm(
   }
 }
 
-/**
- * Build Perfex web-to-lead form fields from a call.
- *
- * When `owner` is provided (admin-global delivery, where leads from every member
- * land in one shared CRM), the member's business identity is added so each lead
- * can be attributed:
- *  - `company` → shown in Perfex's "Company" column on the Leads list
- *  - an "Account" block in the description → stable fallback even if the caller
- *    happens to share a company name.
- * Perfex's wtl endpoint accepts any field that is a real column on `tbl_leads`
- * (see Forms::wtl), so `company` is accepted without any Perfex-side change.
- */
+// Perfex web-to-lead fields. With `owner` (shared admin CRM) the member goes in `company`
+// plus an Account block in the description. wtl accepts any real tbl_leads column.
 function buildNexleonLeadFields(
   call: CallLog,
   formKey: string,
@@ -270,10 +245,7 @@ async function logDelivery(
   });
 }
 
-/* ------------------------------------------------------------------ *
- *  Admin-global Perfex CRM delivery (configured in Admin → Settings)
- *  All call leads from all users are pushed here.
- * ------------------------------------------------------------------ */
+// Admin-global Perfex delivery: every user's leads go here.
 
 async function deliverToAdminNexleon(
   db: TenantClient,
@@ -294,9 +266,7 @@ async function deliverToAdminNexleon(
   await logDelivery(db, null, call.id, "perfex-global", url, fields, result);
 }
 
-/* ------------------------------------------------------------------ *
- *  Per-user CRM delivery (configured in Dashboard → CRM)
- * ------------------------------------------------------------------ */
+// Per-user CRM delivery.
 
 async function deliverToUserCrm(
   userId: string,
@@ -336,22 +306,9 @@ async function deliverToUserCrm(
   await logDelivery(db, crm.id, call.id, provider, url, payload, result);
 }
 
-/* ------------------------------------------------------------------ *
- *  Public API
- * ------------------------------------------------------------------ */
+// Public API.
 
-/**
- * Deliver a call lead to all configured CRMs:
- *  1. Admin-global Perfex CRM (if configured in Admin → Settings)
- *  2. User's own CRM (if configured in Dashboard → CRM)
- *
- * Best-effort: failures are logged but never thrown.
- *
- * `opts.test` marks the lead as coming from an in-app test call. It still goes
- * to the real CRM (so the owner can verify the integration end to end), but the
- * name and description are prefixed "[TEST]" and the JSON payload carries
- * `test: true`, so it's obvious in the leads list and easy to filter or delete.
- */
+/** Delivers a lead to the admin-global Perfex and the user's own CRM. Best-effort. `opts.test` still hits the real CRM (so the owner can verify end to end) but is marked "[TEST]". */
 export async function deliverCallToCrm(
   userId: string,
   call: CallLog,
@@ -377,10 +334,7 @@ export async function deliverCallToCrm(
   }
 }
 
-/**
- * Send a test payload to the user's configured webhook.
- * Returns the delivery result for immediate feedback.
- */
+/** Sends a test payload to the user's webhook and returns the result. */
 export async function testWebhookDelivery(crm: CrmIntegration): Promise<DeliveryResult> {
   let result: DeliveryResult;
   let url: string;
@@ -411,10 +365,7 @@ export async function testWebhookDelivery(crm: CrmIntegration): Promise<Delivery
   return result;
 }
 
-/**
- * Test the admin-global Perfex CRM connection.
- * Called from admin routes.
- */
+/** Tests the admin-global Perfex connection. */
 export async function testAdminNexleon(): Promise<DeliveryResult> {
   const nexleonUrl = getEffective("perfex.url").trim().replace(/\/$/, "");
   const formKey = getEffective("perfex.formKey").trim();
@@ -436,10 +387,7 @@ export async function testAdminNexleon(): Promise<DeliveryResult> {
   return postForm(url, fields);
 }
 
-/**
- * Re-attempt a previously-logged webhook delivery using its stored url + payload.
- * Records the retry as a fresh WebhookDelivery row and returns the result.
- */
+/** Retries a logged delivery with its stored url + payload, recording a fresh row. */
 export async function retryDelivery(
   deliveryId: string,
   brandId: string | null | undefined,

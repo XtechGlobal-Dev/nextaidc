@@ -80,9 +80,7 @@ export default function AdminReportsPage() {
         title="Reports"
         subtitle="Weekly digest emails summarizing each customer's call activity."
         actions={
-          // The send is a platform-wide broadcast — every customer of every
-          // brand — so only the super admin gets the button, matching
-          // requireSuperAdmin on the route behind it.
+          // Platform-wide broadcast to every brand's customers — super admin only, matching requireSuperAdmin on the route.
           canSendDigests ? (
             <Button onClick={() => setConfirmOpen(true)}>
               <Send className="size-4" /> Send digests now

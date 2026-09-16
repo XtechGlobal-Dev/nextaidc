@@ -23,13 +23,7 @@ import { api, ApiError, type DirectoryHit, type PlatformOverview } from "@/lib/a
 import { formatMoney } from "@/lib/currency";
 import { formatDate, formatDateDMY } from "@/lib/utils";
 
-/**
- * The platform as a whole, for the super admin. Every number here comes from
- * Main alone: the nightly rollup of each brand's database, the platform
- * ledger, the brands' wallets and the Stripe events still waiting for a home.
- * No brand's database is opened to draw this page — which is why it says
- * when the numbers were computed, and offers to compute them again.
- */
+/** Super admin's platform-wide view. Reads Main only (nightly rollup, ledger, wallets, unrouted Stripe) — no brand DB is opened, hence the "computed at" + recompute. */
 export default function AdminPlatformOverviewPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<PlatformOverview | null>(null);

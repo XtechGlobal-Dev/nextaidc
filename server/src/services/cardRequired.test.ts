@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* The `onboarding.cardRequired` platform setting — the admin toggle that decides
- * whether a NEW signup must put a card on file before the dashboard opens.
- *
- * The value is deliberately read straight off the row rather than through the
- * in-memory settings cache: that cache only refreshes at boot and after a local
- * save, so on a multi-instance deploy a flip on one instance would keep stamping
- * the stale policy on new signups elsewhere until a restart. */
+// onboarding.cardRequired: must a NEW signup put a card on file first. Read straight off the row, not the
+// in-memory cache — on a multi-instance deploy the cache would stamp a stale policy until restart.
 
 vi.mock("../prisma.js", () => ({
   prisma: {

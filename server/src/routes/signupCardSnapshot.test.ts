@@ -2,18 +2,9 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-/* The grandfathering guarantee, enforced mechanically.
- *
- * The whole design rests on one rule: `onboarding.cardRequired` is read ONCE, at
- * account creation, and frozen onto Profile.cardRequiredAtSignup. Every gate
- * downstream reads that column instead. The day someone "helpfully" reads the
- * live setting inside an entitlement check or a middleware, flipping the admin
- * toggle starts retroactively walling paying customers — a silent, severe
- * regression that no behavioural test would catch, because each piece still
- * works in isolation.
- *
- * createUser is 100+ lines wired to email/notifications/Stripe, so these are
- * source-text assertions in the house style (see planActivation.test.ts). */
+// Grandfathering: `onboarding.cardRequired` is read ONCE at signup and frozen onto
+// Profile.cardRequiredAtSignup. Reading the live toggle anywhere downstream would
+// retroactively wall paying customers, and no behavioural test would catch it.
 
 const SERVER_SRC = resolve(import.meta.dirname, "..");
 const authSrc = readFileSync(join(SERVER_SRC, "routes/auth.routes.ts"), "utf8");

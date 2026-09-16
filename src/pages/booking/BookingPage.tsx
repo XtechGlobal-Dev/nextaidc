@@ -7,21 +7,13 @@ import { OverviewTab } from "./OverviewTab";
 import { CalendarTab } from "./CalendarTab";
 import { SettingsTab } from "./SettingsTab";
 
-/**
- * Booking — the AI books appointments on the call when auto-booking is on and
- * Google Calendar is connected. Three tabs:
- *  • Overview  — connection + auto-book status, today's count, upcoming bookings.
- *  • Calendar  — the main working view (month/week/day) with reschedule + cancel.
- *  • Settings  — Google connect, auto-booking toggle, timezone, bookable hours.
- */
+// Booking page: Overview / Calendar / Settings tabs for the AI's on-call appointment booking.
 /** Roomier tab pill — the active one lifts off the rail with a soft shadow. */
 const TAB_CLASS =
   "rounded-lg px-4 py-2 data-[state=active]:font-semibold data-[state=active]:shadow-[var(--shadow-soft)]";
 
 export default function BookingPage() {
-  // Land on the Settings tab when returning from the Google OAuth flow
-  // (…/dashboard/booking?google=connected) so the SettingsTab mounts and shows
-  // the connect result + refreshes the connection status.
+  // Coming back from Google OAuth (?google=…) lands on Settings so it can show the connect result.
   const [tab, setTab] = useState(() =>
     new URLSearchParams(window.location.search).has("google") ? "settings" : "overview",
   );

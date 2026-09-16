@@ -1,10 +1,6 @@
 import { useId } from "react";
 
-/* ------------------------------------------------------------------ *
- *  Hand-written inline-SVG chart primitives for the Dashboard.
- *  No chart library — every visual is a plain <svg>, with gradient
- *  fills, smooth curves and rounded caps for a modern look.
- * ------------------------------------------------------------------ */
+// Hand-written inline-SVG chart primitives for the Dashboard — no chart library.
 
 export const CHART_COLORS = {
   primary: "#2C76ED",
@@ -14,9 +10,7 @@ export const CHART_COLORS = {
   grey: "#E8ECF3",
 } as const;
 
-/* ------------------------------------------------------------------ *
- *  BarChart — compares a small series of values (current vs previous).
- * ------------------------------------------------------------------ */
+// BarChart — small series comparison (current vs previous).
 export interface BarDatum {
   label: string;
   value: number;
@@ -75,9 +69,7 @@ export function BarChart({
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  DonutChart — proportional ring made of stroked arcs.
- * ------------------------------------------------------------------ */
+// DonutChart — proportional ring of stroked arcs.
 export interface DonutSegment {
   label: string;
   value: number;
@@ -144,9 +136,7 @@ export function DonutChart({
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  Sparkline — a tiny smooth line for trends, with gradient area fill.
- * ------------------------------------------------------------------ */
+// Sparkline — tiny smooth trend line with gradient area fill.
 export function Sparkline({
   values,
   color = CHART_COLORS.primary,
@@ -211,10 +201,7 @@ export function Sparkline({
   );
 }
 
-/** Monotone cubic spline (Fritsch–Carlson) → cubic-bezier path. Unlike
- *  Catmull-Rom it never overshoots the data: flat stretches stay flat and
- *  the curve never dips below/above the actual points, so a zero baseline
- *  next to a peak doesn't produce a fake dip under the axis. */
+// Monotone cubic spline (Fritsch–Carlson). Unlike Catmull-Rom it never overshoots, so a zero baseline next to a peak doesn't dip under the axis.
 function smoothPath(pts: readonly (readonly [number, number])[]): string {
   if (pts.length < 2) return pts.length ? `M${pts[0][0]},${pts[0][1]}` : "";
   const n = pts.length;
@@ -251,9 +238,7 @@ function smoothPath(pts: readonly (readonly [number, number])[]): string {
   return d;
 }
 
-/* ------------------------------------------------------------------ *
- *  HourBars — bars indexed by hour-of-day for the "Peak time" card.
- * ------------------------------------------------------------------ */
+// HourBars — hour-of-day bars for the "Peak time" card.
 export function HourBars({
   values,
   peakIndex,
@@ -308,9 +293,7 @@ export function HourBars({
   );
 }
 
-/* ------------------------------------------------------------------ *
- *  RadialGauge — single-value ring (success-rate style).
- * ------------------------------------------------------------------ */
+// RadialGauge — single-value ring (success-rate style).
 export function RadialGauge({
   percent,
   size = 96,

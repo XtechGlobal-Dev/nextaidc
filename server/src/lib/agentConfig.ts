@@ -19,17 +19,12 @@ export const clampName = (s: string | undefined | null): string => (s ?? "").sli
  *  in step, the same way NAME_MAX is mirrored. */
 export const GREETING_MAX = 160;
 
-/** Clamp the opening greeting. It is owner-editable free text that lands in the
- *  master prompt AND the Vapi payload, so an unbounded value would bloat every
- *  call's system prompt. */
+/** Clamp the opening greeting — it lands in every call's system prompt, so it can't be unbounded. */
 export const clampGreeting = (s: string | undefined | null): string =>
   (s ?? "").slice(0, GREETING_MAX);
 
-// Timezone helpers, inlined rather than imported from lib/phoneTimeZone.ts so
-// this module stays dependency-free (that file pulls in libphonenumber-js).
-// rules.timezone used to hold a display label from a 7-entry Australia-only
-// picker; it holds an IANA zone now, and these translate the old values on read
-// so existing customers keep compiling correctly without a data migration.
+// Inlined (not imported from lib/phoneTimeZone.ts) to keep this module dependency-free.
+// Old configs stored a display label instead of an IANA zone; translate on read, no migration.
 const LEGACY_LABEL_TO_IANA: Record<string, string> = {
   "Sydney (AEST/AEDT)": "Australia/Sydney",
   "Melbourne (AEST/AEDT)": "Australia/Melbourne",
@@ -68,11 +63,7 @@ export function timeZoneLabel(tz: string, now: Date = new Date()): string {
   return abbr ? `${city} (${abbr})` : city;
 }
 
-/**
- * Title-case a person's name for storage/display ("redtape" -> "Redtape",
- * "john doe" -> "John Doe"). Only the first letter of each word is forced up so
- * intentional inner caps (e.g. "McCoy") survive. Trims and collapses whitespace.
- */
+/** Title-case a name. Only the first letter per word is forced up so "McCoy" survives. */
 export const titleCaseName = (s: string | undefined | null): string =>
   (s ?? "")
     .trim()
@@ -80,16 +71,8 @@ export const titleCaseName = (s: string | undefined | null): string =>
     .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
     .join(" ");
 
-/* ------------------------------- Agent LLM ------------------------------- *
- *  The LLM that powers every provisioned Vapi assistant. Admin-selectable in
- *  Admin → Settings; the chosen provider/model is stamped on each assistant at
- *  create/sync time (see services/vapi.ts buildAssistantPayload). Kept here —
- *  the dependency-free shared module — so the server settings layer, the routes'
- *  validation and the seed script all read one catalogue.
- *
- *  `provider`/`model` are Vapi's own identifiers, sent verbatim in the assistant
- *  payload. Only add entries you've confirmed Vapi accepts, or agent creation
- *  will 400 for every new customer. */
+/** An admin-selectable LLM for provisioned assistants. `provider`/`model` go to Vapi verbatim —
+ *  only add pairs Vapi accepts, or agent creation 400s for every new customer. */
 export interface AgentLlmOption {
   /** Vapi provider id, e.g. "anthropic" | "openai" | "google". */
   provider: string;
@@ -99,27 +82,14 @@ export interface AgentLlmOption {
   label: string;
   /** Human label for the provider (groups models in the dropdown). */
   providerLabel: string;
-  /** Estimated cost per minute (USD) as shown in Vapi's model picker; null when
-   *  Vapi has no estimate for this model. Synced from Vapi's own cost estimator
-   *  (see scripts/syncVapiModels.mjs). */
+  /** USD/min from Vapi's cost estimator (scripts/syncVapiModels.mjs); null when Vapi has none. */
   costPerMin: number | null;
   /** Estimated response latency (ms) as shown in Vapi's model picker; null when unknown. */
   latencyMs: number | null;
 }
 
-/** Bundled snapshot of the LLM catalogue. At runtime the admin dropdown is fed
- *  the LIVE list fetched from Vapi's OpenAPI schema by services/vapiModels.ts;
- *  this array is the OFFLINE FALLBACK (used when Vapi is unreachable) and the
- *  source of each model's cost/min + latency (which Vapi has no API for — they're
- *  pulled from Vapi's dashboard cost estimator by scripts/syncVapiModels.mjs and
- *  merged onto the live list by provider+model).
- *
- *  Every entry is a Vapi-valid (provider, model) pair. Excluded on purpose:
- *  providers that take a free-text model with no fixed list (anyscale, deepinfra,
- *  openrouter, perplexity-ai, together-ai, custom-llm) and OpenAI's Azure
- *  region-pinned / realtime variants. To refresh, run `node scripts/syncVapiModels.mjs`.
- *  NOTE: a non-Anthropic provider only works once its API key is set on the Vapi
- *  account itself; unset keys make that assistant fail at call time. */
+/** Offline fallback for the live Vapi model list and the only source of cost/latency (no Vapi API). Refresh
+ *  with `node scripts/syncVapiModels.mjs`. Non-Anthropic providers need a key set on the Vapi account. */
 export const AGENT_LLM_OPTIONS: AgentLlmOption[] = [
   // Anthropic
 
@@ -372,10 +342,8 @@ export const AGENT_LLM_OPTIONS: AgentLlmOption[] = [
   { provider: "minimax", model: "MiniMax-M2.7", label: "MiniMax-M2.7", providerLabel: "MiniMax", costPerMin: 0.01, latencyMs: 1200 },
 ];
 
-/** The built-in default LLM — used until an admin saves an override, and the
- *  fallback whenever a stored value isn't in the catalogue any more. Matches the
- *  value the platform shipped with, so behaviour is unchanged until an admin
- *  picks something else. Must stay a member of AGENT_LLM_OPTIONS. */
+/** Default LLM until an admin overrides it, and the fallback when a stored value leaves the
+ *  catalogue. Must stay a member of AGENT_LLM_OPTIONS. */
 export const DEFAULT_AGENT_LLM: { provider: string; model: string } = {
   provider: "anthropic",
   model: "claude-haiku-4-5-20251001",
@@ -386,16 +354,11 @@ export function isKnownAgentLlm(provider: string, model: string): boolean {
   return AGENT_LLM_OPTIONS.some((o) => o.provider === provider && o.model === model);
 }
 
-/** Languages a multilingual-plan customer may enable, beyond the English base.
- *  Bounded by the weakest link in the call pipeline — Deepgram nova-3's
- *  multilingual (code-switching) transcription set; ElevenLabs turbo v2.5 TTS
- *  covers all of these too. Don't add a language here without confirming both
- *  STT and TTS support it, or callers get the "AI can't follow me" experience.
- *  Keep this identical to the client list in src/data/languages.ts. */
+/** Extra languages a multilingual plan may enable. Don't add one without confirming both STT and
+ *  TTS support it. Keep identical to the client list in src/data/languages.ts. */
 export const SUPPORTED_AGENT_LANGUAGES = [
   "Hindi",
-  // Punjabi hidden for now — mirror of the client list (src/data/languages.ts).
-  // Uncomment both to re-enable it as a switch-to language.
+  // Punjabi hidden for now — uncomment here and in src/data/languages.ts to re-enable.
   // "Punjabi",
   // Dialect named deliberately — see the client list (src/data/languages.ts).
   "Chinese (Mandarin)",
@@ -410,12 +373,8 @@ export const SUPPORTED_AGENT_LANGUAGES = [
   "Japanese",
 ] as const;
 
-/** The languages Deepgram nova-3's code-switching mode (`language: "multi"`) can
- *  actually transcribe, alongside English. Deepgram is the default because it's the
- *  fastest, but its multi set is narrow — a caller speaking anything outside it comes
- *  back as confident garbage in the wrong script (Mandarin arriving as Devanagari),
- *  which the LLM then answers as if it understood. Keep this list matched to
- *  Deepgram's published nova-3 multilingual set, NOT to our own language catalogue. */
+/** What Deepgram nova-3 "multi" can actually transcribe. Anything outside it comes back as confident
+ *  garbage in the wrong script, so match this to Deepgram's published set, not our catalogue. */
 const DEEPGRAM_MULTI_LANGUAGES: readonly string[] = [
   "Hindi",
   "Spanish",
@@ -428,10 +387,7 @@ const DEEPGRAM_MULTI_LANGUAGES: readonly string[] = [
   "Japanese",
 ];
 
-/** Google's transcriber model. Vapi validates this against a fixed list of Gemini
- *  model names — "latest" (which Vapi's own multilingual docs still show) is
- *  REJECTED and fails the assistant update. Flash is the right tier for a live call:
- *  the pro models are slower and transcription doesn't need the extra reasoning. */
+/** Vapi rejects "latest" here (despite its own docs) and fails the update; flash is fast enough for live STT. */
 const GOOGLE_TRANSCRIBER_MODEL = "gemini-2.5-flash";
 
 /** The speech-to-text config for a set of enabled languages. */
@@ -439,19 +395,8 @@ export type TranscriberConfig =
   | { provider: "deepgram"; model: "nova-3"; language: "en" | "multi" }
   | { provider: "google"; model: string; language: "Multilingual" };
 
-/** Pick the transcriber that can actually hear this agent's callers:
- *   - no extra languages → Deepgram nova-3, English only (fastest);
- *   - every extra language inside Deepgram's multi set → nova-3 "multi" (unchanged
- *     behaviour for every agent that existed before Punjabi/Mandarin);
- *   - anything beyond it (Punjabi, Mandarin) → Google's multilingual model, which
- *     covers them. Slower than Deepgram, but the alternative is not understanding
- *     the caller at all. */
-/** The transcription-coverage tier an agent needs, from its enabled languages.
- *  Mirrors transcriberFor()'s branching so the fallback logic can pick only
- *  providers that can actually hear this agent (see lib/transcribers.ts):
- *   - "en"    → English only
- *   - "multi" → English + Deepgram-covered languages
- *   - "wide"  → beyond Deepgram (e.g. Mandarin) — only Google covers it today. */
+/** Coverage tier from enabled languages: "en", "multi" (Deepgram-covered), "wide" (beyond Deepgram —
+ *  only Google today). Must mirror transcriberFor()'s branching. */
 export function transcriberTierFor(languages: readonly string[]): "en" | "multi" | "wide" {
   if (!languages.length) return "en";
   return languages.every((l) => DEEPGRAM_MULTI_LANGUAGES.includes(l)) ? "multi" : "wide";
@@ -461,12 +406,8 @@ export function transcriberFor(languages: readonly string[]): TranscriberConfig 
   if (!languages.length) return { provider: "deepgram", model: "nova-3", language: "en" };
   const deepgramCovers = languages.every((l) => DEEPGRAM_MULTI_LANGUAGES.includes(l));
   if (deepgramCovers) return { provider: "deepgram", model: "nova-3", language: "multi" };
-  // Google only, with NO Deepgram fallback on purpose: Deepgram can't hear these
-  // languages, so falling back to it would transcribe the caller as confident
-  // nonsense and the agent would answer as if it understood. Vapi ends the call if
-  // Google fails — a clear failure beats a call that silently misunderstands.
-  // Vapi's Google transcriber validates `language` against a Title-Cased enum
-  // ("Multilingual", "English", …) — lowercase "multilingual" is REJECTED.
+  // No Deepgram fallback on purpose: it can't hear these languages and would produce confident
+  // nonsense. A clear failure beats silent misunderstanding. Vapi rejects lowercase "multilingual".
   return { provider: "google", model: GOOGLE_TRANSCRIBER_MODEL, language: "Multilingual" };
 }
 
@@ -474,12 +415,8 @@ export function transcriberFor(languages: readonly string[]): TranscriberConfig 
  *  terms, and a business's own vocabulary fits comfortably well under this. */
 const TRANSCRIBER_KEYTERM_MAX = 50;
 
-/** Domain vocabulary for Deepgram nova-3 keyterm prompting: the business name +
- *  its service names, so the live STT hears "split system" instead of "spirit
- *  system" and gets the business name right. English-only (Deepgram supports
- *  keyterm on nova-3 English) — the caller applies it only when language is "en".
- *  Deduped case-insensitively, trimmed, capped; over-long entries are skipped
- *  (they're sentences, not vocabulary, and dilute the boost). */
+/** Deepgram keyterms (business name + services) so STT hears "split system", not "spirit system".
+ *  English-only on nova-3. Over-long entries are sentences, not vocabulary, and dilute the boost. */
 export function transcriberKeyterms(config: AgentConfig): string[] {
   const raw = [config.identity.businessName, ...config.knowledge.services];
   const seen = new Set<string>();
@@ -496,21 +433,16 @@ export function transcriberKeyterms(config: AgentConfig): string[] {
   return out;
 }
 
-/** Languages only available on an ElevenLabs voice. Deepgram's Aura-2 voices are
- *  English-only and the Deepgram pipeline has no coverage for these two, so they're
- *  hidden (and stripped on save) whenever the agent is on a Deepgram voice.
- *  Mirrored client-side (src/data/languages.ts, ELEVENLABS_ONLY_LANGUAGES). */
+/** Deepgram Aura-2 voices are English-only, so these are hidden and stripped on save for Deepgram
+ *  agents. Mirrored in src/data/languages.ts. */
 export const ELEVENLABS_ONLY_LANGUAGES: readonly string[] = [
   "Punjabi",
   "Chinese (Mandarin)",
   "Nepali",
 ];
 
-/** Sanitize a stored/submitted language list: known entries only, deduped, in
- *  catalogue order. English is the implicit base and never stored. Pass the agent's
- *  voice provider to also drop the ElevenLabs-only languages on a Deepgram voice —
- *  without it a stale client (or a later voice change) could persist a language the
- *  agent can't actually speak. */
+/** Known languages only, deduped, catalogue order; English is implicit. Pass the voice provider
+ *  so a stale client or voice change can't persist a language the agent can't speak. */
 export function sanitizeAgentLanguages(
   raw: unknown,
   voiceProvider?: "deepgram" | "elevenlabs",
@@ -535,18 +467,14 @@ export interface AgentConfig {
     businessName: string;
     voiceId: string;
     greetingMessage: string;
-    /** The voice provider this agent was set up with ("deepgram" | "elevenlabs").
-     *  Stamped at provision/save from the then-current global toggle, then sticky —
-     *  a later global toggle change never retroactively switches an existing agent.
-     *  Unset on legacy configs → resolved from the voiceId (see providerForVoiceId). */
+    /** Stamped from the global toggle at provision/save, then sticky — a later toggle change never
+     *  switches an existing agent. Unset on legacy configs → resolved from voiceId. */
     voiceProvider?: "deepgram" | "elevenlabs";
     /** Extra languages the assistant may answer in (multilingual plans only).
      *  English is always the base and isn't stored here. Empty/absent → English only. */
     languages?: string[];
-    /** ISO 3166-1 alpha-2 country of the customer (uppercase), captured at
-     *  onboarding from the number-selection step. Drives the regional style
-     *  block appended to the live prompt (see lib/countryStyles.ts). Absent on
-     *  legacy configs → no regional style until backfilled from their number. */
+    /** Uppercase ISO alpha-2, captured at onboarding; drives the regional style block.
+     *  Absent on legacy configs until backfilled from their number. */
     country?: string;
   };
   knowledge: {
@@ -566,9 +494,7 @@ export interface AgentConfig {
   automations: {
     ownerEmailSummary: boolean;
     ownerSmsSummary: boolean;
-    /** Master switch for "Text Info to Callers" (see `smsOnRequest`). Historically
-     *  a dormant post-call flag that never sent anything — repurposed rather than
-     *  replaced so no stored config needs migrating. */
+    /** Master switch for "Text Info to Callers". Repurposed old dormant flag so no config needs migrating. */
     clientPostCallSms: boolean;
     ownerWhatsAppSummary: boolean;
     /** Summary-only override destinations. Blank → account default (signup email / mobile). */
@@ -602,53 +528,10 @@ export interface AgentConfig {
 
 const bullet = (lines: string[]) => lines.map((l) => `- ${l}`).join("\n");
 
-/**
- * The editable scaffold that wraps every assistant's prompt. An admin can
- * override this in Admin → Settings (stored as the `prompt.masterTemplate`
- * platform setting); when unset, this default is used. Two placeholders are
- * substituted at compile time:
- *   {{assistantName}} → the assistant's name (falls back to "the receptionist")
- *   {{businessName}}  → the owner's business name (falls back to "the business")
- *   {{identity}}      → the assistant's IDENTITY block (who it is + greeting),
- *                       rendered right under # NAME; templates without this
- *                       marker keep identity inside {{sections}}
- *   {{sections}}      → the per-customer blocks (services, FAQs, rules…)
- *                       compiled from the structured AgentConfig
- * Placeholder matching is case-insensitive. A custom template that omits
- * {{sections}} still gets the per-customer blocks appended, so an admin can
- * never accidentally strip the assistant's knowledge.
- *
- * This SHORT scaffold is a token-efficient equivalent of the default below —
- * it is ONLY ever sent to the live agent (Vapi/WhatsApp) when the admin's
- * "Live call prompt" toggle is on Short. Customers never see it: their AI
- * Brain always displays the full template (custom override or the default).
- */
-/**
- * How the agent is allowed to SPEAK on a call — length, directness, one question
- * at a time, how to sign off. This is a platform guarantee rather than
- * per-customer content, so it is appended verbatim to every wire prompt in
- * buildVapiSystemPrompt (services/vapi.ts), the same way REGIONAL STYLE is.
- *
- * That injection is what makes it universal. Compiling it into the scaffold
- * alone reaches only agents whose prompt is still auto-compiled: an owner who
- * hand-edits their master prompt freezes it (`masterPromptDirty`), and
- * baseSystemPrompt then serves that frozen text — so a template change would
- * never reach them. Appending after summarization also keeps the summarizer
- * from compressing these rules away.
- *
- * Exported so the section can be kept in one place; DEFAULT_PROMPT_TEMPLATE_SHORT
- * embeds this same text so the uninjected prompt already reads correctly.
- */
-/** How to take a number the caller reads out. Kept separate from the brevity
- *  rules because it is stamped onto every assistant the same way (see
- *  buildVapiSystemPrompt) but is a different guarantee: brevity is about how
- *  much to say, this is about not making the caller repeat themselves.
- *
- *  The transcriber side of this is handled by Deepgram `numerals` + a longer
- *  number endpointing window (services/vapi.ts). These rules cover what's left:
- *  even with clean digits the model would re-ask when a number arrived in two
- *  pieces, because nothing told it that a short digit run is an unfinished
- *  number rather than a complete answer. */
+// Scaffold placeholders are case-insensitive; a template missing {{sections}} still gets them appended.
+// WIRE_* rules are appended to every wire prompt in services/vapi.ts — a frozen prompt would otherwise never see changes.
+/** Number-taking rules. Deepgram `numerals` gives clean digits; this stops the model re-asking
+ *  when a number arrives in two pieces. */
 export const WIRE_NUMBER_RULES = [
   "## TAKING A NUMBER",
   "- Callers read numbers out in groups, with pauses. A short run of digits is almost never the whole number — wait for the rest instead of replying to a fragment.",
@@ -696,10 +579,7 @@ export const WIRE_BEHAVIOUR_RULES = [
  *  a stale or summarizer-reworded copy can be replaced with WIRE_BEHAVIOUR_RULES. */
 const HOW_MUCH_TO_SAY_RE = /(^|\n)##[ \t]*HOW MUCH TO SAY[\s\S]*?(?=\n#{1,2}[ \t]|$)/i;
 
-/** Drop any existing HOW MUCH TO SAY section from a prompt. Used before appending
- *  the canonical block so an agent never carries two (possibly conflicting) copies
- *  — the compiled one may have been reworded by the summarizer, and a frozen
- *  prompt may carry an old edited version. */
+/** Strip any existing HOW MUCH TO SAY section so the prompt never carries two conflicting copies. */
 export function stripHowMuchToSay(prompt: string): string {
   return prompt.replace(HOW_MUCH_TO_SAY_RE, "$1").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -731,10 +611,7 @@ export const DEFAULT_PROMPT_TEMPLATE_SHORT = [
   "## CLOSING\nOnce you have the useful details, close in ONE line — confirm only what matters (a booked time, or what they need) and never read their details back. The team will be in touch shortly (during business hours if it's after hours).\nNEVER end the call yourself. A \"no\" to something you offered is NOT the end of the call — it only means they don't want that one thing. Reply \"No worries — anything else I can help you with?\" and keep going. Only ever sign off once the CALLER has clearly finished: \"bye\", \"that's all\", \"thanks, that's it\". Saying a sign-off ends the call instantly, so never say one while the caller may still have questions.\nWhen they do finish, sign off warmly once — like a human, thanking them for calling even if they decided not to book: \"No worries at all — thanks for calling, have a great day!\" Never sign off with a single word — that sounds like a machine hanging up on them. Don't restart the conversation over a small background sound after goodbye.",
 ].join("\n\n");
 
-/** The default (full/detailed) scaffold — what admins edit in Settings and what
- *  customers see in their AI Brain. An admin override (`prompt.masterTemplate`)
- *  replaces it; the SHORT scaffold above may replace it on the wire to Vapi only.
- *  Keep this identical to the client copy in src/lib/compilePrompt.ts. */
+/** Full scaffold (what customers see in AI Brain). Keep identical to src/lib/compilePrompt.ts. */
 export const DEFAULT_PROMPT_TEMPLATE = [
   "# NAME: {{assistantName}}",
   "{{identity}}",
@@ -819,14 +696,8 @@ export function autoGreeting(businessName?: string | null): string {
  *  "How can I help you today?" and legacy "How can I help you?" endings. */
 const AUTO_GREETING_RE = /^thanks for calling(?: .+?)?\. how can i help you(?: today)?\?$/i;
 
-/** Keep the greeting's business name in sync with the account's.
- *
- *  The greeting is stored with the business name baked in ("Thanks for calling
- *  Acme. How can I help you today?"), so renaming the business used to leave the
- *  agent greeting callers with the OLD name — on every live call. If the stored
- *  greeting is still one of ours (matches the generated shape, whatever name it
- *  carries), rebuild it from the current business name. A greeting the owner
- *  actually wrote doesn't match the shape and is never touched. */
+/** Rebuild an auto-generated greeting from the current business name (a rename used to leave the
+ *  old name in every live call). An owner-written greeting doesn't match the shape and is untouched. */
 export function resolveGreeting(greeting: string | undefined | null, businessName?: string | null): string {
   const current = greeting?.trim();
   if (!current) return autoGreeting(businessName);
@@ -838,12 +709,8 @@ export function resolveGreeting(greeting: string | undefined | null, businessNam
 const NAME_WORD_CHAR = /[\p{L}\p{N}]/u;
 const isNameWordChar = (ch: string | undefined): boolean => !!ch && NAME_WORD_CHAR.test(ch);
 
-/** Replace standalone, case-insensitive mentions of `from` with `to`.
- *
- *  Hand-rolled instead of a RegExp because a business name is arbitrary text
- *  ("A&B Ltd.", "Bob's Café") — escaping it into a pattern is fiddly, and the
- *  word-boundary rule we want (letters/digits either side, so "insta" doesn't
- *  match inside "Instagram") isn't what \b gives for names with punctuation. */
+/** Replace whole-word, case-insensitive mentions of `from`. Hand-rolled because \b misbehaves on
+ *  names with punctuation ("A&B Ltd.") and "insta" must not match inside "Instagram". */
 export function replaceBusinessName(text: string, from: string, to: string): string {
   const needle = from.trim();
   if (!text || !needle) return text;
@@ -863,18 +730,8 @@ export function replaceBusinessName(text: string, from: string, to: string): str
   }
 }
 
-/** Carry a business rename through every field that baked the OLD name into
- *  free text.
- *
- *  Onboarding generates scenarios, FAQs and facts that name the business
- *  ("The caller is an existing customer of Acme"), so renaming the business
- *  used to leave those — and the live prompt built from them — talking about
- *  the previous business. Renames only whole-word mentions; text that never
- *  named the business is untouched, and the same rename applied twice is a
- *  no-op. Returns the original config object when nothing matched.
- *
- *  The master prompt is only rewritten when the owner froze it with a manual
- *  edit — an auto-compiled prompt is rebuilt from the renamed config anyway. */
+/** Carry a business rename through onboarding-generated text (whole-word only, idempotent). Returns
+ *  the same object when nothing matched. The master prompt is only rewritten when frozen by a manual edit. */
 export function renameBusinessInConfig(
   config: AgentConfig,
   previousName: string | null | undefined,
@@ -882,9 +739,7 @@ export function renameBusinessInConfig(
 ): AgentConfig {
   const from = previousName?.trim() ?? "";
   const to = nextName?.trim() ?? "";
-  // A blank or 1-char previous name is too weak to match on safely (renaming
-  // every standalone "a" would shred the config), and an unchanged name is a
-  // no-op. Case-only changes still flow through, so "acme" → "Acme" lands.
+  // A 1-char previous name would shred the config (every standalone "a"). Case-only changes still flow.
   if (from.length < 2 || !to || from === to) return config;
 
   let changed = false;
@@ -928,20 +783,15 @@ export function renameBusinessInConfig(
   return changed ? next : config;
 }
 
-/** The per-customer blocks (identity → rules) injected at the {{sections}}
- *  placeholder. These are always code-generated from the structured config —
- *  the admin template only controls the surrounding scaffold, never how a
- *  customer's own knowledge is rendered. */
+// Per-customer blocks are always code-generated; the admin template only controls the scaffold.
 function compileIdentity(config: AgentConfig): string {
   const { identity } = config;
   const greeting = resolveGreeting(identity.greetingMessage, identity.businessName);
   return `## IDENTITY\nYou are ${identity.assistantName || "Taylor"}, the 24/7 AI phone receptionist for ${identity.businessName || "the business"}.\nOpening greeting: "${greeting}"\nIf asked, politely disclose that you are an AI assistant.`;
 }
 
-/** The multilingual answering rules for the prompt. Exported so the Vapi
- *  payload builder can graft it onto a frozen (manually edited) prompt whose
- *  owner enabled languages AFTER editing — otherwise the live agent would
- *  never learn it may switch languages. */
+/** Exported so the Vapi payload builder can graft it onto a frozen prompt whose owner enabled
+ *  languages after editing — otherwise the live agent never learns it may switch. */
 export function compileLanguagesSection(languages: string[]): string {
   return `## LANGUAGES\nBesides English, you also speak: ${languages.join(", ")}.\nStart every call in English. The moment the caller speaks — or asks for — one of these languages, switch to it and reply ONLY in that language: every sentence, from the very first reply after the switch. Keep the same warmth and follow all the same rules.\nOnce switched, stay in that language for the rest of the call. Never drift back to English mid-conversation unless the caller clearly switches back to English themselves.\nIf you didn't catch what the caller said, ask them to repeat it in the language they were speaking — don't fall back to English.\nIf the caller uses a language not listed here, apologise briefly in English and continue in English.`;
 }
@@ -965,10 +815,8 @@ function compileSections(config: AgentConfig, ctx?: CompileContext): string {
   }
 
 
-  // Multilingual answering — only rendered when the (plan-gated) list is set.
-  // No provider filter here on purpose: this module stays dependency-free, and
-  // ElevenLabs-only languages are already stripped from identity.languages at save
-  // time (agent.routes.ts) and again when the Vapi payload is built.
+  // No provider filter on purpose (keeps this dependency-free); ElevenLabs-only languages are
+  // already stripped at save time and again when the Vapi payload is built.
   const languages = sanitizeAgentLanguages(identity.languages);
   if (languages.length) parts.push(compileLanguagesSection(languages));
 
@@ -1016,10 +864,7 @@ function compileSections(config: AgentConfig, ctx?: CompileContext): string {
   if (rules.businessHours.trim())
     parts.push(`## BUSINESS HOURS\n${rules.businessHours}`);
 
-  // Timezone — always in the prompt so the assistant knows the business's
-  // region and local time (Australian vs Indian vs American caller base).
-  // Emitted as a readable label plus the IANA zone: the label is what the model
-  // should reason in, the IANA zone removes any DST ambiguity.
+  // Label for the model to reason in, plus the IANA zone to remove DST ambiguity.
   const zone = normalizeTimeZone(rules.timezone);
   if (zone)
     parts.push(`## TIMEZONE\nThe business operates in the ${timeZoneLabel(zone)} timezone (${zone}).`);
@@ -1030,12 +875,7 @@ function compileSections(config: AgentConfig, ctx?: CompileContext): string {
   return parts.join("\n\n");
 }
 
-/**
- * Compile the full master prompt: substitute the admin-editable scaffold
- * template with the owner's business name and inject the per-customer blocks.
- * Pass a `template` (the effective `prompt.masterTemplate` setting) to use an
- * admin override; omit it to use DEFAULT_PROMPT_TEMPLATE.
- */
+/** Compile the master prompt. `template` is the admin override; omit for DEFAULT_PROMPT_TEMPLATE. */
 export function compileMasterPrompt(config: AgentConfig, template?: string, ctx?: CompileContext): string {
   const tpl = (template ?? "").trim() || DEFAULT_PROMPT_TEMPLATE;
   // Default assistant name when the owner hasn't set one (fills {{assistantName}}).
@@ -1047,9 +887,7 @@ export function compileMasterPrompt(config: AgentConfig, template?: string, ctx?
   let out = tpl
     .replace(/\{\{\s*assistantName\s*\}\}/gi, () => name)
     .replace(/\{\{\s*businessName\s*\}\}/gi, () => biz);
-  // The identity block renders at {{identity}} (right under # NAME in the
-  // default template). A custom template without the marker keeps identity
-  // with the rest of the sections so it's never lost.
+  // A custom template without {{identity}} keeps identity with the sections so it's never lost.
   const hasIdentitySlot = /\{\{\s*identity\s*\}\}/i.test(out);
   if (hasIdentitySlot) out = out.replace(/\{\{\s*identity\s*\}\}/gi, () => identitySection);
   const rest = compileSections(config, ctx);
@@ -1125,10 +963,8 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
     // owner flips clientPostCallSms on.
     smsOnRequest: { items: seededSmsInfoItems() },
   },
-  // backgroundSound "office": every new agent starts with office ambience so the
-  // line sounds staffed rather than dead. "default" defers to Vapi, which is not
-  // the same thing and can change under us. Seed only — an existing agent keeps
-  // whatever its owner set. Mirrors src/data/defaultAgentConfig.ts.
+  // "office" so a new line sounds staffed; "default" defers to Vapi and can change under us.
+  // Seed only. Mirrors src/data/defaultAgentConfig.ts.
   advanced: { masterPrompt: "", masterPromptDirty: false, creativity: 0.3, voiceStability: 0.45, voiceSpeed: 1.05, allowHangUp: true, backgroundSound: "office" },
 };
 
@@ -1136,17 +972,8 @@ DEFAULT_AGENT_CONFIG.advanced.masterPrompt = compileMasterPrompt(DEFAULT_AGENT_C
 
 type Automations = AgentConfig["automations"];
 
-/**
- * Resolve a stored config's `automations` into the full shape, backfilling any
- * missing fields from defaults.
- *
- * Email + WhatsApp owner summaries are on-by-default; SMS is OFF by default (it
- * costs per message — the owner opts in). A "legacy" config — one saved before
- * this feature existed, detected by the absence of the `summaryEmail` key — never
- * had these toggles set intentionally, so we apply the same defaults (email +
- * WhatsApp on, SMS off). Once a user touches the feature the override fields are
- * present, so their explicit on/off choices are respected.
- */
+/** Backfill `automations` from defaults. A legacy config (no `summaryEmail` key) never set the
+ *  toggles intentionally, so it gets email + WhatsApp on, SMS off (SMS costs per message). */
 export function normalizeAutomations(raw: unknown): Automations {
   const a = (raw ?? {}) as Partial<Automations>;
   const legacy = a.summaryEmail === undefined;
@@ -1156,19 +983,13 @@ export function normalizeAutomations(raw: unknown): Automations {
     merged.ownerSmsSummary = false;
     merged.ownerWhatsAppSummary = true;
   }
-  // The spread above would hand every caller the SAME seed array from
-  // DEFAULT_AGENT_CONFIG — one account editing an item would mutate it for every
-  // config normalized in this process. Always resolve to a fresh, sanitized list.
+  // The spread would share DEFAULT_AGENT_CONFIG's seed array across accounts — always build a fresh list.
   merged.smsOnRequest = { items: normalizeSmsInfoItems(a.smsOnRequest?.items) };
   return merged;
 }
 
-/**
- * Coerce a stored `smsOnRequest.items` array into the full shape. A config saved
- * before this feature existed (or one whose list was wiped) falls back to the
- * seeded catalogue, so an owner who turns the feature on always finds something
- * sensible waiting rather than an empty screen.
- */
+/** Coerce stored `smsOnRequest.items`; a missing list falls back to the seeded catalogue so the
+ *  owner never turns the feature on to an empty screen. */
 export function normalizeSmsInfoItems(raw: unknown): SmsInfoItem[] {
   if (!Array.isArray(raw)) return seededSmsInfoItems();
   const seen = new Set<string>();
@@ -1182,9 +1003,7 @@ export function normalizeSmsInfoItems(raw: unknown): SmsInfoItem[] {
     // nothing to send. Either way the row is unusable — drop it.
     if (!key || !template || seen.has(key)) continue;
     seen.add(key);
-    // At most MAX_ENABLED_SMS_INFO_ITEMS may be ON — a client bypassing the UI
-    // can't enable a fourth. Extras are paused (kept as a row), not dropped, so
-    // the owner doesn't silently lose the detail.
+    // Cap enabled rows even if a client bypasses the UI; extras are paused, not dropped.
     let enabled = r.enabled !== false;
     if (enabled && enabledCount >= MAX_ENABLED_SMS_INFO_ITEMS) enabled = false;
     if (enabled) enabledCount++;

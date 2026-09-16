@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Provisioning a brand's database — the state machine, not the
- *  infrastructure. Neon, the migration runner and the database clients
- *  are stand-ins; what is checked is the order of things and where each
- *  failure leaves a brand, because that is what "never half-works" means.
- * ------------------------------------------------------------------ */
+// Provisioning state machine, not infrastructure: checks the order of steps and
+// where each failure leaves a brand ("never half-works").
 
 const h = vi.hoisted(() => {
   const brandDatabase = {

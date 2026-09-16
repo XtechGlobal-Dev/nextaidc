@@ -18,26 +18,12 @@ import {
   rescheduleAppointment,
 } from "../services/booking/engine.js";
 
-/* ------------------------------------------------------------------ *
- *  Owner-facing booking module API (authed). Powers the 3-tab Booking UI:
- *  Overview, Calendar, Settings. All config lives on the existing CrmIntegration
- *  row (+ Profile.website) — no new config surface.
- * ------------------------------------------------------------------ */
+// Owner-facing booking module API (authed). Config lives on the existing CrmIntegration row + Profile.website.
 
 const router = express.Router();
 
-/** Re-push the owner's live assistant so booking tool/prompt changes take effect
- *  on real inbound calls immediately (attaches/removes checkAvailability +
- *  createBooking as auto-book flips, and refreshes the booking prompt). Returns
- *  whether the live assistant was actually updated. Never throws.
- *
- *  Strictly a re-sync: it never brings an assistant into existence. Gating on the
- *  conversion row alone wasn't enough — that row is created at signup for every
- *  account, so a customer with no plan and no number who merely saved their
- *  booking settings reached upsertAssistant with a null id and had a live Vapi
- *  assistant CREATED for them, bypassing the provisioning rules in
- *  provisionAgentForUser. Provisioning stays owned by picking a plan or claiming
- *  a number; the config saved here is picked up whenever that happens. */
+/** Re-pushes the live assistant so booking changes hit real calls now. Never throws. Strictly a re-sync: it must
+ *  never CREATE an assistant (that once happened for plan-less accounts, bypassing provisionAgentForUser). */
 async function resyncAssistant(userId: string): Promise<boolean> {
   // Read outside the try so the catch can queue a retry against this row.
   const db = await tenantForUser(userId).catch(() => null);
@@ -57,9 +43,7 @@ async function resyncAssistant(userId: string): Promise<boolean> {
     return true;
   } catch (e) {
     console.warn(`[booking] assistant resync failed for ${userId}:`, e);
-    // Queue it: the settings are already saved, so without a retry the AI would
-    // keep taking (or refusing) bookings on the old rules with no sign anything
-    // is wrong.
+    // Queue a retry — settings are already saved, so otherwise the AI silently keeps the old rules.
     await markVapiSyncPending(db, conv.id, e);
     return false;
   }
@@ -321,9 +305,7 @@ router.put(
       create: { userId, ...data },
     });
 
-    // Booking behaviour changed → re-push the live assistant NOW (awaited) so the
-    // tools + prompt on real inbound calls immediately match the new settings, and
-    // the response can tell the user whether their AI was updated.
+    // Awaited on purpose: real calls should match the new settings immediately, and the response reports the outcome.
     const synced = await resyncAssistant(userId);
 
     const config = await getBookingConfig(userId);

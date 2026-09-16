@@ -112,10 +112,7 @@ import { escapeHtml } from "../lib/escapeHtml.js";
 import { MAX_DEPARTMENTS } from "../lib/transfer.js";
 import { MAX_MONTHLY_INTERVAL_COUNT, cycleMonths } from "../lib/billingInterval.js";
 import { publicApiBaseUrl } from "../env.js";
-// Account emails go to people who belong to a BRAND as often as to the
-// platform, so every link in them is resolved against the request's tenant —
-// a brand's staff member sent to the platform's sign-in page is the white
-// label silently coming off.
+// Email links resolve against the request's tenant — sending a brand's staff to the platform sign-in page breaks the white label.
 import { brandAppUrl, brandDisplayName } from "../lib/brandUrls.js";
 import {
   TRIAL_MINUTES_KEY,
@@ -401,14 +398,7 @@ router.post(
   }),
 );
 
-/**
- * Normalise any plan price to a MONTHLY figure.
- *
- * A cycle is `interval` x `intervalCount`, so a $300 quarterly plan contributes
- * $100 of MRR, not $300. Before multi-month cycles existed the count was always
- * 1 and this was a pure unit conversion; now it is the divisor that stops a
- * quarterly or annual plan from reading as several times its real monthly value.
- */
+/** Plan price as a MONTHLY figure — a $300 quarterly plan is $100 MRR, so intervalCount is the divisor. */
 function monthlyCents(priceCents: number, interval: string, intervalCount = 1): number {
   return priceCents / cycleMonths(interval, intervalCount);
 }
@@ -419,9 +409,7 @@ router.get(
   requirePermission("overview"),
   asyncHandler(async (req, res) => {
     const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    // A brand-scoped section: the admin's own brand, read from its database.
-    // Phone numbers are the one thing read from Main — inventory is the
-    // platform's, stamped with the brand that holds it.
+    // Brand-scoped: read from the brand's DB. Phone numbers are the exception — inventory lives in Main, stamped with the holder.
     const db = await requestTenant(req);
     const brandId = req.user!.brandId!;
     const customerScope = { user: { role: "USER" as const } };
@@ -567,14 +555,7 @@ router.get(
   }),
 );
 
-/**
- * How many calls — one brand's, or every brand's.
- *
- * Calls live in each brand's own database (phase 2a), so a platform-wide
- * number is a sum over tenants, and a brand's number is a count in its own. A
- * brand whose database is not ready yet counts as zero rather than failing the
- * whole overview.
- */
+/** Call count for one brand or all. Calls live per brand DB, so platform-wide is a sum over tenants; a not-ready brand counts as zero. */
 async function countCalls(
   brandId: string | null | undefined,
   where: TenantPrisma.CallLogWhereInput = {},
@@ -620,11 +601,7 @@ async function loadTrialCtx(): Promise<TrialCtx> {
   return { trialMinutes, trialDays, now: new Date() };
 }
 
-/** Where a "none" customer actually sits in the lifecycle. Both a mid-funnel
- *  drop-off and a completed-onboarding customer on the CARD-LESS free trial carry
- *  subscriptionStatus "none" (by design — the dashboard is reachable without a
- *  plan post-revamp), so status alone can't tell them apart. onboardingCompletedAt
- *  is the divider; the trial's own minutes/date decide whether it's still live. */
+/** Where a "none" customer sits: a mid-funnel drop-off and a card-less free-trial user share that status, so onboardingCompletedAt is the divider. */
 function deriveCustomerLifecycle(
   profile: {
     subscriptionStatus: string;
@@ -694,15 +671,9 @@ function serializeCustomer(
     // Real subscription state (not the legacy free/premium flag) so the admin
     // sees the actual plan name + status (Trial/Active/Past due).
     subscriptionStatus: u.profile?.subscriptionStatus ?? "none",
-    // Derived "signup incomplete" flag: the customer verified their account but
-    // never FINISHED onboarding (no plan, no card-less trial yet). Derived, not a
-    // stored status, so it can never drift from the real state. Distinct both from
-    // a churned "canceled" customer and — since the card-less-trial revamp — from a
-    // customer who completed onboarding and is on the free trial at status "none".
+    // Verified but never FINISHED onboarding. Derived, not stored, so it can't drift.
     onboarding: lifecycle.onboarding,
-    // Completed onboarding, no paid plan, but still inside the card-less free
-    // trial. subscriptionStatus stays "none" for them, so this is what tells the
-    // admin they're a live trial user rather than a mid-funnel lead.
+    // Completed onboarding, on the card-less free trial (status still "none") — a live user, not a lead.
     freeTrial: lifecycle.freeTrial,
     // True only for an admin account lock (vs a grace-lapsed billing suspension).
     suspended: !!u.profile?.suspendedAt,
@@ -714,9 +685,7 @@ function serializeCustomer(
     // Notification-email opt-out timestamp (null = still subscribed). Surfaces
     // in the admin customers table so support can see who won't get reminders.
     emailOptOutAt: u.emailOptOutAt ?? null,
-    // Live presence: the customer has the app open right now (an active SSE
-    // stream). Drives the green dot in the customers table. Point-in-time only —
-    // it is NOT a "last seen" timestamp and does not survive an API restart.
+    // Live SSE presence. Point-in-time only — NOT "last seen", and doesn't survive an API restart.
     online: onlineIds?.has(u.id) ?? false,
   };
 }
@@ -736,9 +705,7 @@ const customerSelectBase = {
       subscriptionStatus: true,
       stripeSubscriptionId: true,
       suspendedAt: true,
-      // Lifecycle inputs: distinguish a genuinely mid-funnel signup from a
-      // completed-onboarding customer on the card-less free trial (both sit at
-      // subscriptionStatus "none" — see deriveCustomerLifecycle).
+      // Lifecycle inputs (see deriveCustomerLifecycle).
       onboardingCompletedAt: true,
       createdAt: true,
       trialStartedAt: true,
@@ -761,11 +728,7 @@ const customerSelectNoAssistant = {
   conversion: { select: { id: true } },
 } as const;
 
-/**
- * Customers as the list and detail pages show them. Two things Prisma cannot
- * join for us any more: the plan (the catalogue is in the control plane) and
- * each agent's call count (calls have no relation to the agent record).
- */
+/** Customers as the pages show them. Plan (control plane) and call count (no relation) can't be joined by Prisma any more. */
 async function withCustomerExtras<
   T extends {
     id: string;
@@ -916,9 +879,7 @@ router.post(
 
     await db.profile.update({
       where: { userId: req.params.id },
-      // suspendedAt marks an ADMIN account lock (blocks login entirely); the
-      // subscriptionStatus="suspended" keeps the existing entitlement/number-detach
-      // behaviour consistent with a billing suspension.
+      // suspendedAt = admin lock (blocks login); the status keeps entitlement/number-detach behaving like a billing suspension.
       data: { subscriptionStatus: "suspended", suspendedAt: new Date() },
     });
     // Detach their number from answering (blocked → setNumberAssistant null). We
@@ -955,24 +916,13 @@ router.post(
   }),
 );
 
-/**
- * Mint a session token for a customer so an admin can enter their panel and set
- * things up on their behalf ("Access panel" / impersonation). ADMIN-only, never
- * for other admins/staff, and every entry is audit-logged.
- */
+/** Impersonation: mint a customer session for an admin. ADMIN-only, never for other admins/staff, every entry audited. */
 router.post(
   "/customers/:id/impersonate",
   requireAdmin,
   asyncHandler(async (req, res) => {
-    // THE PIN IS CHECKED HERE, before anything else happens.
-    //
-    // The dialog that collects it is hidden behind an emoji in the header, and
-    // that hiding is worth nothing by itself — this endpoint is still reachable
-    // by any admin session with curl. A client-side check would be worth even
-    // less. This is the gate.
-    //
-    // Checked BEFORE the target is looked up so a wrong PIN can't be used to
-    // probe which customer ids exist.
+    // PIN checked HERE, first — the hidden dialog is worth nothing against curl. Before the target
+    // lookup so a wrong PIN can't probe which customer ids exist.
     const { pin } = z.object({ pin: z.string() }).parse(req.body ?? {});
 
     const lockedMs = await lockedForMs();
@@ -985,9 +935,7 @@ router.post(
 
     if (!(await verifyPin(pin))) {
       const lockedForNow = await registerFailure();
-      // Every failure is logged. A run of these is the signal that someone is
-      // guessing, and without recording them the audit trail would show only
-      // the successful entry that eventually followed.
+      // Log every failure — a run of them is the guessing signal the audit trail would otherwise miss.
       void audit({
         actorId: req.user!.sub,
         actorBrandId: req.user!.brandId ?? null,
@@ -1022,14 +970,8 @@ router.post(
     if (!user) throw notFound("Customer not found");
     if (isAdminTeamRole(user.role))
       throw badRequest("You can only access customer accounts.");
-    // Block only a customer still mid-funnel (verified but never FINISHED
-    // onboarding) — they have no dashboard to land on. A customer who completed
-    // onboarding has a full dashboard on the card-less free trial (no plan
-    // required there), so impersonation is allowed. Defense-in-depth behind the UI
-    // control, matching the `onboarding` flag on the customer list.
-    // A card-required signup is exempt: abandoning at the card step leaves them
-    // with neither field set, and they are precisely the customer an admin needs
-    // to open in order to help them finish paying.
+    // Block only a mid-funnel customer (no dashboard to land on). Card-required signups are exempt —
+    // abandoning at the card step leaves both fields unset, and they're exactly who an admin needs to open.
     if (
       !user.profile?.onboardingCompletedAt &&
       !user.profile?.stripeSubscriptionId &&
@@ -1064,10 +1006,7 @@ router.post(
   }),
 );
 
-/**
- * Whether the impersonation PIN is still the shipped default, so the dialog can
- * say so. Deliberately returns NOTHING else — never the PIN, never its hash.
- */
+/** Is the impersonation PIN still the shipped default? Returns NOTHING else — never the PIN or its hash. */
 router.get(
   "/impersonation-pin",
   requireAdmin,
@@ -1076,11 +1015,7 @@ router.get(
   }),
 );
 
-/**
- * Change the PIN. Requires the CURRENT one — otherwise an unattended admin
- * session is a way to lock the real admin out and take impersonation for
- * yourself, which is worse than the problem the PIN was added to solve.
- */
+/** Change the PIN. Requires the CURRENT one, or an unattended admin session could lock the real admin out. */
 router.put(
   "/impersonation-pin",
   requireAdmin,
@@ -1140,23 +1075,8 @@ router.put(
   }),
 );
 
-/**
- * "Forgot PIN" — email a one-time code to the admin's OWN registered address.
- *
- * The PIN is a bcrypt hash, so it can't be recovered, only replaced; without
- * this an admin who forgot it was left editing the database by hand. Proving
- * control of the admin inbox is the same bar the account's password reset
- * already sets, so it is the right one here.
- *
- * The address comes from the session, never from the request body — a
- * "send the code to this address" parameter would turn account recovery into
- * account takeover.
- *
- * Deliberately NOT blocked by the PIN lockout: being locked out is one of the
- * reasons to reach for this. It is not a way around that lockout either, since
- * the code lands in a mailbox the guesser would also have to hold, and the OTP
- * has its own expiry and attempt limit.
- */
+/** "Forgot PIN": email a one-time code to the SESSION's address, never one from the request — that would be account takeover.
+ *  Deliberately not blocked by the PIN lockout (being locked out is why you're here; the code lands in a mailbox the guesser lacks). */
 router.post(
   "/impersonation-pin/reset/start",
   requireAdmin,
@@ -1241,11 +1161,8 @@ router.post(
     // Restore the best-fit status: a still-valid paid period → active, an
     // unexpired trial → trialing, otherwise none (they'll be sent to /subscribe).
     const now = new Date();
-    // A card-required account that never confirmed a card has no trial to restore.
-    // trialEndsAt alone would say otherwise: /billing/subscribe stamps it the moment
-    // a plan is picked, BEFORE any card exists — so reactivating such an account
-    // would mark it "trialing" with no card, which is a state /confirm-card used to
-    // refuse to correct. It belongs back on the card wall at "none".
+    // No confirmed card = no trial to restore. trialEndsAt is stamped at plan pick, BEFORE any card, so
+    // trusting it would reactivate to "trialing" with no card. Back on the card wall at "none".
     const awaitingFirstCard = !!p?.cardRequiredAtSignup && !p.cardConfirmedAt;
     const restored =
       p?.subscriptionPlanId && p.currentPeriodEnd && p.currentPeriodEnd.getTime() > now.getTime()
@@ -1292,11 +1209,7 @@ router.post(
   }),
 );
 
-/* --------------------------- Agent requests ------------------------ *
- *  New signups land here as "pending". Approving provisions a live Vapi
- *  assistant, assigns a Twilio number from the admin's pool, and emails
- *  the customer.
- * ------------------------------------------------------------------- */
+// Agent requests. New signups land as "pending"; approving provisions the assistant, assigns a pool number and emails the customer.
 router.get(
   "/agent-requests",
   requirePermission("subscriptions"),
@@ -1344,9 +1257,7 @@ router.post(
       { ownerId: conversion.userId },
     );
 
-    // 2) Assign an AVAILABLE number from the system pool + route it to the assistant.
-    //    Flips the pool row to ASSIGNED (so it leaves the pool / shows under the user)
-    //    and tops the pool back up. Best-effort — admin can retry / assign manually.
+    // 2) Assign an available pool number and route it. Best-effort — admin can retry / assign manually.
     let assignedNumber: string | null = conversion.user.profile?.receptionistNumber || null;
     if (isTwilioConfigured() && !assignedNumber) {
       try {
@@ -1422,10 +1333,7 @@ router.post(
   }),
 );
 
-/* ---------------------------- Subscriptions ------------------------ *
- *  Admin → Subscriptions: who is subscribed to what, their payments and
- *  plan history. Read-only over the billing engine's own state.
- * ------------------------------------------------------------------- */
+// Admin → Subscriptions. Read-only over the billing engine's own state.
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -1453,17 +1361,8 @@ function subscriptionMinutes(p: {
   };
 }
 
-/**
- * Which display-only subscription columns the viewer may see. ADMINs see all;
- * STAFF are allow-listed per `subscriptions.field.*`. Mirrors the client's column
- * gating, but enforced HERE so a hidden column's data is never sent to the
- * browser (the client only hides it — the server is the real boundary).
- *
- * Only the financial/usage columns that the client renders purely for display
- * are enforced: `price`, `minutes`, `invoices`. Plan identity, status, renewal
- * and auto-renew are left intact — they're low-sensitivity and feed the client's
- * filtering/risk logic, so nulling them would break the table rather than hide it.
- */
+/** Subscription columns the viewer may see (STAFF allow-listed per `subscriptions.field.*`). Enforced server-side so hidden data
+ *  is never sent. Only price/minutes/invoices — nulling plan/status would break the client's filtering. */
 function subscriptionFieldAccess(user: { role: string; permissions: string[] }) {
   const can = (f: string) =>
     isAdminRole(user.role) || user.permissions.includes(`subscriptions.field.${f}`);
@@ -1474,12 +1373,8 @@ router.get(
   "/subscriptions",
   requirePermission("subscriptions"),
   asyncHandler(async (req, res) => {
-    // Every real customer. Those with a billing footprint show up as normal
-    // subscription rows; the rest (registered but never subscribed — abandoned
-    // onboarding or no plan picked) surface as "under onboarding" leads so the
-    // sales team can call them.
-    // The brand's own database; the plan each row names is joined from the
-    // catalogue in the control plane.
+    // Every customer: billing footprint = subscription row, otherwise an "under onboarding" lead for sales.
+    // Brand DB; plans joined from the control-plane catalogue.
     const db = await requestTenant(req);
     const profiles = await withPlans(
       await db.profile.findMany({
@@ -1522,16 +1417,9 @@ router.get(
       const status = effectiveSubStatus(p);
       const minutes = subscriptionMinutes(p);
       const pl = p.subscriptionPlan;
-      // Registered but never FINISHED onboarding — mid-funnel drop-offs. These
-      // are call-list leads, not churn: keep them out of the canceled/attention
-      // buckets. A customer who completed onboarding and now sits on the card-less
-      // free trial (also status "none", no plan) is NOT a lead — exclude them so
-      // they don't get double-counted as onboarding.
+      // Mid-funnel drop-offs are leads, not churn. A completed-onboarding free-trial user (also "none") is NOT a lead.
       const underOnboarding = status === "none" && !pl && !p.onboardingCompletedAt;
-      // Per-row MRR contribution — live paying statuses only, monthly-normalised.
-      // Left in the PLAN's currency: it sits beside that plan's price on the same
-      // row, so converting it here would put two different units side by side.
-      // The cross-currency normalisation happens once, in the summary below.
+      // Per-row MRR, left in the PLAN's currency so it matches the price beside it; FX normalisation happens once in the summary.
       const mrrCents =
         pl && (status === "active" || status === "past_due")
           ? Math.round(monthlyCents(pl.priceCents, pl.interval, pl.intervalCount))
@@ -1751,9 +1639,7 @@ function genReferralCode(): string {
   return crypto.randomBytes(4).toString("hex").toUpperCase();
 }
 
-/** Best-effort: email a newly-created reseller their login credentials so they
- *  can sign in. Includes the admin-set password (a known shared secret) with a
- *  prompt to change it after first login. */
+/** Best-effort welcome email to a new reseller with the admin-set password and a prompt to change it. */
 async function emailResellerWelcome(opts: {
   email: string;
   fullName: string;
@@ -1935,10 +1821,7 @@ router.patch(
         commissionPercent: z.number().min(0).max(100).optional(),
       })
       .parse(req.body);
-    // Scoped, not merely existence-checked. This section is open to brand
-    // ADMINs, so looking the reseller up by id alone would let one brand edit
-    // another brand's reseller. No-op for the platform's own admins (brandId
-    // null), who keep the platform-wide view.
+    // Scoped, not just existence-checked — by id alone a brand admin could edit another brand's reseller.
     const exists = await (await planeOf(req.user!.brandId ?? null)).user.findFirst({
       where: { id: req.params.id, role: "RESELLER" },
     });
@@ -1987,11 +1870,7 @@ router.delete(
 );
 
 /* ------------- Stripe product/price sync (plans & add-ons) --------- */
-/**
- * Sync a plan/add-on to Stripe. No-op (returns {}) when Stripe isn't
- * configured — the row is still saved locally, just without Stripe ids.
- * Throws a 502 if a configured Stripe call fails.
- */
+/** Sync a plan/add-on to Stripe. No-op when Stripe isn't configured (row saved without ids); 502 if a configured call fails. */
 async function syncStripe(opts: {
   existingProductId: string | null;
   existingPriceId: string | null;
@@ -2047,13 +1926,9 @@ const planInput = z.object({
   description: z.string().optional(),
   priceCents: z.number().int().nonnegative(),
   currency: z.string().optional(),
-  // Plans bill in months; the CYCLE LENGTH is intervalCount below (1 = monthly,
-  // 3 = quarterly, 12 = annual). Kept as a literal so a stray "week"/"year" can't
-  // arrive and silently pair with a count Stripe would reject.
+  // Cycle length is intervalCount; a literal so a stray "year" can't pair with a count Stripe rejects.
   interval: z.literal("month").optional(),
-  // Stripe caps a recurring cycle at one year, so with interval="month" this
-  // cannot exceed 12. Refused here rather than surfacing as a Stripe API error
-  // after the plan row has already been written.
+  // Stripe caps a cycle at one year. Refused here rather than as a Stripe error after the row is written.
   intervalCount: z
     .number()
     .int()
@@ -2145,9 +2020,7 @@ router.post(
     const currency = data.currency ?? "usd";
     const interval = (data.interval ?? "month") as StripeInterval;
     const intervalCount = data.intervalCount ?? 1;
-    // The default plan is pre-selected on the subscribe page, which only lists
-    // active plans — so an inactive plan can't be the default (it would silently
-    // have no effect while still clearing the real default).
+    // The subscribe page only lists active plans, so an inactive default would silently do nothing while clearing the real one.
     if (data.isDefault && data.active === false) {
       throw badRequest("An inactive plan can't be the default plan. Activate it first.");
     }
@@ -2163,9 +2036,7 @@ router.post(
       active: data.active ?? true,
       priceChanged: true,
     });
-    // Only one plan can be the onboarding default. Clear the old default and create
-    // the new plan in one transaction, so a failed create can't leave the system
-    // with zero defaults (the old one already wiped).
+    // One default only. Clear + create in one transaction so a failed create can't leave zero defaults.
     const plan = await prisma.$transaction(async (tx) => {
       if (data.isDefault) {
         await tx.subscriptionPlan.updateMany({
@@ -2189,9 +2060,7 @@ router.patch(
     const exists = await prisma.subscriptionPlan.findUnique({ where: { id: req.params.id } });
     if (!exists) throw notFound("Plan not found");
 
-    // Guard: a plan with live subscribers can only have SAFE fields edited.
-    // Pricing/interval/minutes are locked (they'd alter existing Stripe subs) —
-    // to change those, deactivate this plan (→ legacy) and create a new one.
+    // A plan with live subscribers: pricing/interval/minutes are locked (they'd alter existing Stripe subs). Deactivate and create a new one instead.
     const subscriberCount = await planSubscriberCount(req.params.id);
     if (subscriberCount > 0) {
       const changesPrice = data.priceCents !== undefined && data.priceCents !== exists.priceCents;
@@ -2242,9 +2111,7 @@ router.patch(
       priceChanged,
     });
 
-    // Only one plan can be the onboarding default. Clear the old default and apply
-    // this update in one transaction, so a failed update can't leave the system
-    // with zero defaults (the old one already wiped).
+    // One default only. Clear + update in one transaction so a failed update can't leave zero defaults.
     const plan = await prisma.$transaction(async (tx) => {
       if (data.isDefault) {
         await tx.subscriptionPlan.updateMany({
@@ -2257,9 +2124,7 @@ router.patch(
         data: { ...data, ...stripeIds, ...(clearsOwnDefault ? { isDefault: false } : {}) },
       });
     });
-    // Brand Prices are base + addon, so a new base means new brand Prices —
-    // rebuilt in the background and the brands told; the plan save itself
-    // must not hang on N Stripe calls.
+    // A new base means new brand Prices (base + addon). Rebuilt in the background — the save must not hang on N Stripe calls.
     if (priceChanged) {
       void refreshBrandPricesForPlan(plan.id).catch(() => undefined);
     }
@@ -2359,12 +2224,8 @@ const couponInput = couponBase
   .refine((c) => c.percentOff != null || c.bonusMinutes != null, {
     message: "A coupon must give a percentage discount, bonus minutes, or both.",
   })
-  // Every NEW coupon must say when it stops being redeemable. A code with no end
-  // date stays claimable forever — long after the campaign it was written for is
-  // over — and nothing but an admin remembering to switch it off ever closes it.
-  // Required on create only: coupons made before this rule legitimately have no
-  // expiry, and `couponPatchInput` must keep letting an admin edit those (the
-  // PATCH handler blocks CLEARING a date that exists, which is the loophole).
+  // Every NEW coupon needs an expiry or it's claimable forever. Create only — older coupons legitimately have
+  // none and must stay editable (PATCH blocks clearing an existing date instead).
   .refine((c) => c.expiresAt != null, {
     message: "Pick a 'Redeemable until' date — every coupon needs one.",
     path: ["expiresAt"],
@@ -2377,23 +2238,12 @@ const couponInput = couponBase
   .refine((c) => !c.expiresAt || new Date(c.expiresAt) > new Date(), {
     message: "The expiry date can't be in the past.",
   })
-  // Likewise a start date before the coupon existed: it can't have been
-  // redeemable then, so it only ever means "start now" spelled confusingly.
-  // Blank already means "open immediately".
+  // A backdated start is just "start now" spelled confusingly; blank already means that.
   .refine((c) => !c.startsAt || new Date(c.startsAt) >= earliestAllowedStart(), {
     message: "The start date can't be in the past — leave it blank to start straight away.",
   });
 
-/**
- * The earliest `startsAt` the server will accept: 24 hours ago.
- *
- * Deliberately a tolerance rather than "midnight today". The client sends the
- * chosen day as LOCAL midnight, which can sit up to 14 hours either side of the
- * server's own day boundary — so comparing against the server's midnight would
- * reject an admin in Sydney picking today. The exact local-date check lives in
- * the browser where the timezone is actually known; this is the backstop that
- * catches a genuinely backdated value.
- */
+/** Earliest accepted startsAt: 24h ago. A tolerance, not server midnight — the client sends LOCAL midnight, which can sit 14h either side, so Sydney picking "today" must pass. */
 function earliestAllowedStart(): Date {
   return new Date(Date.now() - 24 * 60 * 60 * 1000);
 }
@@ -2402,16 +2252,7 @@ function earliestAllowedStart(): Date {
 // be expressed here — they're checked against the MERGED result in the handler.
 const couponPatchInput = couponBase.partial();
 
-/**
- * Whether a coupon's terms may still be changed, and why not.
- *
- * `locked` covers live checkouts as well as completed redemptions: a customer
- * sitting on the card step has already been SHOWN this coupon's terms, so
- * letting an admin move them underneath is the same wrong as rewriting a
- * finished redemption — just harder to notice. Stale reservations don't lock
- * anything (the sweep is about to delete them), so an abandoned checkout can't
- * freeze admin edits indefinitely.
- */
+/** May a coupon's terms still change? `locked` includes live checkouts (the customer has already SEEN the terms), not stale reservations (the sweep is about to delete them). */
 async function couponUsage(couponId: string): Promise<{
   redeemed: number;
   livePending: number;
@@ -2522,9 +2363,7 @@ router.post(
 
     const clash = await prisma.coupon.findUnique({ where: { code } });
     if (clash) throw badRequest(`The code ${code} is already in use.`);
-    // Coupon codes and reseller referral codes share one namespace from the
-    // customer's point of view (both are "a code you were given"), so a
-    // collision would be genuinely ambiguous at redemption time.
+    // Coupon and referral codes share one namespace to the customer, so a collision is ambiguous at redemption.
     const referralClash = await (await planeOf(req.user!.brandId ?? null)).user.findFirst({
       where: { referralCode: code },
       select: { id: true },
@@ -2589,23 +2428,15 @@ router.patch(
     if (mergedStartsAt && mergedExpiresAt && mergedStartsAt >= mergedExpiresAt) {
       throw badRequest("The start date must be before the expiry date.");
     }
-    // An expiry that exists can be MOVED but never cleared. Creating a coupon
-    // with an end date and then editing it away would walk straight around the
-    // create-time rule and leave exactly the never-closing code it exists to
-    // prevent. A coupon that never had one is left alone — those predate the
-    // rule, and blocking them would make them uneditable altogether.
+    // An existing expiry can be MOVED but never cleared, or the create-time rule is trivially bypassed.
+    // Coupons that never had one predate the rule and are left alone.
     if (exists.expiresAt && mergedExpiresAt === null) {
       throw badRequest(
         "A coupon can't have its 'Redeemable until' date removed — move it instead, or turn Active off to stop it now.",
       );
     }
-    // Guard only dates the admin actually MOVED.
-    //
-    // Compared against the STORED value, not merely against presence in the
-    // payload: the admin form submits every safe field on every save, including
-    // dates it never touched. Treating "present" as "changed" meant an already
-    // expired coupon could not be edited at all — not renamed, not reactivated,
-    // not have its limit raised — because its own untouched expiry tripped this.
+    // Guard only dates the admin MOVED — compare to the STORED value, not payload presence. The form submits every
+    // field on every save, so "present = changed" made an expired coupon uneditable.
     const sameInstant = (a: Date | null, b: Date | null) =>
       (a?.getTime() ?? null) === (b?.getTime() ?? null);
 
@@ -2628,10 +2459,7 @@ router.patch(
       );
     }
 
-    // Same guard as in-use plans: once anyone has been shown this coupon's terms
-    // — a completed redemption, or a checkout in progress — they're locked.
-    // Changing them would retroactively alter a deal someone is already on.
-    // Deactivate it and make a new code instead.
+    // Like in-use plans: once anyone has seen the terms (redeemed or mid-checkout) they're locked. Deactivate and make a new code.
     const { redeemed, locked } = await couponUsage(req.params.id);
     if (locked) {
       const changesValue =
@@ -2642,9 +2470,7 @@ router.patch(
       if (changesValue) throw badRequest(couponLockMessage(redeemed));
     }
 
-    // Resolve the coupon as it will be AFTER this patch. The terms fields can
-    // only move while the coupon is unlocked (guard above), so they collapse
-    // back to the stored value otherwise.
+    // The coupon as it will be AFTER this patch; terms collapse to the stored value when locked.
     const nextCode = data.code !== undefined ? normalizeCode(data.code) : exists.code;
     const nextDisplayName = data.displayName ?? exists.displayName;
     const nextPercentOff =
@@ -2669,9 +2495,7 @@ router.patch(
       if (referralClash) throw badRequest(`${nextCode} is already a reseller referral code.`);
     }
 
-    // Stripe coupons are IMMUTABLE. A changed percentage or duration needs a
-    // fresh Stripe object — without this the DB would say 20% while Stripe kept
-    // discounting at 10%, and customers would get the stale rate.
+    // Stripe coupons are IMMUTABLE: a changed percentage/duration needs a fresh one, or Stripe keeps billing the old rate.
     let stripeCouponId = exists.stripeCouponId;
     const termsChanged =
       nextPercentOff !== exists.percentOff || nextDurationCycles !== exists.durationCycles;
@@ -2730,11 +2554,7 @@ router.delete(
     const exists = await prisma.coupon.findUnique({ where: { id: req.params.id } });
     if (!exists) throw notFound("Coupon not found");
 
-    // Deleting would cascade the redemption rows away — and those rows ARE what
-    // stops a user redeeming the same code twice. Blocked, exactly like an in-use
-    // plan; deactivating stops new redemptions without rewriting history. A live
-    // checkout blocks it too: cascading a reservation out from under someone
-    // mid-payment would strand their discount.
+    // Deleting cascades the redemption rows that stop double-redemption, and strands a mid-payment reservation. Deactivate instead.
     const { redeemed, locked } = await couponUsage(req.params.id);
     if (locked) {
       throw new HttpError(
@@ -2762,14 +2582,7 @@ router.delete(
   }),
 );
 
-/**
- * Everything the customer's Discount card needs in one call: the discount they
- * currently have (if any), and every active coupon annotated with whether it can
- * be granted to them and why not.
- *
- * Gated on `coupons` rather than `customers`, so a staff member who can view
- * customers but not manage coupons never even loads it.
- */
+/** The customer's Discount card in one call. Gated on `coupons`, not `customers`, so view-only customer staff never load it. */
 router.get(
   "/customers/:id/coupon",
   requirePermission("coupons"),
@@ -2810,9 +2623,7 @@ router.post(
     const { couponId, override } = z
       .object({
         couponId: z.string().min(1),
-        // Granting a coupon past its redemption window or plan restriction is
-        // allowed but never implicit — the client has to ask for it, and the
-        // audit records it.
+        // Granting past the window/plan restriction is allowed but never implicit — and audited.
         override: z.boolean().optional(),
       })
       .parse(req.body);
@@ -2837,9 +2648,7 @@ router.post(
       action: "coupons.grant",
       targetType: "user",
       targetId: user.id,
-      // The override is the part worth being able to look up later — "who gave
-      // out a campaign that had already ended, or one for a plan this customer
-      // isn't on, and when".
+      // The override is what's worth looking up later — who granted an ended campaign, and when.
       metadata: override === true ? { couponId, override: true } : { couponId },
       ip: req.ip,
     });
@@ -2847,14 +2656,7 @@ router.post(
   }),
 );
 
-/**
- * Remove a customer's live discount.
- *
- * `releaseSlot=true` deletes the redemption and hands the supply slot back, so
- * the customer may redeem that code again — the undo for a coupon granted by
- * mistake. Left off (the default), the record stays and the code remains spent
- * for them, which is what you want when the discount was genuinely consumed.
- */
+/** Remove a live discount. `releaseSlot=true` deletes the redemption so the code can be used again (undo for a mistaken grant); default keeps it spent. */
 router.delete(
   "/customers/:id/coupon",
   requirePermission("coupons", "edit"),
@@ -2913,19 +2715,12 @@ router.put(
   }),
 );
 
-/* ------------------- Reporting FX rates (→ USD) -------------------- *
- *  Revenue figures are normalised to USD before they are summed, because
- *  plans exist in more than one currency. Rates are set here rather than
- *  fetched live: a dashboard that restates last month's MRR on its own
- *  because the market moved is worse than one holding a rate a person chose.
- * ------------------------------------------------------------------------- */
+// Reporting FX rates (→ USD). Set by hand, not fetched live — a dashboard that restates last month's MRR because the market moved is worse.
 router.get(
   "/fx-rates",
   requireSuperAdmin,
   asyncHandler(async (_req, res) => {
-    // The currencies that actually need a rate — every non-USD currency a live
-    // plan is priced in. Listing them lets the UI show exactly what's missing
-    // instead of asking the admin to guess which codes matter.
+    // Every non-USD currency a plan is priced in, so the UI can show exactly what's missing.
     const plans = await prisma.subscriptionPlan.findMany({ select: { currency: true } });
     const needed = [
       ...new Set(
@@ -2973,13 +2768,7 @@ router.put(
   }),
 );
 
-/* -------------------- Global master-prompt template ---------------- *
- *  The admin-editable scaffold wrapped around every assistant's compiled
- *  prompt. {{businessName}} and {{sections}} placeholders are filled per
- *  customer at compile time. Empty template = the built-in default. Changes
- *  reach a customer's live assistant the next time their AI Brain is saved /
- *  synced (non-manually-edited prompts recompile from this template).
- * ------------------------------------------------------------------------- */
+// Global master-prompt template. Empty = built-in default; changes reach live assistants on their next AI Brain save/sync.
 router.get(
   "/prompt-template",
   requireAdmin,
@@ -3004,10 +2793,7 @@ router.put(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { template } = z.object({ template: z.string().max(20000) }).parse(req.body);
-    // A non-empty template MUST keep all three placeholders — without them a
-    // customer's assistant name / business name / knowledge would silently vanish
-    // from every prompt. An empty string is allowed: it resets to the built-in
-    // default (which has all three).
+    // A non-empty template MUST keep all three placeholders or names/knowledge silently vanish from every prompt. Empty resets to default.
     const incoming = template.trim();
     if (incoming) {
       const missing: string[] = [];
@@ -3045,9 +2831,7 @@ router.put(
   }),
 );
 
-/* ---------------------- Per-country regional styles ---------------------- *
- *  Admin manages the persona block that makes each customer's assistant sound
- *  local to their country (e.g. an Australian receptionist for AU callers). */
+// Per-country regional styles — the persona block that makes an assistant sound local.
 router.get(
   "/country-styles",
   requireAdmin,
@@ -3084,10 +2868,7 @@ router.put(
   }),
 );
 
-/* ----------------- Industry / niche suggestions review ----------------- *
- *  Customers can propose a custom industry when none of the built-ins fit. Each
- *  proposal waits here until an admin approves it (→ joins the public list every
- *  customer sees) or rejects it. Admins can also prune a previously-approved one. */
+// Industry suggestions review. Customer proposals wait here until approved (joins the public list) or rejected.
 router.get(
   "/industries",
   requireAdmin,
@@ -3155,9 +2936,7 @@ router.delete(
   }),
 );
 
-/* ----------------- Admin-managed custom scripts (SEO/tracking) ----------------- *
- *  Raw HTML snippets (GA, GTM, Meta Pixel, verification tags…) injected by the
- *  frontend into <head>, start of <body>, or the footer — no code deploy. */
+// Admin-managed custom scripts (GA, GTM, pixels) the frontend injects into head/body/footer without a deploy.
 router.get(
   "/seo",
   requireAdmin,
@@ -3212,10 +2991,7 @@ router.get(
   }),
 );
 
-/* ------------- Gender-matched default assistant names -------------- *
- *  Applied at onboarding: a male voice → the "male" name, a female voice →
- *  the "female" name (see agent.routes.ts /persist). Both admin-editable.
- * ------------------------------------------------------------------------- */
+// Gender-matched default assistant names, applied at onboarding by voice gender. Admin-editable.
 router.get(
   "/agent-default-names",
   requireAdmin,
@@ -3245,12 +3021,7 @@ router.put(
   }),
 );
 
-/* -------------------- Global default agent LLM model --------------------- *
- *  The provider + model every provisioned Vapi assistant is created and synced
- *  with. Selected from a fixed catalogue (AGENT_LLM_OPTIONS) so only Vapi-valid
- *  ids can ever be stored. A change rolls out to a customer's live assistant the
- *  next time their AI Brain is saved/synced (same as the prompt template).
- * ------------------------------------------------------------------------- */
+// Global default agent LLM. Fixed catalogue (AGENT_LLM_OPTIONS) so only Vapi-valid ids are stored; rolls out on next AI Brain save/sync.
 router.get(
   "/agent-llm",
   requireAdmin,
@@ -3287,13 +3058,8 @@ router.put(
   }),
 );
 
-/* ------------------- Transcriber (STT) fallback settings ----------------- *
- *  The PRIMARY transcriber stays auto-chosen by language. Here the admin sets a
- *  fallback that Vapi tries when the primary STT fails: an optional preferred
- *  provider/model, plus an "auto fallback" toggle. Only backups that can hear an
- *  agent's language are ever applied (buildTranscriberFallbackPlan handles that).
- *  Rolls out to a customer's live assistant on their next AI-Brain save/sync.
- * ------------------------------------------------------------------------- */
+// Transcriber (STT) fallback. Primary stays auto-chosen by language; only backups that can hear the agent's language
+// are applied (buildTranscriberFallbackPlan). Rolls out on next AI Brain save/sync.
 router.get(
   "/transcriber-fallback",
   requireAdmin,
@@ -3337,14 +3103,8 @@ router.put(
   }),
 );
 
-/* --------------------------- Onboarding card wall ------------------------- *
- *  Whether NEW signups must add a card (a $0 authorisation — the free trial
- *  still runs) before the dashboard opens. The value is snapshotted onto each
- *  account at signup, so flipping it here only ever changes what the NEXT signup
- *  gets: customers already using the app keep whatever rule they signed up under.
- *  Audited deliberately — once accounts differ by signup date, "when was this
- *  flipped?" is the only way to explain why two customers behave differently.
- * ------------------------------------------------------------------------- */
+// Onboarding card wall. Snapshotted per account at signup, so flipping it only affects the NEXT signup.
+// Audited — "when was this flipped?" is the only way to explain why two customers behave differently.
 router.get(
   "/onboarding",
   requireAdmin,
@@ -3358,11 +3118,7 @@ router.put(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const { cardRequired } = z.object({ cardRequired: z.boolean() }).parse(req.body);
-    // Turning this ON sends every new signup to the plan + card screen, and that
-    // screen cannot work without Stripe — the SetupIntent it needs is minted by
-    // /billing/subscribe. Enabling it on an environment where Stripe isn't
-    // configured would therefore brick signup completely, with no obvious cause.
-    // Turning it OFF is always allowed (that is the way out of exactly that hole).
+    // ON without Stripe would brick signup (the card screen needs a SetupIntent). OFF is always allowed — it's the way out.
     if (cardRequired && !isStripeConfigured()) {
       throw badRequest(
         "Stripe isn't configured, so new customers couldn't add a card — they'd be stuck. Configure Stripe first.",
@@ -3382,9 +3138,7 @@ router.put(
   }),
 );
 
-/* ----------------- Global trial minute quota (call usage) ---------------- *
- *  The trial ends when EITHER limit (days or minutes) is reached first.
- * ------------------------------------------------------------------------- */
+// Global trial minute quota. The trial ends when EITHER limit (days or minutes) hits first.
 router.get(
   "/trial-minutes",
   requireSuperAdmin,
@@ -3409,12 +3163,7 @@ router.put(
   }),
 );
 
-/* ------------------- Global per-call duration ceiling -------------------- *
- *  An abuse control: no single call may run longer than this, whatever the
- *  customer's plan allows. Saving it re-stamps every live assistant so the new
- *  value applies to calls placed from this moment, not from each customer's next
- *  billing event.
- * ------------------------------------------------------------------------- */
+// Global per-call duration ceiling (abuse control). Saving re-stamps every live assistant so it applies immediately.
 router.get(
   "/call-duration-cap",
   requireSuperAdmin,
@@ -3450,15 +3199,8 @@ router.put(
   }),
 );
 
-/* ------------------- One-time assistant re-sync -------------------- *
- *  Re-pushes every existing assistant's config to Vapi so it carries the
- *  current server.secret (and any other current payload fields). Needed once
- *  after the webhook started requiring that secret — assistants created before
- *  it don't send the header, so their real calls would 401 until rebuilt. New
- *  assistants already get it at creation, so this is a one-off backfill;
- *  re-running is harmless. ADMIN-only. Runs to completion and returns the count
- *  (an admin firing this from a terminal wants the result, not fire-and-forget).
- * ------------------------------------------------------------------------- */
+// One-time assistant re-sync: re-pushes every assistant so it carries the current server.secret (pre-secret assistants
+// 401 on real calls until rebuilt). Harmless to re-run. ADMIN-only; runs to completion and returns the count.
 router.post(
   "/resync-assistants",
   requireAdmin,
@@ -3478,10 +3220,7 @@ router.post(
   }),
 );
 
-/* -------------------- Post-trial grace period ---------------------- *
- *  Global on/off + length (days). When on, a lapsed trial's number is held
- *  for `days` before the hourly sweep releases it back to the pool.
- * ------------------------------------------------------------------------- */
+// Post-trial grace period: a lapsed trial's number is held for `days` before the hourly sweep releases it.
 router.get(
   "/grace-period",
   requireSuperAdmin,
@@ -3529,10 +3268,7 @@ router.get(
     const from = parseDate(req.query.from);
     const to = parseDate(req.query.to);
 
-    // A brand admin's audit trail is their OWN team's actions: every entry
-    // carries the plane its actor lives in (actorBrandId), so the scope is a
-    // column, not a lookup of the brand's operators. The platform's own people
-    // pass undefined and see everything — with each entry's brand named.
+    // A brand admin sees their OWN team's actions (actorBrandId is a column); platform people pass undefined and see everything.
     const scoped = tenantScope(req.user);
     const actorBrandId = scoped.brandId ?? undefined;
 
@@ -3701,10 +3437,7 @@ router.get(
     const detailLifecycle = deriveCustomerLifecycle(user.profile, await loadTrialCtx());
 
     const conv = user.conversion;
-    // Every call counts (not just the 20 shown) and each rounds up to a full
-    // minute, matching the metered entitlement counter — counted and summed in
-    // Postgres so opening a heavy customer's page costs two aggregates rather
-    // than their entire call history.
+    // Every call, each rounded up to a full minute (matches the entitlement counter). Aggregated in Postgres, not Node.
     const [callsHandled, billedMinutes] = conv
       ? await Promise.all([
           countCalls(user.brandId, { conversionId: conv.id }),
@@ -3748,9 +3481,7 @@ router.get(
         // the free/premium flag, which reads "Free" during a trial on a paid plan.
         planName: user.profile?.subscriptionPlan?.displayName ?? null,
         subscriptionStatus: user.profile?.subscriptionStatus ?? "none",
-        // Derived: verified but never FINISHED onboarding (no plan, no card-less
-        // trial yet). Same rule as the customer-list `onboarding` flag — a
-        // completed-onboarding trial user (also status "none") is NOT onboarding.
+        // Same rule as the customer-list `onboarding` flag.
         onboarding: detailLifecycle.onboarding,
         // Completed onboarding, no plan, still inside the card-less free trial.
         freeTrial: detailLifecycle.freeTrial,
@@ -3758,10 +3489,7 @@ router.get(
         suspended: !!user.profile?.suspendedAt,
         stripeCustomerId: user.profile?.stripeCustomerId ?? null,
         trialEndsAt: user.profile?.trialEndsAt ?? null,
-        // Which onboarding rule applied the day THIS account was created. The
-        // admin toggle can be flipped at any time and never affects existing
-        // accounts, so two customers can behave differently for no visible
-        // reason — this is the only way support can tell them apart.
+        // The card rule THIS account signed up under — the only way support can explain two customers behaving differently.
         cardRequiredAtSignup: user.profile?.cardRequiredAtSignup ?? false,
         // When their first card landed; null = never. Paired with the flag above
         // it identifies a customer stuck at the card wall.
@@ -3805,10 +3533,7 @@ router.get(
   "/reports/preview/:userId",
   requirePermission("reports"),
   asyncHandler(async (req, res) => {
-    // A digest is that customer's call history in miniature — check they're
-    // inside the caller's tenant before building one.
-    // A brand admin previews their own customers' digests; the platform's own
-    // people may preview anyone's, found through the directory.
+    // A digest is call history in miniature — check the customer is inside the caller's tenant first. Platform people may preview anyone's.
     const target = req.user!.brandId
       ? await (await requestTenant(req)).user.findUnique({ where: { id: req.params.userId }, select: { id: true } })
       : await prisma.customerDirectory.findFirst({ where: { userId: req.params.userId }, select: { userId: true } });
@@ -3824,9 +3549,7 @@ router.get(
   "/commissions",
   requirePermission("resellers"),
   asyncHandler(async (req, res) => {
-    // Commissions are between a brand and its resellers, in the brand's
-    // database — a brand admin sees their own, the platform's people every
-    // brand's, each row naming its brand.
+    // Commissions live in the brand DB — a brand admin sees their own, platform people every brand's.
     const tenants = await tenantsFor(req.user?.brandId);
     const commissions = (
       await Promise.all(
@@ -3947,23 +3670,14 @@ async function emailStaffRolePermissionsUpdated(opts: {
   });
 }
 
-/* ----------------------------- Staff management ----------------------------- *
- *  Only full ADMINs can manage staff members — STAFF cannot access these routes.
- * ---------------------------------------------------------------------------- */
+// Staff management. Full ADMINs only — STAFF cannot access these routes.
 
 router.get(
   "/permissions",
   requireAdmin,
   asyncHandler(async (req, res) => {
-    // Same rule requirePermission enforces on every write, applied here so the
-    // matrix never OFFERS a box that would be refused the moment it's ticked —
-    // a grantable key that authorizes nothing is worse than no box at all.
-    //
-    // A brand admin builds roles for their OWN team: they see the brand's
-    // sections (customers, subscriptions, tickets, …) and never the platform's
-    // (its own inbox, its audit trail). The platform builds roles for ITS team
-    // the other way round — the platform's own sections, never any one brand's
-    // day-to-day, which is that brand admin's job alone.
+    // Mirror requirePermission so the matrix never OFFERS a box that would be refused when ticked. A brand admin
+    // sees only brand sections, the platform only its own — never a brand's day-to-day.
     const hidden = req.user!.brandId
       ? new Set([...PLATFORM_TEAM_SECTIONS, ...PLATFORM_ONLY_SECTIONS])
       : BRAND_SCOPED_SECTIONS;
@@ -3985,13 +3699,7 @@ interface RoleInfo {
   ticketDepartments: { id: string; name: string }[];
 }
 
-/**
- * The roles a set of staff rows name, from the plane those roles live in.
- *
- * `users.staffRoleId` is a plain id since phase 4: a brand's roles are in the
- * brand's own database, the platform's in the control plane, so the account's
- * plane — not a join — is where the name comes from.
- */
+/** Roles named by staff rows, looked up (not joined) in the plane they live in — brand roles are in the brand DB. */
 async function staffRolesFor(
   rows: { staffRoleId: string | null }[],
   brandId: string | null,
@@ -4030,10 +3738,7 @@ function serializeStaff(
     createdAt: u.createdAt,
     roleId: u.staffRoleId,
     roleName: role?.name ?? null,
-    // Split deliberately: `departments` is what an admin edits on this screen,
-    // `roleDepartments` is inherited and read-only here (it belongs to the
-    // role). Merging them would let an admin "untick" a role grant that this
-    // form cannot actually revoke.
+    // Kept separate: roleDepartments is inherited and read-only here — merged, an admin could "untick" a grant this form can't revoke.
     departments: u.ticketDepartments,
     roleDepartments: role?.ticketDepartments ?? [],
   };
@@ -4049,15 +3754,7 @@ const staffSelect = {
   ticketDepartments: { select: { id: true, name: true }, orderBy: { name: "asc" } },
 } as const;
 
-/**
- * Keep only the ids that name a real support queue this admin may grant.
- *
- * Scoped to the caller's own tenant, so a brand admin can never lend one of
- * their staff a queue belonging to another brand — or to the platform, whose
- * `brand` lane is the super admin's alone. A stale id (a queue deleted a moment
- * ago) is dropped rather than failing the save: the grant it refers to is
- * meaningless anyway, and there is nothing for the admin to fix.
- */
+/** Keeps only queue ids this admin may grant — scoped to their tenant so no cross-brand (or platform) grants. Stale ids are dropped, not fatal. */
 async function validTicketDepartmentIds(
   db: TenantClient,
   ids: string[],
@@ -4067,9 +3764,7 @@ async function validTicketDepartmentIds(
   const rows = await db.ticketDepartment.findMany({
     where: {
       id: { in: ids },
-      // A brand's staff work that brand's customer queues; the platform's own
-      // staff (no brand) work the platform's inbox — the queues brand admins
-      // file into. Neither can be granted the other's.
+      // Brand staff work the brand's queues; platform staff the platform inbox. Never the other's.
       lane: brandId ? "support" : "brand",
       brandId,
     },
@@ -4142,11 +3837,8 @@ router.post(
       req.user!.brandId ?? null,
     );
 
-    // A staff member joins the tenant of the admin who created them, so a
-    // brand's staff stay inside that brand. The super admin has no brand, so
-    // the staff THEY create are the platform's own support team — the one kind
-    // of account besides the super admin allowed to have no brand (migration
-    // 0057).
+    // Staff join their creator's tenant. The super admin's staff are the platform team — the only other
+    // account kind allowed no brand (migration 0057).
     const brandId = req.user!.brandId ?? null;
     const departmentIds = await validTicketDepartmentIds(
       await planeOf(brandId),
@@ -4320,17 +4012,9 @@ router.delete(
   }),
 );
 
-/* -------------------------------- Staff roles ------------------------------- *
- *  Named permission bundles (RBAC). A role is the source of truth for a set of
- *  permission keys; staff are assigned a role and inherit its keys. Editing a
- *  role re-syncs every member's denormalized `permissions` array. Only full
- *  ADMINs manage roles.
- * --------------------------------------------------------------------------- */
+// Staff roles (RBAC). Editing a role re-syncs every member's denormalized `permissions`. Full ADMINs only.
 
-/**
- * Resolve a staff member's effective permissions. When a `roleId` is given the
- * role's permissions win (RBAC); otherwise the explicit list is used (custom).
- */
+/** Effective permissions: the role's when roleId is given, else the explicit (custom) list. */
 async function resolveStaffPermissions(
   roleId: string | undefined,
   explicit: string[] | undefined,
@@ -4383,9 +4067,7 @@ const roleInclude = {
   ticketDepartments: { select: { id: true, name: true }, orderBy: { name: "asc" } },
 } as const;
 
-/** How many staff hold each role — counted where the roles live. A brand's
- *  staff are mirrored into the brand's database with their role id, so the
- *  count is right in both planes. */
+/** Staff per role, counted where the roles live (brand staff are mirrored into the brand DB with their role id). */
 async function roleMemberCounts(db: TenantClient, roleIds: string[]): Promise<Map<string, number>> {
   if (roleIds.length === 0) return new Map();
   const rows = await db.user.groupBy({
@@ -4608,10 +4290,7 @@ router.delete(
   }),
 );
 
-/* --------------------------- System email templates ------------------------ *
- *  Manage the editable lifecycle emails (Admin → System Emails). Subject/body/
- *  enabled are stored per template; header/footer/from-name are branding-wide.
- * -------------------------------------------------------------------------- */
+// System email templates. Subject/body/enabled per template; header/footer/from-name are branding-wide.
 
 /** Representative sample values so admins can preview/test any template. */
 function sampleEmailVars(recipient: string): Record<string, string> {

@@ -42,16 +42,7 @@ function TuneSlider({
   );
 }
 
-/**
- * How the assistant sounds and behaves on a call: creativity, voice stability,
- * speed, hang-up permission and background ambience.
- *
- * Lives with **Identity**, right under Voice Selection, because that is where
- * someone is already choosing how the agent sounds — it was previously buried
- * in Advanced next to the master prompt, which is a different job entirely.
- * Reads and writes `config.advanced` regardless, so the stored shape and the
- * compiled prompt are unchanged by where the controls are shown.
- */
+/** Voice/behaviour sliders shown under Identity but still stored in `config.advanced`, so the saved shape and compiled prompt are unchanged. */
 export function VoiceBehaviourTuning() {
   const advanced = useAgentStore((s) => s.config.advanced);
   const updateSection = useAgentStore((s) => s.updateSection);

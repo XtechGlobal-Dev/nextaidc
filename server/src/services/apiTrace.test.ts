@@ -1,12 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeEndpoint, traceFetch } from "./apiTrace.js";
 
-/* ------------------------------------------------------------------ *
- *  Endpoint grouping is the one piece of the tracer whose failure mode is
- *  silent: if ids don't collapse, the Errors and Logs screens degenerate into a
- *  list of unique URLs and "this endpoint failed 4,000 times" becomes 4,000 rows
- *  of one. Worth pinning down.
- * ------------------------------------------------------------------ */
+// Endpoint grouping fails silently: if ids don't collapse, "this endpoint failed
+// 4,000 times" becomes 4,000 rows of one on the Errors and Logs screens.
 
 describe("normalizeEndpoint", () => {
   it("strips the scheme and host so the same path groups across base URLs", () => {
@@ -68,16 +64,8 @@ describe("normalizeEndpoint", () => {
   });
 });
 
-/* ------------------------------------------------------------------ *
- *  Rule 1 of this tracer: telemetry never fails the request it measures.
- *
- *  `traceFetch` wraps live vendor calls, so anything it touches on the response
- *  has to be optional. Real `fetch` always returns a spec-complete Response, but
- *  SDK fetch-alikes, polyfills and test doubles routinely don't — and a thrown
- *  tracer turns a working API call into a failed one. This caught a live bug:
- *  reading rate-limit headers off a response with no `headers` threw straight
- *  through the caller.
- * ------------------------------------------------------------------ */
+// Telemetry must never fail the request it measures. SDK fetch-alikes and test doubles
+// aren't spec-complete Responses; a live bug had rate-limit header reads throw on a response with no `headers`.
 
 afterEach(() => {
   vi.unstubAllGlobals();

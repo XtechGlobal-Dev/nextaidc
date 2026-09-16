@@ -1,14 +1,7 @@
 import type { Customer } from "@/lib/api";
 
-/* ------------------------------------------------------------------ *
- *  Customer lifecycle — the buckets an admin actually thinks in.
- *
- *  A customer's real state is spread across three places: an admin lock
- *  (`suspended`), two derived flags (`onboarding`, `freeTrial`), and the
- *  raw `subscriptionStatus`. Reading them in the wrong order gives the
- *  wrong answer, so it's derived once here and shared by the status badge
- *  and the filter — otherwise the two could disagree about the same row.
- * ------------------------------------------------------------------ */
+// Customer lifecycle buckets. State is spread across `suspended`, `onboarding`/`freeTrial` and the raw
+// `subscriptionStatus`; derived once here so the badge and the filter can't disagree about a row.
 
 export type StatusKey =
   | "active"
@@ -47,13 +40,8 @@ export const STATUS_ORDER: StatusKey[] = [
   "suspended",
 ];
 
-/**
- * Which lifecycle bucket a customer is in.
- *
- * Order matters and is deliberate: an admin lock outranks billing state, and the
- * derived onboarding / free-trial flags outrank a raw "none" — both of those
- * customers have `subscriptionStatus === "none"` but are nothing alike.
- */
+/** Lifecycle bucket. Order is deliberate: admin lock outranks billing state, and onboarding/free-trial
+ *  outrank a raw "none" (both have `subscriptionStatus === "none"` but are nothing alike). */
 export function statusKey(c: Customer): StatusKey {
   if (c.suspended) return "suspended";
   if (c.onboarding) return "onboarding";

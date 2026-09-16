@@ -1,13 +1,5 @@
-/**
- * Timezone helpers for the AI Brain (client).
- *
- * The agent's timezone is stored as an IANA zone ("Australia/Perth") — the only
- * form that survives DST arithmetic and that Google Calendar accepts on an
- * event. The server resolves it from the business's phone number + address +
- * the browser's zone (see server/src/lib/phoneTimeZone.ts). These helpers cover
- * the picker, the label, and normalising the legacy display labels the field
- * used to hold ("Sydney (AEST/AEDT)") so old configs keep working on read.
- */
+// Timezone helpers for the AI Brain. Zones are stored as IANA names (the only form that survives DST and
+// that Google Calendar accepts); legacy display labels like "Sydney (AEST/AEDT)" are normalised on read.
 
 /** The old hardcoded picker values → the IANA zone each one meant. */
 const LEGACY_LABEL_TO_IANA: Record<string, string> = {
@@ -20,20 +12,8 @@ const LEGACY_LABEL_TO_IANA: Record<string, string> = {
   "Hobart (AEST/AEDT)": "Australia/Hobart",
 };
 
-/**
- * Old IANA identifiers → the modern zone they point at.
- *
- * Two names for one zone is how the timezone field ends up blank: the stored
- * value is "Asia/Kolkata" (what the server resolves for India) while
- * Intl.supportedValuesOf on ICU's older data lists "Asia/Calcutta", so no
- * option in the picker matches and the Select renders nothing.
- *
- * This map is applied to *both* the stored value and the picker's list, so the
- * two always agree on one spelling regardless of which vintage of tz data the
- * runtime ships. Deliberately not using Intl to canonicalise: engines disagree
- * on the direction (ICU maps Kolkata→Calcutta, newer data the reverse), and
- * we want the modern name in the prompt either way.
- */
+/** Old IANA aliases -> modern name. Applied to both the stored value and the picker list, or a stored
+ *  "Asia/Kolkata" finds no "Asia/Calcutta" option and the Select renders blank. Not Intl: engines disagree on direction. */
 const ALIAS_TO_CANONICAL: Record<string, string> = {
   "Asia/Calcutta": "Asia/Kolkata",
   "Asia/Saigon": "Asia/Ho_Chi_Minh",
@@ -81,13 +61,8 @@ export function isValidTimeZone(tz?: string): boolean {
   }
 }
 
-/**
- * Coerce a stored timezone to a canonical IANA zone: passes valid zones
- * through (canonicalising link names like Asia/Calcutta), translates the legacy
- * display labels, and returns "" for anything else (blank, or a hand-edited
- * value we can't interpret) so callers can fall back rather than emit nonsense
- * into the prompt.
- */
+/** Stored timezone -> canonical IANA zone; legacy labels are translated and anything unreadable becomes ""
+ *  so callers fall back instead of emitting nonsense into the prompt. */
 export function normalizeTimeZone(value?: string): string {
   const raw = value?.trim();
   if (!raw) return "";
@@ -124,11 +99,7 @@ export function timeZoneAbbreviation(tz: string, now: Date = new Date()): string
   }
 }
 
-/**
- * Human label for a zone, e.g. "Perth (AWST)" — the city plus whichever
- * abbreviation is in effect right now, so the reading is honest about DST
- * instead of hardcoding "AEST/AEDT" the way the old list did.
- */
+/** "Perth (AWST)": city plus the abbreviation in effect right now, so DST reads honestly. */
 export function timeZoneLabel(tz: string, now: Date = new Date()): string {
   if (!isValidTimeZone(tz)) return tz;
   const abbr = timeZoneAbbreviation(tz, now);
@@ -161,9 +132,7 @@ const FALLBACK_ZONES = [
   "America/Toronto", "America/Vancouver", "Africa/Johannesburg",
 ];
 
-/** Every IANA zone the runtime knows, for the picker — each under its modern
- *  name so options match stored values, with the duplicates that creates on a
- *  runtime listing both spellings collapsed. */
+/** Every zone the runtime knows, under its modern name so options match stored values (duplicates collapsed). */
 export function listTimeZones(): string[] {
   const supported = (
     Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }
@@ -178,15 +147,8 @@ export function listTimeZones(): string[] {
   return [...new Set(zones.map(canonicalTimeZone))];
 }
 
-/**
- * Zones grouped by IANA region ("Australia", "America", …) for the picker,
- * each group ordered by city name.
- *
- * `ensure` is the zone currently selected. It's added when the runtime's list
- * doesn't contain it — an unmapped link name, or a zone from a newer tz release
- * than this browser knows — because a Select whose value has no matching option
- * renders an empty trigger, which reads as "no timezone set" even though one is.
- */
+/** Zones grouped by IANA region for the picker. `ensure` (the selected zone) is added when the runtime
+ *  doesn't list it, or the Select renders an empty trigger that reads as "no timezone set". */
 export function groupedTimeZones(ensure?: string): { region: string; zones: string[] }[] {
   const zones = listTimeZones();
   const extra = ensure?.trim();

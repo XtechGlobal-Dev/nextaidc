@@ -1,9 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 
-// Give each plan a stable, distinct colour so different tiers (Starter, Silver,
-// Gold…) are tellable at a glance instead of one uniform amber. Shared between
-// the customers table and the customer detail page so a plan looks identical in
-// both places.
+// Stable, distinct colour per tier so plans are tellable at a glance and look the same everywhere.
 const PLAN_COLORS = [
   "var(--color-step-1)", // blue
   "var(--color-step-2)", // violet

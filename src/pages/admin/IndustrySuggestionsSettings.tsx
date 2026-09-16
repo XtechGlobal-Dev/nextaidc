@@ -7,21 +7,13 @@ import { api, ApiError, type IndustryAdminView } from "@/lib/api";
 import { formatDateDMY } from "@/lib/utils";
 import { useLiveTick } from "@/hooks/useLiveData";
 
-/**
- * Admin review for customer-proposed industries. New suggestions land in the
- * pending queue (usable on the submitter's own profile immediately, but not yet
- * shared); approving one adds it to the public list every customer sees, rejecting
- * drops it. Previously-approved customs can also be pruned. Built-ins aren't listed
- * here — they can't be removed.
- */
+/** Review queue for customer-proposed industries. Pending ones already work on the submitter's profile; approving shares them. Built-ins can't be removed so aren't listed. */
 export function IndustrySuggestionsSettings() {
   const [data, setData] = useState<IndustryAdminView | null>(null);
   const [loading, setLoading] = useState(true);
   // Which value is mid-action, so only its buttons spin.
   const [busy, setBusy] = useState<string | null>(null);
-  // Bumps when the server pushes an admin event (e.g. a new suggestion lands), so
-  // the queue refreshes live — no page reload. First load shows a spinner + surfaces
-  // errors; live-tick refreshes update silently in place.
+  // Bumps on admin events so the queue refreshes live; only the first load spins or surfaces errors.
   const liveTick = useLiveTick();
   const firstLoad = useRef(true);
 

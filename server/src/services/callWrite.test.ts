@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Writing a call. A brand's calls live whole in the brand's own
- *  database — never in the control plane, not even briefly. These tests
- *  pin the two things that matter: the row goes to the tenant client
- *  for that brand, and the share index is the only thing written to the
- *  control plane.
- * ------------------------------------------------------------------ */
+// A brand's calls live only in the brand's database. Pins that the row goes to that tenant
+// client and the share index is the only thing written to the control plane.
 
 const h = vi.hoisted(() => ({
   callDb: vi.fn(),

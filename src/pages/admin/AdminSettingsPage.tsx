@@ -70,15 +70,8 @@ const INTEGRATION_META: Record<string, { icon: LucideIcon; color: string }> = {
 const SETTINGS_TABS = ["integrations", "agent", "onboarding", "branding", "seo"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
-/**
- * Integrations is the one tab a brand admin never sees: it holds the platform's
- * provider credentials (Vapi, Twilio, SMTP, OpenAI …), which are the platform
- * owner's and are billed to them. The other four configure how the product
- * behaves and looks, and hold no secrets.
- *
- * The API enforces the same split independently — `/admin/integrations*` stays
- * on requireSuperAdmin while the rest moved to requireAdmin.
- */
+// Integrations holds the platform owner's provider credentials, so brand admins never see it.
+// The API enforces the same split: /admin/integrations* is requireSuperAdmin, the rest requireAdmin.
 const SUPER_ADMIN_TABS = new Set<SettingsTab>(["integrations"]);
 
 const TAB_META: Record<SettingsTab, { label: string; icon: LucideIcon }> = {
@@ -97,9 +90,7 @@ export default function AdminSettingsPage() {
   );
   const [views, setViews] = useState<IntegrationView[]>([]);
   const [loading, setLoading] = useState(true);
-  // Active tab lives in the URL (?tab=agent) so sections are deep-linkable and
-  // survive a refresh. A tab this account can't open (a shared ?tab=integrations
-  // link) falls back to their first one rather than rendering an empty panel.
+  // Tab lives in the URL for deep links; a tab this account can't open falls back to its first one.
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get("tab") as SettingsTab | null;
   const tab: SettingsTab = rawTab && tabs.includes(rawTab) ? rawTab : tabs[0];

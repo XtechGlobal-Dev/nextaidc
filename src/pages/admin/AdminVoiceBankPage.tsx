@@ -94,9 +94,7 @@ export default function AdminVoiceBankPage() {
       onError: (message) => toast.error(`${v.name}: ${message}`),
     });
 
-  // Capability gates — ADMIN passes all; STAFF only where the role grants it.
-  // Buttons are omitted from the DOM entirely (not just hidden) when denied, and
-  // the mutating handlers below no-op as a defensive backstop.
+  // Capability gates (ADMIN passes all). Denied buttons are omitted from the DOM and handlers no-op.
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreate = hasPermission("voice_bank.create");
   const canEdit = hasPermission("voice_bank.edit");
@@ -356,9 +354,7 @@ export default function AdminVoiceBankPage() {
                   )}
                 </div>
 
-                {/* Provider composition — a compact donut with the total in the
-                    centre + a labelled legend. A thin ring (not a solid pie) so it
-                    reads clearly even at 100% one provider without dominating the card. */}
+                {/* Provider split donut — thin ring so it still reads at 100% one provider. */}
                 {total > 0 && (
                   <div className="flex items-center gap-4">
                     <VoiceDonut dg={dg} el={el} />
@@ -530,12 +526,7 @@ export default function AdminVoiceBankPage() {
                       >
                         <span className={cn("size-2 rounded-full", meta.dot)} />
                         {meta.label}
-                        {/* Both of these have to follow the tab's state. The
-                            active tab paints itself `bg-primary`, so the muted
-                            grey the count used unconditionally came out barely
-                            legible on it — and the selected-count badge was
-                            `text-primary` on that same blue, i.e. invisible,
-                            reading as an empty gap beside the label. */}
+                        {/* Colours follow the tab state: muted grey and text-primary are illegible on the active bg-primary. */}
                         <span className={cn(isActive ? "text-primary-foreground/70" : "text-muted-foreground")}>
                           ({catCount})
                         </span>
@@ -758,11 +749,7 @@ function VoiceLibrarySkeleton() {
   );
 }
 
-/**
- * Compact donut of the Deepgram vs ElevenLabs split with the total voice count in
- * the centre. A thin ring (not a solid pie) so it stays legible even at 100% one
- * provider. The arcs sweep in on mount (Deepgram first, then ElevenLabs).
- */
+// Deepgram vs ElevenLabs donut; thin ring so it stays legible at 100% one provider.
 function VoiceDonut({ dg, el, size = 56 }: { dg: number; el: number; size?: number }) {
   const total = dg + el;
   const [shown, setShown] = useState(false);

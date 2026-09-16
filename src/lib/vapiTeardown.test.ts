@@ -1,28 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/* Reported as: starting a test call several times in a row fails with
- * "Duplicate DailyIframe instances are not allowed", and the new call dies at
- * 0:00.
- *
- * Cause: the Vapi SDK's `stop()` is ASYNC — it awaits `daily.destroy()` before
- * releasing its call object — but every caller here fired it and moved on (a
- * hang-up, the minute cap, closing the dialog). Starting the next call inside
- * that window makes the SDK call `daily.createCallObject()` while the previous
- * object is still being destroyed, and Daily refuses.
- *
- * These pin the ORDERING, which is the whole fix: a start must never reach the
- * SDK until the pending teardown has settled. */
+// Pins the start/stop ORDERING: the SDK's stop() is async (awaits daily.destroy()), and starting inside that
+// window used to fail with "Duplicate DailyIframe instances" and a call dead at 0:00.
 
-/**
- * A stand-in for the SDK that models the two ways its call object gets
- * corrupted, both of which real users hit:
- *
- *  - `start()` entered while a destroy is running → Daily's duplicate error.
- *  - `stop()` entered while a join is running → the join's later step finds the
- *    call object gone ("Cannot read properties of null"), AND the half-built
- *    object leaks, so every later start fails as a duplicate. That is what
- *    "End call during Connecting…, repeatedly" produced.
- */
+/** SDK stand-in modelling both corruptions: start() during a destroy (duplicate error), and stop() during a
+ *  join (null deref + a leaked half-built object that makes every later start a duplicate). */
 class FakeVapi {
   destroying = false;
   connecting = false;
@@ -131,10 +113,8 @@ describe("test call teardown ordering", () => {
     expect(fake.duplicateErrors).toBe(0);
   });
 
-  /* The reported sequence: hit "Call again", then "End call" while it still says
-   * Connecting…, over and over. Previously the stop nulled the call object
-   * mid-join, which both threw and leaked — after which nothing would connect
-   * on that page until a reload. */
+  // "Call again" then "End call" while still Connecting, repeatedly: the stop used to null
+  // the call object mid-join, after which nothing connected until a reload.
   it("ending a call DURING connect neither throws nor leaks", async () => {
     const { startTestCall } = await load();
 

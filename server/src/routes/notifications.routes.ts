@@ -16,6 +16,13 @@ import { isTwilioConfigured, callSummarySms, describeSmsError } from "../service
 import { isWhatsAppConfigured, callSummaryWhatsApp } from "../services/whatsapp.js";
 import { isAdminRole } from "../lib/roles.js";
 import { brandDisplayName } from "../lib/brandUrls.js";
+import { sendValidated } from "../lib/respond.js";
+import { OkResponseSchema } from "hello22/shared/contracts/common.js";
+import {
+  NotificationChannelsResponseSchema,
+  NotificationsListResponseSchema,
+  TestSummaryResponseSchema,
+} from "hello22/shared/contracts/notifications.js";
 
 const router = express.Router();
 
@@ -30,36 +37,26 @@ const testSummarySchema = z.object({
   to: z.string().trim().min(1, "A destination is required."),
 });
 
-/**
- * Which summary channels the user's plan includes. Email is always available;
- * SMS / WhatsApp depend on the subscription plan (admins get all). The UI shows
- * only the included channels.
- */
+/** Which summary channels the plan includes. Email is always on; SMS/WhatsApp depend on the plan (admins get all). */
 router.get(
   "/channels",
   requireAuth,
   asyncHandler(async (req, res) => {
     const features = await getPlanFeatures(req.user!.sub);
-    res.json({
+    sendValidated(res, NotificationChannelsResponseSchema, {
       email: true,
       sms: features.sms,
       smsToCaller: features.smsToCaller,
       whatsapp: features.whatsapp,
       customCrm: features.customCrm,
       multilingual: features.multilingual,
-      // Resolved department allowance (0 = plan excludes Call Transfer). The
-      // Call Transfer page reads this to decide between the editor and the
-      // upgrade prompt, and to know when "Add Department" is spent.
+      // Department allowance; 0 means the plan excludes Call Transfer.
       callTransferDepartments: features.callTransferDepartments,
     });
   }),
 );
 
-/**
- * Send a dummy call-summary to verify a channel. Customer-facing (any logged-in
- * user can test their own destination). Uses the same admin-configured sender as
- * real summaries. For SUMMARIES only — never used for login/OTP.
- */
+/** Sends a dummy call summary to check a channel works. Any logged-in user, own destination only; never used for login/OTP. */
 router.post(
   "/test-summary",
   requireAuth,
@@ -76,12 +73,8 @@ router.post(
       return;
     }
 
-    // This route sends a REAL message to a caller-supplied destination, so it
-    // spends Twilio/Meta money on demand. Entitlement — not plan features — is
-    // what decides whether an account may use the service at all, and a
-    // card-required signup that hasn't added a card is entitled to nothing.
-    // (Plan features stay wide open through the whole trial by design; the check
-    // below only enforces which channels a PAID plan includes.)
+    // This spends real Twilio/Meta money, so gate on entitlement, not plan features —
+    // features stay open all trial, but a card-required signup with no card gets nothing.
     if (!isAdminRole(req.user!.role)) {
       const ent = await getEntitlement(req.user!.sub);
       if (ent.blocked) {
@@ -131,7 +124,7 @@ router.post(
         }
         await callSummaryWhatsApp({ to, callerName: "Test Caller", callerNumber: TEST_CALLER_NUMBER, summary: testSummaryText(), businessName });
       }
-      res.json({ ok: true, to });
+      sendValidated(res, TestSummaryResponseSchema, { ok: true, to });
     } catch (err) {
       console.error("[test-summary] failed:", err);
       const error =
@@ -155,7 +148,7 @@ router.get(
       listNotifications(db, userId),
       db.notification.count({ where: { userId, read: false } }),
     ]);
-    res.json({ notifications, unreadCount });
+    sendValidated(res, NotificationsListResponseSchema, { notifications, unreadCount });
   }),
 );
 
@@ -164,7 +157,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     await markNotificationRead(await planeOf(req.user!.brandId), req.user!.sub, req.params.id);
-    res.json({ ok: true });
+    sendValidated(res, OkResponseSchema, { ok: true });
   }),
 );
 
@@ -173,7 +166,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     await markAllNotificationsRead(await planeOf(req.user!.brandId), req.user!.sub);
-    res.json({ ok: true });
+    sendValidated(res, OkResponseSchema, { ok: true });
   }),
 );
 
@@ -182,7 +175,7 @@ router.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     await clearNotifications(await planeOf(req.user!.brandId), req.user!.sub);
-    res.json({ ok: true });
+    sendValidated(res, OkResponseSchema, { ok: true });
   }),
 );
 

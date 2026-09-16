@@ -1,13 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-/* ------------------------------------------------------------------ *
- *  Which front door a signed-in account belongs on.
- *
- *  The rule the RequireBrandFrontDoor guard applies, extracted so the
- *  decision can be tested without a browser: `/dashboard` and
- *  `/acme/dashboard` are two different front doors, and an account on
- *  the wrong one sees the wrong brand's name, logo and colours.
- * ------------------------------------------------------------------ */
+// The RequireBrandFrontDoor rule: an account on the wrong door sees the wrong brand's name, logo and colours.
 
 import { frontDoorTarget } from "./frontDoor";
 
@@ -56,9 +49,7 @@ describe("frontDoorTarget", () => {
   });
 
   it("does not mistake a lookalike path for the brand prefix", () => {
-    // "/acmecorp" starts with "/acme" as a string but is a different segment.
-    // Slicing blindly produced "corp/dashboard" — a URL nobody asked for. The
-    // right answer is to leave the path alone, i.e. no redirect at all.
+    // Slicing "/acmecorp" blindly produced "corp/dashboard"; the right answer is no redirect.
     expect(
       frontDoorTarget({ accountSlug: null, pageSlug: "acme", pathname: "/acmecorp/dashboard" }),
     ).toBeNull();
@@ -103,9 +94,7 @@ describe("frontDoorTarget on a brand host", () => {
 });
 
 describe("frontDoorTarget on a developer's machine", () => {
-  // A brand's origin is always a real https host (see brandOrigin on the
-  // server), so acting on it locally would throw the developer out of the
-  // environment they are working in and onto production.
+  // A brand origin is always a real https host, so acting on it locally would jump to production.
   it("stays put rather than jump from a local host to a production origin", () => {
     for (const origin of [
       "http://acme.localhost:5174",

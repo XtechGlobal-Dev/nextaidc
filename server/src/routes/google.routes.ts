@@ -29,31 +29,16 @@ router.get(
     if (!isGoogleConfigured()) {
       throw notImplemented("Google is not configured (add Google OAuth keys in Admin → Settings)");
     }
-    // Where this user must be handed back to once Google is done. Google itself
-    // will only ever call our ONE registered callback (see redirectUri()), so a
-    // white-label tenant's own origin has to travel there inside the signed
-    // state — otherwise every brand's users would land on the platform domain,
-    // on an origin where their session doesn't even exist (the token lives in
-    // that origin's localStorage).
+    // Google only calls our one registered callback, so the brand's origin travels in
+    // the signed state — otherwise brand users land on the platform domain with no session.
     const url = buildAuthUrl(signState(req.user!.sub, brandAppOrigin(req.user!.brandId ?? null)));
     res.json({ url });
   }),
 );
 
-/**
- * PUBLIC — Google redirects the browser here with ?code & ?state (no auth header).
- *
- * This is the single callback registered on the Google OAuth client, shared by
- * every brand. Its job after the exchange is to send the browser back to the
- * origin the flow STARTED on, which the signed state carries.
- *
- * That return origin is re-validated here rather than trusted: it decides where
- * we redirect a just-authorised browser, so treating it as data would turn the
- * callback into an open redirect. It must match one of the brand's real hosts —
- * a signature proving we minted it is not on its own proof that the brand still
- * owns that hostname, since a domain can be un-verified or reassigned in the ten
- * minutes the state is alive.
- */
+// Public OAuth callback shared by every brand. The return origin from the state is
+// re-validated against the brand's current hosts (not just the signature) — a domain
+// can be un-verified in the ten minutes the state lives, and trusting it = open redirect.
 router.get(
   "/callback",
   asyncHandler(async (req, res) => {
@@ -144,9 +129,7 @@ router.post(
   }),
 );
 
-/** Connectivity self-test: create a short test event on the user's calendar and
- *  immediately delete it. Confirms the OAuth token can both WRITE and DELETE
- *  events (exactly what booking needs) without leaving anything behind. */
+// Self-test: create then delete a short event, proving the token can both write and delete.
 router.post(
   "/test",
   requireAuth,

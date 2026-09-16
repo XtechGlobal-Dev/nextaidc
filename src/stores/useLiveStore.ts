@@ -1,31 +1,15 @@
 import { create } from "zustand";
 
-/**
- * Global "live" heartbeat. A single driver ({@link useLiveData}) bumps `tick`
- * on a short interval (and instantly on tab focus) while the user is signed in.
- *
- * Two ways to consume it:
- *  - Customer-facing pages read from the shared data stores (calls, CRM, trial,
- *    usage), which the driver re-hydrates each cycle — so they update with no
- *    page changes at all.
- *  - Pages that fetch their own data (most Admin screens) subscribe to `tick`
- *    via {@link useLiveTick} and add it to their loader effect's deps, so the
- *    loader re-runs every cycle without a manual reload.
- */
+/** Global live heartbeat — useLiveData bumps `tick` on an interval and on tab focus. Shared
+ *  stores re-hydrate each cycle; pages that fetch their own data add useLiveTick() to their deps. */
 interface LiveState {
   /** Monotonic counter, incremented once per live refresh cycle. */
   tick: number;
   /** Epoch ms of the last refresh — for "updated Xs ago" style affordances. */
   lastRefresh: number;
   bump: () => void;
-  /**
-   * "Someone is typing", per ticket id.
-   *
-   * The only pushed event whose PAYLOAD matters. Everything else is a "something
-   * changed" tag the pages answer by re-fetching, but there is nothing to fetch
-   * for a keystroke — it is never written down. Entries are stamped rather than
-   * cleared on a timer, so a stale one simply reads as expired.
-   */
+  /** "Someone is typing", per ticket id — the one pushed event with a payload, since a
+   *  keystroke is never stored to re-fetch. Entries are timestamped, not cleared; stale = expired. */
   typing: Record<string, { label: string; at: number }>;
   noteTyping: (ticketId: string, label: string) => void;
 }

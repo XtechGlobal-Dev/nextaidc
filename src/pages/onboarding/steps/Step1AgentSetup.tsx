@@ -30,10 +30,7 @@ export default function Step1AgentSetup() {
       setPct((prev) => {
         // Quick ease to 20% in the first ~500ms so it feels responsive…
         if (elapsed < 500) return Math.min(20, (elapsed / 500) * 20);
-        // …then keep nudging forward EVERY tick so it never looks stuck. The
-        // speed starts gentle and decays toward a floor (never zero), so the bar
-        // always inches ahead while the analysis runs — capped just short of
-        // 100 until the real data actually lands.
+        // …then keep inching forward every tick (speed decays to a floor, never zero) so it never looks stuck; capped at 99 until real data lands.
         if (prev >= 99) return 99;
         const over = elapsed - 500;
         const speedPerSec = Math.max(0.8, 4 * Math.exp(-over / 20000));
@@ -44,9 +41,7 @@ export default function Step1AgentSetup() {
     // Safety net: never wait on the voice for longer than this.
     const speechCap = window.setTimeout(() => speechDoneRef.current(), 12000);
 
-    // Advance ONLY once the website data is actually fetched (analyzeFromUrl
-    // resolves — success or handled error) AND Emma has read the intro out.
-    // No artificial cap: we never jump to the next screen before the data lands.
+    // Advance only once the data has landed (success or handled error) AND Emma finished the intro — no artificial cap.
     const minDelay = new Promise<void>((r) => window.setTimeout(r, 1800));
     Promise.all([analyzeFromUrl(), minDelay, speechDone.current]).finally(() => {
       if (doneRef.current) return;

@@ -4,13 +4,8 @@ import { currentBrandId } from "../lib/brandContext.js";
 import { brandIdForOwner } from "./customerDirectory.js";
 import { controlPlaneAsTenant, planeOf, type TenantClient } from "./tenantDb.js";
 
-/* ------------------------------------------------------------------ *
- *  In-app notifications follow the person (phase 4): a brand's
- *  customer, admin or staff member keeps theirs in the brand's own
- *  database; the platform's own people keep theirs in the control plane.
- *  Both tables have the same shape, so one function serves both once it
- *  knows whose notification it is writing.
- * ------------------------------------------------------------------ */
+// Notifications follow the person: a brand's people keep theirs in the brand DB,
+// the platform's own in the control plane. Same table shape in both.
 
 export interface NotificationInput {
   type: string; // missed_call | new_lead | billing | agent | system | ticket
@@ -24,10 +19,7 @@ export async function notificationsOf(userId: string): Promise<TenantClient> {
   return planeOf(await brandIdForOwner(userId));
 }
 
-/**
- * Create an in-app notification for a user. Best-effort — never throws, so callers
- * can fire it with `void notify(...)` without their own try/catch.
- */
+/** Creates an in-app notification. Never throws, so `void notify(...)` is safe. */
 export async function notify(userId: string, n: NotificationInput): Promise<void> {
   try {
     const db = await notificationsOf(userId);
@@ -40,9 +32,7 @@ export async function notify(userId: string, n: NotificationInput): Promise<void
         link: n.link ?? null,
       },
     });
-    // Push a live nudge so the owner's open tabs refresh instantly (no polling),
-    // and admin dashboards reflect the new activity in aggregate. Payload is just
-    // the type tag — clients re-fetch only what the current screen shows.
+    // Live nudge; payload is just the type tag, clients re-fetch what they show.
     publishToUser(userId, { type: n.type });
     publishToAdmins({ type: n.type });
   } catch {
@@ -50,11 +40,7 @@ export async function notify(userId: string, n: NotificationInput): Promise<void
   }
 }
 
-/**
- * The same notification for several accounts that live in ONE plane — a
- * ticket's handlers, say, who are all the brand's people or all the
- * platform's. Best-effort.
- */
+/** Same notification for several accounts that all live in ONE plane. Best-effort. */
 export async function notifyIn(db: TenantClient, userIds: string[], n: NotificationInput): Promise<void> {
   if (userIds.length === 0) return;
   try {
@@ -72,14 +58,7 @@ export async function notifyIn(db: TenantClient, userIds: string[], n: Notificat
   }
 }
 
-/**
- * Fan a notification out to the admins who should see it (platform-ops
- * alerts: a sync failure, a grace period lapsing, etc). Best-effort.
- *
- * Tenant rule: the platform's owner hears about everything, in the control
- * plane. A brand's ADMINs hear about their OWN brand, in the brand's database
- * — so one brand's alerts never appear in another's bell.
- */
+/** Platform-ops alert fan-out. Platform owner hears everything; a brand's admins hear only their own brand, in their own DB. */
 export async function notifyAdmins(n: NotificationInput): Promise<void> {
   try {
     const brandId = currentBrandId();
@@ -105,13 +84,7 @@ export async function notifyAdmins(n: NotificationInput): Promise<void> {
   }
 }
 
-/**
- * Fan a notification out to the CURRENT brand's own admins only — never the
- * platform's super admin. For events about a brand's customer (signup,
- * onboarding, etc): the super admin has no access to any brand's customer
- * panel, so being notified about one customer's activity is just noise, not
- * something they can act on. Best-effort; a no-op with no current brand.
- */
+/** Current brand's admins only — the super admin can't open a brand's customer panel, so it'd be noise. No-op without a brand. */
 export async function notifyBrandAdmins(n: NotificationInput): Promise<void> {
   try {
     const brandId = currentBrandId();

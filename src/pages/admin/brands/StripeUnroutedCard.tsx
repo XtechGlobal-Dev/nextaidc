@@ -6,13 +6,7 @@ import { Button } from "@/components/ui/button";
 import { api, ApiError, type UnroutedStripeEvent } from "@/lib/api";
 import { formatDateDMY } from "@/lib/utils";
 
-/**
- * Stripe events the platform could not place in any brand. Renders nothing
- * in the healthy state — the card only appears when something is waiting.
- * Retry applies the event exactly as the webhook would have, once the
- * customer's account has been given its Stripe customer id; Dismiss puts
- * away an event that was never ours.
- */
+/** Stripe events with no brand. Hidden when empty. Retry replays as the webhook would (after the account gets its Stripe id); Dismiss buries an event that was never ours. */
 export function StripeUnroutedCard() {
   const [events, setEvents] = useState<UnroutedStripeEvent[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);

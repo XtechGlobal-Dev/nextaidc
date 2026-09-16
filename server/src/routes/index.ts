@@ -39,13 +39,8 @@ import { requireBrandModule } from "../middleware/brandModule.js";
 
 export const apiRouter = Router();
 
-// Public, non-secret runtime config for the frontend (Vapi browser key,
-// branding + admin-managed custom scripts for head/body/footer).
-//
-// `brand` is the white-label tenant this request's host resolved to, or null on
-// the platform's own domain. It carries the palette, font and logos the SPA
-// paints itself with — so a visitor to a brand subdomain sees that brand from
-// the very first render, before any sign-in.
+// Public, non-secret runtime config for the SPA. `brand` is the tenant the host
+// resolved to (null on the platform domain) so brand pages look right before sign-in.
 apiRouter.get("/config", async (req, res) => {
   res.json({
     vapiPublicKey: getEffective("vapi.publicKey", req.brand?.id ?? null),
@@ -57,16 +52,8 @@ apiRouter.get("/config", async (req, res) => {
   });
 });
 
-/**
- * Resolve a brand by its slug — how the SPA turns the first path segment of
- * `example.com/acme` into a tenant before it renders anything.
- *
- * Public and unauthenticated on purpose: it answers the same question the login
- * screen already has to answer ("whose front door is this?"), and returns only
- * what a visitor is about to see anyway — a name, some logos and a palette.
- * A suspended or unknown slug is a 404, so the SPA falls back to the platform's
- * own look rather than a half-branded page.
- */
+// Brand by slug for the SPA's path-based tenant lookup. Public on purpose — it only
+// returns what a visitor sees anyway; unknown/suspended slug is a 404 so the SPA falls back.
 apiRouter.get("/brand/:slug", async (req, res) => {
   const brand = brandBySlug(req.params.slug);
   if (!brand) {
@@ -80,14 +67,11 @@ apiRouter.use("/unsubscribe", unsubscribeRouter);
 apiRouter.use("/events", eventsRouter);
 apiRouter.use("/onboard", onboardRouter);
 apiRouter.use("/bookings", bookingRouter);
-// Website-first booking module. `/booking/ai` (public Vapi tool dispatcher) is
-// mounted BEFORE `/booking` (owner API) so the more specific path wins. `/bookings`
-// (plural, above) is the unrelated marketing demo form.
+// `/booking/ai` (public Vapi dispatcher) mounts before `/booking` so the specific
+// path wins. `/bookings` above is the unrelated marketing demo form.
 apiRouter.use("/booking/ai", bookingAiRouter);
-// Owner-facing module APIs sit behind the brand's module switches — a brand that
-// turned Booking off gets a 403 here, not a working API behind a hidden nav item.
-// The public dispatchers above (/booking/ai, /ai/sms) are Vapi tool callbacks
-// and carry no request brand, so they are deliberately not gated.
+// Module switches gate the owner APIs (403 when the brand turned it off). The public
+// Vapi dispatchers (/booking/ai, /ai/sms) carry no request brand, so they aren't gated.
 apiRouter.use("/booking", requireBrandModule("booking"), bookingModuleRouter);
 // Public Vapi tool dispatcher for "Text Info to Callers" (sendInfoSms).
 apiRouter.use("/ai/sms", aiSmsRouter);
@@ -99,9 +83,8 @@ apiRouter.use("/voices", voicesRouter);
 apiRouter.use("/industries", industriesRouter);
 apiRouter.use("/calls", callsRouter);
 apiRouter.use("/notifications", notificationsRouter);
-// Support tickets, requester side. One prefix for both lanes: a customer asks
-// their brand, a brand admin asks the platform, and which of the two you get is
-// decided by your role rather than by the URL (see lib/ticketLanes.ts).
+// Tickets, requester side. Lane (customer→brand or brand admin→platform) is picked
+// by role, not URL — see lib/ticketLanes.ts.
 apiRouter.use("/tickets", ticketsRouter);
 apiRouter.use("/trial", trialRouter);
 apiRouter.use("/crm", requireBrandModule("crm"), crmRouter);

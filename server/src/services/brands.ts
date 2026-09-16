@@ -34,52 +34,57 @@ import {
   type SignupMode,
 } from "./brandSetup.js";
 
-/* ------------------------------------------------------------------ *
- *  Brands — the white-label tenants.
- *
- *  A brand is created by the SUPER_ADMIN and handed to a brand ADMIN.
- *  It owns a subdomain, a look (logos, palette, font) and optionally its
- *  own messaging senders. Everything a browser needs to paint the brand
- *  is public; the sending credentials live encrypted in brand_settings
- *  (see services/settings.ts).
- *
- *  Host -> brand resolution runs on EVERY request, so it reads from an
- *  in-memory cache rather than hitting the DB each time. The cache is
- *  loaded at boot and refreshed on every brand mutation.
- * ------------------------------------------------------------------ */
+// Brands (white-label tenants): subdomain, look, optional senders. Paint data is public; sending
+// credentials live encrypted in brand_settings. Host -> brand runs on every request, so it reads an in-memory cache refreshed on each mutation.
 
 let bySlug = new Map<string, Brand>();
 let byDomain = new Map<string, Brand>();
 let byId = new Map<string, Brand>();
 
+let settleFirstLoad: () => void = () => {};
+const firstLoad = new Promise<void>((resolve) => {
+  settleFirstLoad = resolve;
+});
+
+/** Settles once the boot load has landed (or given up). Until then every brand host is a stranger
+ *  to CORS, so a brand's first request waits here rather than being refused. */
+export function brandsReady(): Promise<void> {
+  return firstLoad;
+}
+
 /** (Re)load the host-resolution cache. Safe to call on a cold DB — a failure
- *  leaves the previous snapshot in place rather than blanking every brand. */
-export async function loadBrands(): Promise<void> {
-  try {
-    const rows = await prisma.brand.findMany();
-    const slugs = new Map<string, Brand>();
-    const domains = new Map<string, Brand>();
-    const ids = new Map<string, Brand>();
-    for (const b of rows) {
-      slugs.set(b.slug, b);
-      ids.set(b.id, b);
-      // Only a VERIFIED vanity domain routes to its brand. A claimed-but-unproven
-      // hostname is a string someone typed into the admin, not a host the brand
-      // controls — and this map is what the CORS check and the Origin fallback in
-      // middleware/brand.ts consult, so an unverified entry would let a page on a
-      // domain the tenant doesn't own be served (and admitted) as that tenant.
-      // (The exception is a developer who set ALLOW_UNVERIFIED_BRAND_DOMAINS —
-      // a domain pointed at a dev machine can never publish real DNS.)
-      if (b.customDomain && (b.domainStatus === "verified" || allowUnverifiedBrandDomains)) {
-        domains.set(b.customDomain.toLowerCase(), b);
+ *  leaves the previous snapshot in place rather than blanking every brand.
+ *  `retries` is for boot: a flaky first connection would otherwise leave the
+ *  cache empty for a whole refresh interval, with every brand door refused. */
+export async function loadBrands(opts: { retries?: number } = {}): Promise<void> {
+  const attempts = 1 + (opts.retries ?? 0);
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const rows = await prisma.brand.findMany();
+      const slugs = new Map<string, Brand>();
+      const domains = new Map<string, Brand>();
+      const ids = new Map<string, Brand>();
+      for (const b of rows) {
+        slugs.set(b.slug, b);
+        ids.set(b.id, b);
+        // Only VERIFIED domains route: this map feeds CORS and the Origin fallback, so an unproven
+        // hostname would admit a page on a domain the tenant merely typed in. Dev-only override via ALLOW_UNVERIFIED_BRAND_DOMAINS.
+        if (b.customDomain && (b.domainStatus === "verified" || allowUnverifiedBrandDomains)) {
+          domains.set(b.customDomain.toLowerCase(), b);
+        }
       }
+      bySlug = slugs;
+      byDomain = domains;
+      byId = ids;
+      settleFirstLoad();
+      return;
+    } catch {
+      // DB not reachable — keep whatever snapshot we have; at boot, wait and try again.
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 2500));
     }
-    bySlug = slugs;
-    byDomain = domains;
-    byId = ids;
-  } catch {
-    /* DB not reachable yet — keep whatever snapshot we have. */
   }
+  // Out of attempts: stop holding requests, the minute refresh keeps trying.
+  settleFirstLoad();
 }
 
 export function cachedBrand(brandId: string | null | undefined): Brand | null {
@@ -107,19 +112,8 @@ function hostname(host: string): string {
   return host.trim().toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
 }
 
-/**
- * The brand slug a host names, IF the host sits directly under one of our own
- * apexes — `acme.hello22.ai` -> "acme". Anything else gives null.
- *
- * Anchoring to `platformDomains` is a security boundary, not tidiness. Matching
- * the leading label of any host would make `acme.attacker.com` resolve to Acme:
- * it would be served Acme's branding and, because CORS admits every host that
- * resolves to an active brand, would be handed a same-brand API origin on a
- * domain we don't control. Only a host we actually terminate can name a tenant.
- *
- * Exactly one label deep, mirroring what a `*.hello22.ai` wildcard record covers
- * — `a.b.hello22.ai` is not matched by the wildcard and isn't matched here.
- */
+// Security boundary: anchoring to platformDomains stops acme.attacker.com resolving to Acme
+// (CORS admits every host that resolves to a brand). One label deep, matching the wildcard record.
 function platformSubdomainLabel(h: string): string | null {
   for (const apex of platformDomains) {
     if (!h.endsWith(`.${apex}`)) continue;
@@ -131,16 +125,7 @@ function platformSubdomainLabel(h: string): string | null {
   return null;
 }
 
-/**
- * Which brand a request's Host belongs to.
- *
- * Two ways in: an exact VERIFIED custom domain (acme-voice.com), or the leading
- * label of a platform subdomain (acme.hello22.ai -> "acme"). Anything else — the
- * apex domain, localhost, an IP, a preview URL, a lookalike host under someone
- * else's domain — is the platform itself and resolves to null. A suspended brand
- * deliberately resolves to null too: its front door stops working while its data
- * stays intact.
- */
+/** Brand for a Host header: exact VERIFIED custom domain or a platform subdomain label; anything else (and any suspended brand) is null. */
 export function resolveBrandForHost(host: string | undefined): Brand | null {
   if (!host) return null;
   const h = hostname(host);
@@ -156,11 +141,7 @@ export function resolveBrandForHost(host: string | undefined): Brand | null {
   return brand.status === "active" ? brand : null;
 }
 
-/**
- * Every hostname that currently routes to this brand — its platform subdomain
- * always, plus its vanity domain once verified. Used to authorise OAuth return
- * origins and to show the operator where a brand answers.
- */
+/** Every hostname that routes to this brand: platform subdomain always, vanity domain once verified. */
 export function brandHostnames(brand: Brand): string[] {
   const hosts = platformDomains.map((apex) => `${brand.slug}.${apex}`);
   if (brand.customDomain && brand.domainStatus === "verified") {
@@ -169,15 +150,7 @@ export function brandHostnames(brand: Brand): string[] {
   return hosts;
 }
 
-/**
- * The origin a brand's users actually sign in at — its vanity domain when that
- * is verified and serving, otherwise its platform subdomain.
- *
- * Gated on "verified" on purpose: a domain that has been *claimed* but whose DNS
- * the client hasn't pointed yet does not resolve, so building an email login
- * link from it would send that brand's customers to a dead host. Until the
- * records land, links keep working on the subdomain.
- */
+/** Where the brand's users sign in. Gated on "verified" — a claimed-but-unpointed domain would send email login links to a dead host. */
 export function brandOrigin(brand: Brand | null | undefined): string | null {
   if (!brand) return null;
   if (brand.customDomain && brand.domainStatus === "verified") {
@@ -307,11 +280,7 @@ export function serializeBrand(b: Brand, counts?: BrandView["counts"]): BrandVie
   };
 }
 
-/**
- * The public slice every visitor of a branded host gets (via /api/config) —
- * what the app needs to paint itself as this brand before anyone signs in.
- * Deliberately small and non-secret: a name, some URLs, a palette, a font.
- */
+/** What /api/config hands every visitor to paint the brand before sign-in. Small and non-secret on purpose. */
 export interface PublicBrand {
   id: string;
   name: string;
@@ -408,14 +377,10 @@ export interface BrandIdentityInput {
   supportPhone?: string;
 }
 
-/** A brand payload: identity + look above, plus the policy half — sign-up
- *  mode, modules, plans, trial terms, legal footer, scripts — which
- *  services/brandSetup.ts validates. */
+/** Identity + look, plus the policy half that brandSetup.ts validates. */
 export type BrandInput = BrandIdentityInput & BrandSetupInput;
 
-/** Validate + normalise the theme half of a brand payload. Colours that match a
- *  preset keep that preset's id; hand-picked ones flip it to "custom", so the
- *  UI can show which swatch is selected without storing a lie. */
+// Colours matching a preset keep its id; hand-picked ones flip to "custom" so the UI's selected swatch is never a lie.
 function resolveTheme(input: Partial<BrandInput>) {
   const fontId = (input.fontFamily ?? DEFAULT_FONT_ID).trim();
   const font = findFont(fontId);
@@ -485,9 +450,7 @@ async function assertDomainAvailable(
   if (domain.length > 253 || domain.split(".").some((l) => !l || l.length > 63)) {
     throw badRequest("That hostname isn't valid — each label must be 1–63 characters.");
   }
-  // Our own space is reached by slug, not by claiming a domain. Allowing it here
-  // would let one brand's vanity entry shadow another brand's subdomain in the
-  // exact-match lookup, which runs BEFORE the slug lookup.
+  // A vanity entry on our own apex would shadow another brand's subdomain — the exact-match lookup runs BEFORE the slug lookup.
   for (const apex of platformDomains) {
     if (domain === apex || domain.endsWith(`.${apex}`)) {
       throw badRequest(
@@ -538,26 +501,12 @@ export async function createBrand(input: BrandInput, createdById: string): Promi
     },
   });
   await loadBrands();
-  // The brand's own database. The row above already exists, so a failure here
-  // is visible on the brand's page (status "failed") and retryable, rather than
-  // a create that vanished. Provisioning also gives the new database its
-  // starter customer-support queues (phase 4: they live there now), so the
-  // very first customer to raise a request has something to file it into.
+  // Row exists first so a provisioning failure shows as "failed" and is retryable instead of a
+  // vanished create. Provisioning also seeds the tenant's starter support queues.
   return provisionBrand(brand.id, input.status ?? "active");
 }
 
-/**
- * Set up (or retry setting up) a brand's own database, then open its door.
- *
- * `thenStatus` is what the brand becomes once the database is ready — "active"
- * normally, or "suspended" when the operator created it switched off. On
- * failure the brand is marked "failed" and the reason is kept on its
- * brand_databases row for the page to show; the operator retries from there.
- *
- * Imported lazily so the provisioning module (Neon client, migration runner)
- * stays out of this module's import graph — every request resolves brands
- * through here, and none of them needs any of that loaded.
- */
+/** Sets up (or retries) the brand's database, then sets `thenStatus`; failure marks it "failed" for a retry. Lazy import keeps the Neon/migration code out of the per-request import graph. */
 export async function provisionBrand(
   brandId: string,
   thenStatus: "active" | "suspended" = "active",
@@ -589,10 +538,7 @@ export async function updateBrand(id: string, input: Partial<BrandInput>): Promi
   if (input.customDomain !== undefined) {
     const next = await assertDomainAvailable(input.customDomain, id);
     data.customDomain = next;
-    // Changing (or clearing) the domain invalidates any proof we hold: the new
-    // hostname has published nothing yet. Re-arm the claim rather than carrying
-    // a "verified" flag across to a domain that was never checked — otherwise
-    // links would immediately point somewhere that may not resolve.
+    // A changed domain has proven nothing yet — never carry "verified" across, or links point at a host that may not resolve.
     if (next !== existing.customDomain) {
       data.domainStatus = next ? "pending" : "none";
       data.domainToken = next ? newDomainToken() : "";
@@ -652,14 +598,7 @@ export async function updateBrand(id: string, input: Partial<BrandInput>): Promi
   return brand;
 }
 
-/**
- * Delete a brand. Its members are NOT deleted — `users.brandId` is ON DELETE
- * SET NULL, so accounts survive as platform-level ones rather than vanishing
- * with the tenant. The caller is expected to have confirmed that first.
- *
- * Its database is kept for 30 days (services/tenantProvisioning.ts), so a
- * mistaken delete is recoverable; the daily sweep removes it after that.
- */
+/** Deletes a brand. Members survive as platform-level accounts (users.brandId is ON DELETE SET NULL); the database is kept 30 days so a mistake is recoverable. */
 export async function deleteBrand(id: string): Promise<void> {
   const { retireBrandDatabase } = await import("./tenantProvisioning.js");
   await retireBrandDatabase(id);

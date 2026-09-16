@@ -3,14 +3,8 @@ import { unauthorized } from "../lib/http.js";
 import { getEntitlement, entitlementError, reconcileSubscription } from "../services/trial.js";
 import { isAdminRole } from "../lib/roles.js";
 
-/**
- * Gate AI/premium functionality behind an active entitlement (live trial OR a
- * paid plan with remaining minutes). Mount AFTER requireAuth on any route that
- * starts a call, runs the assistant, or uses a paid feature.
- *
- * Allowed → next(). Blocked → 403 with the spec's `{ success, code, message }`
- * body so the frontend can show the right prompt (upgrade / renew / fix card).
- */
+/** Gate paid features behind an active entitlement (trial or plan with minutes). Mount AFTER requireAuth.
+ *  Blocked → 403 `{ success, code, message }` so the frontend can show the right prompt. */
 export async function validateTrial(req: Request, res: Response, next: NextFunction) {
   if (!req.user) return next(unauthorized());
 

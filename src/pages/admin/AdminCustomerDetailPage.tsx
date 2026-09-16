@@ -68,9 +68,7 @@ function prettyUrl(raw: string): string {
 export default function AdminCustomerDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  // Suspend / reactivate are moderation edits — gated by `customers.edit`. The
-  // buttons are omitted from the DOM when denied and `moderate()` no-ops as a
-  // defensive backstop (the server also enforces `customers.edit`).
+  // Suspend/reactivate need `customers.edit`; buttons omitted when denied and `moderate()` no-ops too.
   const canEdit = useAuthStore((s) => s.hasPermission)("customers.edit");
   const [data, setData] = useState<CustomerDetail | null>(null);
   const [busy, setBusy] = useState(false);
@@ -160,9 +158,7 @@ export default function AdminCustomerDetailPage() {
         <PageHeader title={customer.fullName} subtitle={customer.email} />
         {!isAdminRole(customer.role) && (
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            {/* The "Login as Customer" button used to sit here. Impersonation is
-                now behind the 👋 in the header greeting, gated by a PIN the
-                server checks — see ImpersonationEmojiTrigger. */}
+            {/* No "Login as Customer" here — impersonation is PIN-gated behind ImpersonationEmojiTrigger. */}
             {canEdit &&
               (billing.subscriptionStatus === "suspended" ? (
                 <Button
@@ -209,10 +205,7 @@ export default function AdminCustomerDetailPage() {
           <div className="grid grid-cols-2 gap-x-6 gap-y-5">
             <div>
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Plan</p>
-              {/* Same per-tier coloured pill the customers table uses. The name is
-                  the subscribed plan's ("Standard") — the free/premium flag reads
-                  "Free" during a trial on a paid plan, so PlanPill's null case (a
-                  neutral "Free" badge) only shows when there's genuinely no plan. */}
+              {/* Pass the plan name, not the free/premium flag — that reads "Free" during a paid-plan trial. */}
               <div className="mt-1">
                 <PlanPill name={billing.planName} />
               </div>
@@ -247,10 +240,7 @@ export default function AdminCustomerDetailPage() {
               label="Trial ends"
               value={billing.trialEndsAt ? formatDate(billing.trialEndsAt) : ""}
             />
-            {/* Which onboarding rule this account signed up under. The admin toggle
-                only applies to NEW signups, so accounts created either side of a
-                flip behave differently forever — without this, support has no way
-                to see which rule a given customer is living under. */}
+            {/* Onboarding rule at signup — the toggle only affects new signups, so support needs to see which one applies. */}
             <div>
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Signed up</p>
               <Badge variant={billing.cardRequiredAtSignup ? "primary" : "neutral"} className="mt-1">
