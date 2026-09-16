@@ -12,7 +12,7 @@ import { startScheduler } from "./services/scheduler.js";
 import { getElevenLabsCatalog } from "./services/voices.js";
 import { securityHeaders } from "./middleware/securityHeaders.js";
 import { brandContext } from "./middleware/brand.js";
-import { loadBrands, resolveBrandForHost } from "./services/brands.js";
+import { brandsReady, loadBrands, resolveBrandForHost } from "./services/brands.js";
 import { markStaleTenants } from "./services/tenantProvisioning.js";
 const app = express();
 
@@ -29,7 +29,7 @@ app.set("trust proxy", env.TRUST_PROXY_HOPS);
 // subdomain can't wait for a CORS_ORIGIN redeploy. Unknown/suspended hosts are still refused.
 app.use(
   cors({
-    origin(origin, callback) {
+    async origin(origin, callback) {
       // No Origin = same-origin, curl or webhooks; never a cross-site risk, and blocking breaks webhooks.
       if (!origin) return callback(null, true);
       if (corsOrigins.includes(origin)) return callback(null, true);
@@ -39,6 +39,8 @@ app.use(
       } catch {
         return callback(null, false);
       }
+      // The brand cache fills after listen; a brand door's first request must not race it.
+      await brandsReady();
       callback(null, Boolean(resolveBrandForHost(hostname)));
     },
     credentials: true,
@@ -76,8 +78,9 @@ app.listen(env.PORT, () => {
   // A rejected origin is an opaque "CORS error" in the browser — log the fixed list so it's a quick check.
   console.log(`   CORS_ORIGIN allow-list: ${corsOrigins.join(", ") || "(empty)"}`);
   startScheduler();
-  // Brand cache first: host resolution and the settings load both need it.
-  void loadBrands();
+  // Brand cache first: host resolution and the settings load both need it. Retried because a cold
+  // Neon connection often fails once, and an empty cache refuses every brand door until the next refresh.
+  void loadBrands({ retries: 6 });
   // A tenant behind this build's schema stops routing until `npm run tenant:migrate` catches it up.
   void markStaleTenants().catch((err) => console.error("[tenantDb] stale-tenant check failed:", err));
   void loadSettings().then(() => {

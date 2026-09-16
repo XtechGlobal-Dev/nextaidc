@@ -161,6 +161,9 @@ const FILTER_TRIGGER =
 const ASSIGNED_ANY = "any";
 const ASSIGNED_ME = "me";
 const ASSIGNED_NONE = "unassigned";
+/** Assignee-select sentinel: "hand this to the platform". Not a person, so it never patches the
+ *  ticket — it opens the escalation dialog, which raises a linked request with the super admin. */
+const ASSIGN_TO_PLATFORM = "__platform__";
 
 function isStaffFilter(value: string): boolean {
   return value !== ASSIGNED_ANY && value !== ASSIGNED_ME && value !== ASSIGNED_NONE;
@@ -938,8 +941,8 @@ export default function AdminTicketsPage() {
                             <GitMerge className="size-3.5" /> Merge
                           </Button>
                         )}
-                        {/* Brand admins only — the request goes up in their name. */}
-                        {isAdmin &&
+                        {/* Anyone on the brand's team who can edit — the request goes up in their name. */}
+                        {canEdit &&
                           thread &&
                           lane?.lane === "support" &&
                           !headerTicket.escalation && (
@@ -1230,7 +1233,11 @@ export default function AdminTicketsPage() {
                         {canEdit ? (
                           <Select
                             value={thread.ticket.assignedTo?.id ?? "__unassigned__"}
-                            onValueChange={(v) => stageAssign(thread.ticket, v, agents)}
+                            onValueChange={(v) =>
+                              v === ASSIGN_TO_PLATFORM
+                                ? setShowEscalate(true)
+                                : stageAssign(thread.ticket, v, agents)
+                            }
                           >
                             <SelectTrigger id="ticket-assignee" className="h-9 text-xs">
                               <SelectValue placeholder="Unassigned" />
@@ -1275,6 +1282,25 @@ export default function AdminTicketsPage() {
                                   ))}
                                 </SelectGroup>
                               ))}
+                              {/* A brand's team can hand any customer request, whatever its department, up to the
+                                  super admin. The ticket stays here with its assignee; a linked request opens on the
+                                  platform, so once escalated the entry only reports where it went. */}
+                              {lane?.lane === "support" && (
+                                <SelectGroup>
+                                  <SelectLabel>Platform</SelectLabel>
+                                  <SelectItem
+                                    value={ASSIGN_TO_PLATFORM}
+                                    disabled={!!thread.ticket.escalation}
+                                  >
+                                    Platform (super admin)
+                                    <span className="ml-1.5 text-muted-foreground">
+                                      {thread.ticket.escalation
+                                        ? `· escalated as ${thread.ticket.escalation.reference}`
+                                        : "· escalate"}
+                                    </span>
+                                  </SelectItem>
+                                </SelectGroup>
+                              )}
                             </SelectContent>
                           </Select>
                         ) : (
@@ -2046,7 +2072,7 @@ export default function AdminTicketsPage() {
         />
       )}
 
-      {isAdmin && thread && lane?.lane === "support" && (
+      {canEdit && thread && lane?.lane === "support" && (
         <EscalateTicketDialog
           open={showEscalate}
           onOpenChange={setShowEscalate}

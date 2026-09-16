@@ -587,12 +587,13 @@ export function TicketThread({
 
   let lastDay = "";
 
+  // Wallpaper on the wrapper, not the scroller: it stays put while the messages scroll over it.
   return (
-    <div className={cn("relative flex min-h-0 flex-col", className)}>
+    <div className={cn("ticket-wallpaper relative flex min-h-0 flex-col", className)}>
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="ticket-wallpaper min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-4 sm:px-6"
+        className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-4 sm:px-6"
       >
         {messages.map((m, index) => {
           const day = dayLabel(m.createdAt);

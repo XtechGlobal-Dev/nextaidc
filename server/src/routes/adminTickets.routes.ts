@@ -1093,14 +1093,14 @@ const escalateSchema = z.object({
   note: z.string().trim().max(MAX_MESSAGE_CHARS, MESSAGE_TOO_LONG).default(""),
 });
 
-/** Escalate a customer ticket to the platform. Brand admins only — it's raised in THEIR name; the customer thread stays here, linked both ways. */
+/** Escalate a customer ticket to the platform. Anyone on the brand's team who can edit tickets — it's raised in THEIR name; the customer thread stays here, linked both ways. */
 router.post(
   "/:id/escalate",
   asyncHandler(async (req, res) => {
     const actor = actorOf(req);
     assertCan(actor, "edit");
-    if (actor.lane !== "support" || actor.role !== "ADMIN" || !actor.brandId) {
-      throw forbidden("Only a brand admin can escalate a customer's request to the platform.");
+    if (actor.lane !== "support" || !actor.brandId) {
+      throw forbidden("Only a brand's team can escalate a customer's request to the platform.");
     }
     const data = escalateSchema.parse(req.body);
     const db = dbOf(req);

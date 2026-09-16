@@ -891,7 +891,7 @@ export default function AdminBrandCreatePage() {
           <Card className="p-5">
             <h3 className="text-sm font-semibold">Brand Preview</h3>
 
-            <div className="mt-4 flex flex-col items-center gap-2 rounded-xl bg-warm p-5">
+            <div className="mt-4 flex min-w-0 flex-col items-center gap-2 rounded-xl bg-warm p-5">
               <BrandMark
                 logoUrl={logoPreview}
                 name={draft.name}
@@ -900,12 +900,12 @@ export default function AdminBrandCreatePage() {
                 className="size-16 rounded-2xl text-2xl"
               />
               <p
-                className="mt-1 max-w-full truncate text-base font-semibold"
+                className="mt-1 w-full truncate text-center text-base font-semibold"
                 style={font ? { fontFamily: font.stack } : undefined}
               >
                 {draft.name || "Brand Name"}
               </p>
-              <p className="line-clamp-2 text-center text-xs text-muted-foreground">
+              <p className="line-clamp-2 w-full break-words text-center text-xs text-muted-foreground [overflow-wrap:anywhere]">
                 {draft.tagline || "Your brand tagline goes here"}
               </p>
             </div>

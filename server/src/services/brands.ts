@@ -41,29 +41,50 @@ let bySlug = new Map<string, Brand>();
 let byDomain = new Map<string, Brand>();
 let byId = new Map<string, Brand>();
 
+let settleFirstLoad: () => void = () => {};
+const firstLoad = new Promise<void>((resolve) => {
+  settleFirstLoad = resolve;
+});
+
+/** Settles once the boot load has landed (or given up). Until then every brand host is a stranger
+ *  to CORS, so a brand's first request waits here rather than being refused. */
+export function brandsReady(): Promise<void> {
+  return firstLoad;
+}
+
 /** (Re)load the host-resolution cache. Safe to call on a cold DB — a failure
- *  leaves the previous snapshot in place rather than blanking every brand. */
-export async function loadBrands(): Promise<void> {
-  try {
-    const rows = await prisma.brand.findMany();
-    const slugs = new Map<string, Brand>();
-    const domains = new Map<string, Brand>();
-    const ids = new Map<string, Brand>();
-    for (const b of rows) {
-      slugs.set(b.slug, b);
-      ids.set(b.id, b);
-      // Only VERIFIED domains route: this map feeds CORS and the Origin fallback, so an unproven
-      // hostname would admit a page on a domain the tenant merely typed in. Dev-only override via ALLOW_UNVERIFIED_BRAND_DOMAINS.
-      if (b.customDomain && (b.domainStatus === "verified" || allowUnverifiedBrandDomains)) {
-        domains.set(b.customDomain.toLowerCase(), b);
+ *  leaves the previous snapshot in place rather than blanking every brand.
+ *  `retries` is for boot: a flaky first connection would otherwise leave the
+ *  cache empty for a whole refresh interval, with every brand door refused. */
+export async function loadBrands(opts: { retries?: number } = {}): Promise<void> {
+  const attempts = 1 + (opts.retries ?? 0);
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const rows = await prisma.brand.findMany();
+      const slugs = new Map<string, Brand>();
+      const domains = new Map<string, Brand>();
+      const ids = new Map<string, Brand>();
+      for (const b of rows) {
+        slugs.set(b.slug, b);
+        ids.set(b.id, b);
+        // Only VERIFIED domains route: this map feeds CORS and the Origin fallback, so an unproven
+        // hostname would admit a page on a domain the tenant merely typed in. Dev-only override via ALLOW_UNVERIFIED_BRAND_DOMAINS.
+        if (b.customDomain && (b.domainStatus === "verified" || allowUnverifiedBrandDomains)) {
+          domains.set(b.customDomain.toLowerCase(), b);
+        }
       }
+      bySlug = slugs;
+      byDomain = domains;
+      byId = ids;
+      settleFirstLoad();
+      return;
+    } catch {
+      // DB not reachable — keep whatever snapshot we have; at boot, wait and try again.
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 2500));
     }
-    bySlug = slugs;
-    byDomain = domains;
-    byId = ids;
-  } catch {
-    /* DB not reachable yet — keep whatever snapshot we have. */
   }
+  // Out of attempts: stop holding requests, the minute refresh keeps trying.
+  settleFirstLoad();
 }
 
 export function cachedBrand(brandId: string | null | undefined): Brand | null {
