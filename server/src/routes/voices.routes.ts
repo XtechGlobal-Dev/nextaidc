@@ -9,7 +9,7 @@ import {
   DEFAULT_AGENT_VOICE_ID,
 } from "../services/voices.js";
 import { sendValidated } from "../lib/respond.js";
-import { AllVoicesResponseSchema, VoiceCatalogResponseSchema } from "hello22/shared/contracts/voices.js";
+import { AllVoicesResponseSchema, VoiceCatalogResponseSchema } from "../../../shared/contracts/voices.js";
 
 const router = express.Router();
 
