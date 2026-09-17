@@ -2012,8 +2012,11 @@ router.get(
   }),
 );
 
+// Plans are the platform's defaults: only the super admin creates, edits, deletes or syncs them.
+// A brand admin reads them (GET above) and prices on top via the brand pricing addon.
 router.post(
   "/plans",
+  requireSuperAdmin,
   requirePermission("plans", "create"),
   asyncHandler(async (req, res) => {
     const data = planInput.parse(req.body);
@@ -2054,6 +2057,7 @@ router.post(
 
 router.patch(
   "/plans/:id",
+  requireSuperAdmin,
   requirePermission("plans", "edit"),
   asyncHandler(async (req, res) => {
     const data = planInput.partial().parse(req.body);
@@ -2134,6 +2138,7 @@ router.patch(
 
 router.delete(
   "/plans/:id",
+  requireSuperAdmin,
   requirePermission("plans", "delete"),
   asyncHandler(async (req, res) => {
     const exists = await prisma.subscriptionPlan.findUnique({ where: { id: req.params.id } });
@@ -2163,6 +2168,7 @@ router.delete(
 /** Bulk-sync all local plans to Stripe (creates missing products/prices, updates existing). */
 router.post(
   "/plans/sync-stripe",
+  requireSuperAdmin,
   requirePermission("plans", "edit"),
   asyncHandler(async (_req, res) => {
     if (!isStripeConfigured()) throw badRequest("Stripe is not configured");

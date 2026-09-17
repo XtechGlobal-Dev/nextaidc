@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -132,6 +132,16 @@ export default function SupportPage() {
   const [pageSize, setPageSize] = useState(10);
 
   const [composing, setComposing] = useState(false);
+  const navigate = useNavigate();
+  // `?new=1` — the inbox's "Ask the platform" button lands here with the composer already open.
+  const wantsNew = searchParams.get("new") === "1";
+  useEffect(() => {
+    if (!wantsNew || !lane) return;
+    setComposing(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("new");
+    setSearchParams(next, { replace: true });
+  }, [wantsNew, lane, searchParams, setSearchParams]);
   const [rating, setRating] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
   const [allAttachments, setAllAttachments] = useState(false);
@@ -215,6 +225,11 @@ export default function SupportPage() {
   function select(id: string | null) {
     setReplyTo(null);
     setEditing(null);
+    // A brand admin's requests are listed in their Support Tickets inbox, not here: leaving a conversation goes back there.
+    if (!id && lane?.lane === "brand") {
+      navigate("/dashboard/admin/tickets");
+      return;
+    }
     setSearchParams(id ? { ticket: id } : {}, { replace: true });
   }
 
@@ -397,12 +412,18 @@ export default function SupportPage() {
     );
   }
 
+  // A brand admin has no list here: their requests to the platform sit in their Support Tickets inbox,
+  // next to their customers' tickets. This page only hosts one conversation, or the composer.
+  if (lane?.lane === "brand" && !selectedId && !composing && !wantsNew) {
+    return <Navigate to="/dashboard/admin/tickets" replace />;
+  }
+
   const copy = lane?.copy;
 
   return (
     <div>
       <PageHeader
-        title={copy?.requesterPage ?? "Support"}
+        title={lane?.lane === "brand" ? "Platform request" : (copy?.requesterPage ?? "Support")}
         subtitle={
           openCount > 0
             ? `${openCount} open request${openCount === 1 ? "" : "s"} with ${copy?.handlerName ?? "the team"}`
@@ -435,8 +456,8 @@ export default function SupportPage() {
                 type="button"
                 onClick={() => select(null)}
                 className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border text-foreground transition-colors hover:bg-muted"
-                aria-label="All requests"
-                title="All requests"
+                aria-label={lane?.lane === "brand" ? "Back to Support Tickets" : "All requests"}
+                title={lane?.lane === "brand" ? "Back to Support Tickets" : "All requests"}
               >
                 <ArrowLeft className="size-5" />
               </button>

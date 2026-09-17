@@ -21,7 +21,7 @@ export default function AdminBrandPricingPage() {
   return (
     <div>
       <PageHeader
-        title="Pricing"
+        title="Price addon"
         subtitle="What your customers pay for each plan: the platform's base price plus your addon."
       />
       <BrandPricingSection

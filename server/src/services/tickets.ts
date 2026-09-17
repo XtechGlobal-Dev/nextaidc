@@ -240,9 +240,24 @@ export async function loadTicketForHandler(db: TenantClient, id: string, actor: 
 }
 
 /** Load a ticket the CALLER raised, 404-ing anyone else's. */
-export async function loadTicketForRequester(db: TenantClient, id: string, requesterId: string) {
+/** The account asking, as the requester routes see it. */
+export interface TicketRequester {
+  id: string;
+  brandId: string | null;
+  lane: TicketLane;
+}
+
+/** What a requester may read. A customer sees their own tickets; on the brand lane the request is the
+ *  BRAND's (raised by whichever admin, or born of a staff member's escalation), so its admin sees them all. */
+export function requesterWhere(who: TicketRequester): Prisma.TicketWhereInput {
+  return who.lane === "brand" && who.brandId
+    ? { lane: "brand", brandId: who.brandId }
+    : { lane: who.lane, requesterId: who.id };
+}
+
+export async function loadTicketForRequester(db: TenantClient, id: string, who: TicketRequester) {
   const ticket = await db.ticket.findFirst({
-    where: { id, requesterId },
+    where: { id, ...requesterWhere(who) },
     include: ticketInclude,
   });
   if (!ticket) throw notFound("Ticket not found");
@@ -712,9 +727,11 @@ export function preview(body: string, hadAttachments = false, max = 300): string
 
 /* --------------------------------- URLs ---------------------------------- */
 
-/** One "my requests" page for both lanes; who's signed in decides which lane it shows. */
-export function requesterTicketPath(ticketId: string): string {
-  return `/dashboard/support?ticket=${ticketId}`;
+/** Where the requester reads their ticket. A customer has the Support page; a brand admin's requests to the
+ *  platform sit in their own inbox next to their customers' tickets, so the link lands there and the inbox
+ *  opens the conversation. */
+export function requesterTicketPath(lane: TicketLane, ticketId: string): string {
+  return lane === "brand" ? `/dashboard/admin/tickets?ticket=${ticketId}` : `/dashboard/support?ticket=${ticketId}`;
 }
 
 /** Handler inbox path — brand admins at /dashboard/admin, the platform owner at /superadmin. */
@@ -1156,7 +1173,7 @@ export async function notifyRequester(
       type: "ticket",
       title: opts.title,
       message: opts.message,
-      link: opts.link ?? requesterTicketPath(ticket.id),
+      link: opts.link ?? requesterTicketPath(ticket.lane as TicketLane, ticket.id),
     });
     publishToUser(ticket.requesterId, { type: "ticket", ticketId: ticket.id });
 
@@ -1165,7 +1182,7 @@ export async function notifyRequester(
       const vars = {
         ...ticketVars(ticket, opts.templateVars),
         user_name: ticket.requester.fullName || ticket.requester.email,
-        ticket_url: brandAppUrl(opts.link ?? requesterTicketPath(ticket.id), mailBrand),
+        ticket_url: brandAppUrl(opts.link ?? requesterTicketPath(ticket.lane as TicketLane, ticket.id), mailBrand),
         // What to call whoever is answering, in the requester's own words.
         handler_name: laneCopy(ticket.lane as TicketLane).handlerName,
       };

@@ -132,11 +132,14 @@ export default function AdminPlansPage() {
   // Trial/grace/cap are platform-wide settings, super admin only (matches requireSuperAdmin on the routes).
   // Only load them for the super admin — otherwise the 403s take down the whole page load.
   const hasPermission = useAuthStore((s) => s.hasPermission);
-  const canManageSettings = useAuthStore((s) => isSuperAdminRole(s.user?.role));
-  // Plan CRUD gates (ADMIN passes all). Denied buttons are omitted from the DOM and handlers no-op.
-  const canCreate = hasPermission("plans.create");
-  const canEdit = hasPermission("plans.edit");
-  const canDelete = hasPermission("plans.delete");
+  const isSuperAdmin = useAuthStore((s) => isSuperAdminRole(s.user?.role));
+  const canManageSettings = isSuperAdmin;
+  // Plan CRUD is the platform's alone: a brand admin sees the default plans read-only and sets its
+  // markup under Price addon (the routes enforce the same with requireSuperAdmin). Denied buttons
+  // are omitted from the DOM and handlers no-op.
+  const canCreate = isSuperAdmin && hasPermission("plans.create");
+  const canEdit = isSuperAdmin && hasPermission("plans.edit");
+  const canDelete = isSuperAdmin && hasPermission("plans.delete");
 
   const [trialDays, setTrialDays] = useState<number | null>(null);
   const [trialDraft, setTrialDraft] = useState("");
@@ -442,8 +445,12 @@ export default function AdminPlansPage() {
   return (
     <div>
       <PageHeader
-        title="Plans"
-        subtitle="Create the subscription plans customers choose at signup."
+        title={isSuperAdmin ? "Plans" : "Default plans"}
+        subtitle={
+          isSuperAdmin
+            ? "Create the subscription plans customers choose at signup."
+            : "The platform's subscription plans your customers choose at signup. Set what you add on top under Price addon."
+        }
         actions={
           canCreate || canEdit ? (
             <div className="flex gap-2">

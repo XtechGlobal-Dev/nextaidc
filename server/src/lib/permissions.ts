@@ -53,7 +53,8 @@ export const SECTIONS: SectionDef[] = [
     label: "Brand Requests",
     capabilities: ["view", "create", "edit", "delete"],
   },
-  { key: "plans", label: "Plans", capabilities: ["view", "create", "edit", "delete"] },
+  // View only: the plans are the platform's defaults, changed by the super admin alone (routes enforce it).
+  { key: "plans", label: "Default plans", capabilities: ["view"] },
   { key: "coupons", label: "Coupons", capabilities: ["view", "create", "edit", "delete"] },
   { key: "voice_bank", label: "Voice Bank", capabilities: ["view", "create", "edit", "delete"] },
   { key: "phone_numbers", label: "Phone Numbers", capabilities: ["view", "create", "edit", "delete"] },

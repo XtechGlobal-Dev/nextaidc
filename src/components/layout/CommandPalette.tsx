@@ -45,6 +45,8 @@ import { adminHref } from "@/lib/onboardingRoute";
 interface Destination {
   to: string;
   label: string;
+  /** Shown to a brand's people instead of `label` (mirrors the sidebar's `brandLabel`). */
+  brandLabel?: string;
   group: string;
   icon: LucideIcon;
   /** Extra search terms — lets a query match content *inside* a page, not just its title. */
@@ -83,13 +85,14 @@ const DESTINATIONS: Destination[] = [
   { to: "/dashboard/sms-to-caller", label: "SMS to Caller", group: "Workspace", icon: MessageSquareText, customer: true, module: "smsToCaller", premiumWhenLocked: true, keywords: ["sms", "text", "message", "caller", "send details", "link", "address", "quote", "premium"] },
   // Raising a request. Which tier it goes to is the account's own — a customer
   // asks their brand, a brand admin asks the platform — so one entry covers both.
-  { to: "/dashboard/support", label: "Support", group: "Workspace", icon: LifeBuoy, keywords: ["help", "ticket", "tickets", "contact", "raise a request", "issue", "problem", "chat with support", "attachment", "platform support"] },
+  // A brand admin's requests to the platform sit in their Support Tickets inbox, so this is the customer's page only.
+  { to: "/dashboard/support", label: "Support", group: "Workspace", icon: LifeBuoy, hideForAdmin: true, keywords: ["help", "ticket", "tickets", "contact", "raise a request", "issue", "problem", "chat with support", "attachment", "platform support"] },
   { to: "/dashboard/settings", label: "Account Settings", group: "Workspace", icon: Settings, keywords: ["profile", "account", "password", "email", "business name", "mobile", "website", "personal"] },
   { to: "/dashboard/admin/overview", label: "Overview", group: "Admin", icon: LayoutGrid, permission: "overview", keywords: ["admin", "metrics", "revenue", "signups", "stats"] },
   { to: "/dashboard/admin/customers", label: "Customers", group: "Admin", icon: Users, permission: "customers", keywords: ["users", "accounts", "clients", "members"] },
   { to: "/dashboard/admin/subscriptions", label: "Subscriptions", group: "Admin", icon: CreditCard, permission: "subscriptions", keywords: ["billing", "mrr", "revenue", "payments", "invoices", "trial", "active", "past due", "canceled", "onboarding", "under onboarding", "leads", "plan history", "renewals", "win-back"] },
-  { to: "/dashboard/admin/plans", label: "Plans", group: "Admin", icon: Package, permission: "plans", keywords: ["pricing", "tiers", "packages", "products"] },
-  { to: "/dashboard/admin/pricing", label: "Pricing", group: "Admin", icon: BadgeDollarSign, permission: "pricing", keywords: ["addon", "markup", "price", "plans", "brand price", "charges"] },
+  { to: "/dashboard/admin/plans", label: "Plans", brandLabel: "Default plans", group: "Admin", icon: Package, permission: "plans", keywords: ["default plans", "pricing", "tiers", "packages", "products"] },
+  { to: "/dashboard/admin/pricing", label: "Price addon", group: "Admin", icon: BadgeDollarSign, permission: "pricing", keywords: ["pricing", "addon", "markup", "price", "plans", "brand price", "charges"] },
   { to: "/dashboard/admin/wallet", label: "Wallet", group: "Admin", icon: Wallet, permission: "wallet", keywords: ["balance", "payout", "earnings", "commission", "credits", "money"] },
   // The handler side. Two entries, one path: only one of the permissions is
   // ever reachable for a given account, so exactly one of these shows up.
@@ -179,7 +182,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       // Admins hold no subscription of their own (the sidebar hides this too).
       if (d.hideForAdmin && isAdmin) return false;
       return true;
-    });
+    }).map((d) => (d.brandLabel && !isSuperAdmin ? { ...d, label: d.brandLabel } : d));
     if (!q) return visible.map((d) => ({ d, hint: undefined as string | undefined }));
 
     return visible

@@ -13,6 +13,8 @@ export type { TenantClient };
 
 // Short on purpose: a status flip is an incident-response lever and must land in seconds.
 const REGISTRY_TTL_MS = 30_000;
+// After a failed read: try again soon rather than sitting on a stale (or empty) registry for a full TTL.
+const REGISTRY_RETRY_MS = 5_000;
 
 /** Most tenants we keep a live client for. Each holds its own pool, so this
  *  bounds total connections; the least recently used is evicted. */
@@ -56,14 +58,21 @@ async function loadRegistry(): Promise<Map<string, Entry>> {
           select: { brandId: true, status: true, urlEncrypted: true },
         });
       } catch (e) {
-        // Unreadable registry (usually the brand_databases migration hasn't run):
-        // treat as "no tenant is ready" so every query refuses rather than routing elsewhere.
+        // Unreadable registry. With nothing loaded yet (usually the brand_databases
+        // migration hasn't run) treat it as "no tenant is ready" so every query refuses
+        // rather than routing elsewhere. With a registry already loaded, this is a blip
+        // on the control plane: keep the last good copy — a stale entry still names the
+        // right database, whereas an empty one shuts every brand's door with "database
+        // isn't available" for the rest of the TTL, long after the connection is back.
+        // Either way, retry soon rather than waiting out a full TTL.
         console.warn(
-          "[tenantDb] registry unreadable, no tenant database is routable:",
+          registry
+            ? "[tenantDb] registry re-read failed, keeping the last good copy:"
+            : "[tenantDb] registry unreadable, no tenant database is routable:",
           e instanceof Error ? e.message : e,
         );
-        registry = new Map();
-        registryLoadedAt = Date.now();
+        registry ??= new Map();
+        registryLoadedAt = Date.now() - REGISTRY_TTL_MS + REGISTRY_RETRY_MS;
         return registry;
       }
       const next = new Map<string, Entry>();

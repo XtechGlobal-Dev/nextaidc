@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { Prisma } from "@prisma/tenant-client";
 import { prisma } from "../prisma.js";
-import { laneDb, type TenantClient } from "../services/tenantDb.js";
+import { controlPlaneAsTenant, laneDb, type TenantClient } from "../services/tenantDb.js";
 import { brandIdsMatching, cachedBrand } from "../services/brands.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../lib/http.js";
 import { requireAuth, requireAdminOrStaff } from "../middleware/auth.js";
@@ -60,6 +60,7 @@ import {
   serializeMerge,
   serializeMessage,
   serializeTicket,
+  serializeTicketForRequester,
   shouldEmailForMessage,
   ticketInclude,
   toggleReaction,
@@ -660,15 +661,53 @@ const listQuery = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 
+/** The filters that read the same on any ticket: status, priority and the search box. */
+function commonWhere(query: z.infer<typeof listQuery>, brandIds: string[]): Prisma.TicketWhereInput {
+  const where: Prisma.TicketWhereInput = {};
+  if (query.status === "unresolved") where.status = { in: ["open", "pending"] };
+  else if (query.status !== "all") where.status = query.status;
+  if (query.priority) where.priority = query.priority;
+  if (query.q) {
+    // "#42" matches the number too. Brand names go through the cache — the brand table is the platform's, not joinable here.
+    const asNumber = /^#?\d{1,9}$/.test(query.q) ? Number(query.q.replace("#", "")) : null;
+    where.OR = [
+      ...(asNumber !== null ? [{ number: asNumber }] : []),
+      { reference: { contains: query.q, mode: "insensitive" as const } },
+      { subject: { contains: query.q, mode: "insensitive" as const } },
+      { requesterName: { contains: query.q, mode: "insensitive" as const } },
+      { requesterEmail: { contains: query.q, mode: "insensitive" as const } },
+      ...(brandIds.length ? [{ brandId: { in: brandIds } }] : []),
+    ];
+  }
+  return where;
+}
+
+/**
+ * A brand admin's own requests to the platform, for their inbox: brand-lane rows in the control plane
+ * stamped with their brand. They sit in the same list as the customers' tickets (one inbox, a badge
+ * tells them apart) rather than on a page of their own. Only the full admin — staff answer customers
+ * and raise nothing. Null when the caller has none, or when a filter names something only the brand's
+ * own tickets have (its queues, its handlers, the team's unread marker).
+ */
+function platformRequestsWhere(
+  query: z.infer<typeof listQuery>,
+  actor: TicketActor,
+): Prisma.TicketWhereInput | null {
+  if (actor.lane !== "support" || actor.role !== "ADMIN" || !actor.brandId) return null;
+  if (query.departmentId || query.assigned !== "any" || query.assignedToId || query.unread === "true") return null;
+  return { lane: "brand", brandId: actor.brandId, ...commonWhere(query, []) };
+}
+
 /** Inbox filters as a Prisma where, shared by table and CSV. Null when a filter is out of reach — that means "nothing", never "everything". */
 function listWhere(
   query: z.infer<typeof listQuery>,
   actor: TicketActor,
   scope: string[] | null,
 ): Prisma.TicketWhereInput | null {
-  const where: Prisma.TicketWhereInput = { ...scopeFilter(actor, scope) };
-  if (query.status === "unresolved") where.status = { in: ["open", "pending"] };
-  else if (query.status !== "all") where.status = query.status;
+  const where: Prisma.TicketWhereInput = {
+    ...scopeFilter(actor, scope),
+    ...commonWhere(query, actor.lane === "brand" && query.q ? brandIdsMatching(query.q) : []),
+  };
 
   if (query.departmentId) {
     // Never widen: an explicit filter can only narrow what the caller holds.
@@ -684,23 +723,34 @@ function listWhere(
   if (query.assigned === "me") where.assignedToId = actor.id;
   else if (query.assigned === "unassigned") where.assignedToId = null;
   else if (query.assignedToId) where.assignedToId = query.assignedToId;
-  if (query.priority) where.priority = query.priority;
   if (query.unread === "true") where.unreadForStaff = true;
-
-  if (query.q) {
-    // "#42" matches the number too. Brand names go through the cache — the brand table is the platform's, not joinable here.
-    const asNumber = /^#?\d{1,9}$/.test(query.q) ? Number(query.q.replace("#", "")) : null;
-    const brandIds = actor.lane === "brand" ? brandIdsMatching(query.q) : [];
-    where.OR = [
-      ...(asNumber !== null ? [{ number: asNumber }] : []),
-      { reference: { contains: query.q, mode: "insensitive" as const } },
-      { subject: { contains: query.q, mode: "insensitive" as const } },
-      { requesterName: { contains: query.q, mode: "insensitive" as const } },
-      { requesterEmail: { contains: query.q, mode: "insensitive" as const } },
-      ...(brandIds.length ? [{ brandId: { in: brandIds } }] : []),
-    ];
-  }
   return where;
+}
+
+/** The list's shape: newest conversation first, with its latest message for the preview. */
+function listArgs(where: Prisma.TicketWhereInput, take: number, skip: number, internalNotes: boolean) {
+  return {
+    where,
+    orderBy: { lastMessageAt: "desc" as const },
+    skip,
+    take,
+    include: {
+      ...ticketInclude,
+      messages: {
+        // The brand's own requests are read as their requester: internal notes are the platform's.
+        ...(internalNotes ? {} : { where: { internal: false } }),
+        orderBy: { createdAt: "desc" as const },
+        take: 1,
+        select: {
+          body: true,
+          authorType: true,
+          deletedAt: true,
+          attachments: { select: { mime: true }, take: 1 },
+        },
+      },
+      _count: { select: { messages: internalNotes ? true : { where: { internal: false } } } },
+    },
+  };
 }
 
 router.get(
@@ -717,41 +767,51 @@ router.get(
       return;
     }
 
-    const [total, rows] = await Promise.all([
-      db.ticket.count({ where }),
-      db.ticket.findMany({
-        where,
-        orderBy: { lastMessageAt: "desc" },
-        skip: (query.page - 1) * query.pageSize,
-        take: query.pageSize,
-        include: {
-          ...ticketInclude,
-          messages: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-            select: {
-              body: true,
-              authorType: true,
-              deletedAt: true,
-              attachments: { select: { mime: true }, take: 1 },
-            },
-          },
-          _count: { select: { messages: true } },
-        },
-      }),
-    ]);
+    const skip = (query.page - 1) * query.pageSize;
+    const platformWhere = platformRequestsWhere(query, actor);
 
-    res.json({
-      tickets: (await attachEscalationPairs(rows)).map((t) =>
-        serializeTicket(t, {
-          lastMessage: messagePreview(t.messages[0]),
-          messageCount: t._count.messages,
-        }),
-      ),
-      total,
-      page: query.page,
-      pageSize: query.pageSize,
-    });
+    if (!platformWhere) {
+      const [total, rows] = await Promise.all([
+        db.ticket.count({ where }),
+        db.ticket.findMany(listArgs(where, query.pageSize, skip, true)),
+      ]);
+      res.json({
+        tickets: (await attachEscalationPairs(rows)).map((t) =>
+          serializeTicket(t, { lastMessage: messagePreview(t.messages[0]), messageCount: t._count.messages }),
+        ),
+        total,
+        page: query.page,
+        pageSize: query.pageSize,
+      });
+      return;
+    }
+
+    // Two databases, one list: the customers' tickets from the brand's own DB and the brand's requests to
+    // the platform from the control plane. Each side yields up to the end of the requested page, then the
+    // page is cut from the merged order — no single query can span the two.
+    const main = controlPlaneAsTenant();
+    const [total, rows, platformTotal, platformRows] = await Promise.all([
+      db.ticket.count({ where }),
+      db.ticket.findMany(listArgs(where, skip + query.pageSize, 0, true)),
+      main.ticket.count({ where: platformWhere }),
+      main.ticket.findMany(listArgs(platformWhere, skip + query.pageSize, 0, false)),
+    ]);
+    const customers = (await attachEscalationPairs(rows)).map((t) =>
+      serializeTicket(t, { lastMessage: messagePreview(t.messages[0]), messageCount: t._count.messages }),
+    );
+    const platform = (await attachEscalationPairs(platformRows)).map((t) => ({
+      ...serializeTicketForRequester(t, {
+        lastMessage: messagePreview(t.messages[0]),
+        messageCount: t._count.messages,
+      }),
+      // In this inbox "new" means new for the person reading it: on their own request, the platform's reply.
+      unreadForStaff: t.unreadForRequester,
+    }));
+    const merged = [...customers, ...platform]
+      .sort((a, b) => (a.lastMessageAt < b.lastMessageAt ? 1 : a.lastMessageAt > b.lastMessageAt ? -1 : 0))
+      .slice(skip, skip + query.pageSize);
+
+    res.json({ tickets: merged, total: total + platformTotal, page: query.page, pageSize: query.pageSize });
   }),
 );
 

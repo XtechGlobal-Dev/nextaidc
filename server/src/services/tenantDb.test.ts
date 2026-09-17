@@ -177,6 +177,33 @@ describe("registry loading", () => {
     await expect(tenantFor("b_acme")).rejects.toMatchObject({ status: "none" });
     warn.mockRestore();
   });
+
+  // The other realistic case: the control plane blips for a second while the brand's own
+  // database is fine. That must not shut every brand's door with "database isn't available"
+  // for a whole TTL — the last good registry still names the right database.
+  it("keeps the last good registry through a transient read failure, and retries soon", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      h.findMany.mockResolvedValue([row("b_acme")]);
+      expect(await tenantStatus("b_acme")).toBe("active");
+
+      vi.advanceTimersByTime(31_000); // TTL expired → the next call re-reads
+      h.findMany.mockRejectedValue(new Error("Can't reach database server"));
+      expect(await tenantStatus("b_acme")).toBe("active");
+      await expect(tenantFor("b_acme")).resolves.toBeDefined();
+      expect(h.findMany).toHaveBeenCalledTimes(2);
+
+      // Not a full TTL later: a few seconds on, it reads again and a real status flip lands.
+      vi.advanceTimersByTime(6_000);
+      h.findMany.mockResolvedValue([row("b_acme", "disabled")]);
+      expect(await tenantStatus("b_acme")).toBe("disabled");
+      expect(h.findMany).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+      warn.mockRestore();
+    }
+  });
 });
 
 describe("allCallDbs", () => {

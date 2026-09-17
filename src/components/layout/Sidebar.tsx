@@ -125,6 +125,9 @@ interface NavItem {
   adminOnly?: boolean;
   /** SUPER_ADMIN only: platform API accounts and tenant setup. A brand ADMIN never sees these. */
   superAdminOnly?: boolean;
+  /** What a brand's people see instead of `label` — the same page reads differently from inside a tenant
+   *  (the platform's "Plans" are a brand's read-only "Default plans"). */
+  brandLabel?: string;
   /** Brand module. Switched off = hidden outright; unlike a plan lock there's nothing to upsell. */
   module?: BrandModuleId;
 }
@@ -159,14 +162,15 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/dashboard/admin/overview", label: "Overview", icon: LayoutGrid, permission: "overview" },
   { to: "/dashboard/admin/customers", label: "Customers", icon: Users, permission: "customers" },
   { to: "/dashboard/admin/subscriptions", label: "Subscriptions", icon: CreditCard, permission: "subscriptions" },
-  { to: "/dashboard/admin/plans", label: "Plans", icon: Package, permission: "plans" },
+  // The platform owns the plans; a brand only reads them and sets its addon under Price addon.
+  { to: "/dashboard/admin/plans", label: "Plans", brandLabel: "Default plans", icon: Package, permission: "plans" },
   { to: "/dashboard/admin/coupons", label: "Coupons", icon: Ticket, permission: "coupons" },
   // `tickets` is brand-scoped, `brand_tickets` platform-only, so exactly one of these two shows.
   { to: "/dashboard/admin/tickets", label: "Support Tickets", icon: MessagesSquare, permission: "tickets" },
   { to: "/dashboard/admin/tickets", label: "Brand Requests", icon: MessagesSquare, permission: "brand_tickets" },
   // A brand's own money: brand-scoped sections, so the super admin never sees
   // them here (they live on the brand's page under Brands instead).
-  { to: "/dashboard/admin/pricing", label: "Pricing", icon: BadgeDollarSign, permission: "pricing" },
+  { to: "/dashboard/admin/pricing", label: "Price addon", icon: BadgeDollarSign, permission: "pricing" },
   { to: "/dashboard/admin/wallet", label: "Wallet", icon: Wallet, permission: "wallet" },
   { to: "/dashboard/admin/voice-bank", label: "Voice Library", icon: Mic, permission: "voice_bank" },
   { to: "/dashboard/admin/phone-numbers", label: "Phone Numbers", icon: Phone, permission: "phone_numbers" },
@@ -368,8 +372,10 @@ export function Sidebar() {
       : NAV.filter(
           (item) =>
             // Admins keep Call Forwarding + Call Transfer in their user nav
-            // (they have a real profile); only Plans & Billing is hidden.
-            !(isAdmin && item.to === "/dashboard/plans") &&
+            // (they have a real profile); Plans & Billing is hidden, and so is
+            // Support: a brand admin's requests to the platform live in their
+            // Support Tickets inbox, next to their customers' tickets.
+            !(isAdmin && (item.to === "/dashboard/plans" || item.to === "/dashboard/support")) &&
             // A module the brand switched off is simply not on offer.
             !(item.module && brandModules && brandModules[item.module] === false) &&
             // On mobile these live in the bottom app bar, so drop them here.
@@ -508,14 +514,10 @@ export function Sidebar() {
                     className={cn(navItemClass(isCollapsed)({ isActive: onUserPage }), "w-full")}
                   >
                     <LayoutDashboard className="size-[18px] shrink-0" />
-                    {isCollapsed ? (
-                      // Support is folded behind this button, so its bell rings here.
-                      <TicketBell count={ticketUnread.requester} collapsed />
-                    ) : (
+                    {!isCollapsed && (
                       <>
                         <span>User Dashboard</span>
                         <span className="ml-auto flex items-center gap-1.5">
-                          <TicketBell count={ticketUnread.requester} collapsed={false} />
                           <ChevronRight className="size-4 shrink-0 opacity-60" />
                         </span>
                       </>
@@ -533,7 +535,7 @@ export function Sidebar() {
               if (!canUseSection(user?.role, item.permission, user?.brandId)) return false;
               if (item.permission && !hasPermission(item.permission)) return false;
               return true;
-            });
+            }).map((item) => (item.brandLabel && !isSuperAdmin ? { ...item, label: item.brandLabel } : item));
             if (visibleAdminItems.length === 0) return null;
             return (
             <nav className="mt-2 flex flex-col gap-1 px-3">

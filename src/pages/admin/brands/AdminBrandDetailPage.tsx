@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Trash2,
   UserCog,
+  UserRound,
   Users,
   Wallet,
 } from "lucide-react";
@@ -297,6 +298,43 @@ export default function AdminBrandDetailPage() {
               >
                 View in Domain →
               </button>
+          </div>
+        </div>
+
+        {/* The owner is the first admin account created with the brand. It lives
+            in the brand's own database, so it's a read-out here; the Team tab is
+            where accounts are managed. */}
+        <div className="sm:col-span-2">
+          <Label>Owner</Label>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            {brand?.owner ? (
+              <>
+                <span className="flex items-center gap-1.5 text-sm">
+                  <UserRound className="size-4 text-muted-foreground" />
+                  <span className="font-medium">{brand.owner.fullName || "—"}</span>
+                </span>
+                <a
+                  href={`mailto:${brand.owner.email}`}
+                  className="rounded bg-muted px-2 py-1 font-mono text-sm hover:underline"
+                >
+                  {brand.owner.email}
+                </a>
+                <span className="text-xs text-muted-foreground">
+                  Admin since {new Date(brand.owner.createdAt).toLocaleDateString()}.
+                </span>
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                No admin account yet — this brand has no owner until one is added.
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setTab("team")}
+              className="text-xs text-primary hover:underline"
+            >
+              View in Team →
+            </button>
           </div>
         </div>
 

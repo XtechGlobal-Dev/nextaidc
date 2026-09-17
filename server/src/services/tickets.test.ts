@@ -605,8 +605,10 @@ describe("shouldEmailForMessage — the quiet-for-an-hour rule", () => {
 });
 
 describe("paths and previews", () => {
-  it("sends every requester to one page, and each handler to their own inbox", () => {
-    expect(requesterTicketPath("t1")).toBe("/dashboard/support?ticket=t1");
+  it("sends a customer to the Support page, a brand admin to their inbox, and each handler to their own inbox", () => {
+    expect(requesterTicketPath("support", "t1")).toBe("/dashboard/support?ticket=t1");
+    // A brand's requests to the platform sit in its own inbox next to its customers' tickets.
+    expect(requesterTicketPath("brand", "t1")).toBe("/dashboard/admin/tickets?ticket=t1");
     expect(handlerTicketPath("support", "t1")).toBe("/dashboard/admin/tickets?ticket=t1");
     expect(handlerTicketPath("brand", "t1")).toBe("/superadmin/tickets?ticket=t1");
   });
