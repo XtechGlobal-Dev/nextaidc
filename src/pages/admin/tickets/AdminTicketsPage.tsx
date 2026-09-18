@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, SyntheticEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRightLeft,
@@ -76,6 +76,7 @@ import {
   STATUS_WASH,
   TicketAvatar,
   TicketBrandBadge,
+  TicketLaneBadge,
   TicketPriorityBadge,
   TicketStatusBadge,
   TicketStatusDot,
@@ -199,6 +200,10 @@ export default function AdminTicketsPage() {
   /** On the brand lane the tenant column is the point; on a brand's own inbox
    *  every row is the same tenant, so it would be a column of one value. */
   const showBrandColumn = lane?.lane === "brand";
+  /** A brand admin's inbox holds two kinds of conversation: their customers' tickets and their own
+   *  requests to the platform. A badge tells them apart; staff only ever see the first kind. */
+  const mixedInbox = lane?.lane === "support" && isAdmin;
+  const navigate = useNavigate();
 
   const [status, setStatus] = useState<StatusFilter>(DEFAULT_STATUS);
   const [departmentId, setDepartmentId] = useState<string>(ANY_DEPARTMENT);
@@ -405,12 +410,18 @@ export default function AdminTicketsPage() {
         .then(setAgents)
         .catch(() => setAgents([]));
     } catch (e) {
+      // A brand admin's own request to the platform is listed here but lives in the platform's database:
+      // its conversation is read as the requester, on the Support page, with the way back to this inbox.
+      if (e instanceof ApiError && e.status === 404 && lane?.lane === "support") {
+        navigate(`/dashboard/support?ticket=${id}&from=inbox`, { replace: true });
+        return;
+      }
       toast.error(e instanceof ApiError ? e.message : "Couldn't open that request");
       setThread(null);
     } finally {
       setLoadingThread(false);
     }
-  }, []);
+  }, [lane, navigate]);
 
   useEffect(() => {
     if (!selectedId || !lane) {
@@ -437,6 +448,12 @@ export default function AdminTicketsPage() {
   }, [selectedId]);
 
   function select(id: string | null) {
+    // The brand's own platform requests share this list but not this inbox's tools (assignees, queues,
+    // notes are the platform's): their conversation opens as the requester.
+    if (id && tickets.some((t) => t.id === id && t.lane === "brand")) {
+      navigate(`/dashboard/support?ticket=${id}&from=inbox`);
+      return;
+    }
     const next = new URLSearchParams(searchParams);
     if (id) next.set("ticket", id);
     else next.delete("ticket");
@@ -826,6 +843,15 @@ export default function AdminTicketsPage() {
                 )}
                 Export CSV
               </Button>
+              {mixedInbox && (
+                <Button
+                  variant="outline"
+                  onClick={() => navigate("/dashboard/support?new=1&from=inbox")}
+                  title="Raise a request with the platform team — it will be listed here"
+                >
+                  <ArrowUpRight className="size-4" /> Ask the platform
+                </Button>
+              )}
               {canCreate && (
                 <Button onClick={() => setShowNew(true)} disabled={!lane}>
                   <Plus className="size-4" /> New request
@@ -1732,6 +1758,13 @@ export default function AdminTicketsPage() {
                                   {t.requester.name}
                                 </p>
                               </div>
+                            ) : t.lane === "brand" ? (
+                              // The brand's own request: the other side is the platform, and only that
+                              // — never the person answering there.
+                              <div className="min-w-0">
+                                <p className="truncate font-medium">Platform</p>
+                                <TicketLaneBadge lane={t.lane} className="mt-1" />
+                              </div>
                             ) : (
                               <div className="flex items-center gap-3">
                                 <TicketAvatar name={t.requester.name} size="md" />
@@ -1740,6 +1773,7 @@ export default function AdminTicketsPage() {
                                   <p className="truncate text-xs text-muted-foreground">
                                     {t.requester.email}
                                   </p>
+                                  {mixedInbox && <TicketLaneBadge lane={t.lane} className="mt-1" />}
                                 </div>
                               </div>
                             )}
@@ -1963,7 +1997,7 @@ export default function AdminTicketsPage() {
                         onClick={() => select(t.id)}
                         className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted/60"
                       >
-                        <TicketAvatar name={t.requester.name} className="mt-0.5" />
+                        <TicketAvatar name={t.lane === "brand" ? "Platform" : t.requester.name} className="mt-0.5" />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
                             <p
@@ -1981,9 +2015,10 @@ export default function AdminTicketsPage() {
                           </div>
                           <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                             {showBrandColumn && t.brand ? `${t.brand.name} · ` : ""}
-                            {t.requester.name} • {t.lastMessage || "No messages"}
+                            {t.lane === "brand" ? "Platform" : t.requester.name} • {t.lastMessage || "No messages"}
                           </p>
                           <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            {mixedInbox && <TicketLaneBadge lane={t.lane} />}
                             <TicketStatusBadge status={t.status} staff />
                             {t.department && (
                               <Badge variant="outline" className="bg-card text-[11px]">

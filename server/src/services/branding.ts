@@ -31,12 +31,19 @@ const objKey = (slot: BrandingSlot) => `branding.${slot}.key`;
 
 export type Branding = Record<BrandingSlot, string>;
 
+/** Every slot empty — what the SPA gets when the settings table can't be read. */
+export function emptyBranding(): Branding {
+  const out = {} as Branding;
+  for (const { slot } of BRANDING_SLOTS) out[slot] = "";
+  return out;
+}
+
 export async function getBranding(): Promise<Branding> {
   const rows = await prisma.platformSetting.findMany({
     where: { key: { in: BRANDING_SLOTS.map((s) => urlKey(s.slot)) } },
   });
   const byKey = new Map(rows.map((r) => [r.key, r.value]));
-  const out = {} as Branding;
+  const out = emptyBranding();
   for (const { slot } of BRANDING_SLOTS) out[slot] = byKey.get(urlKey(slot)) ?? "";
   return out;
 }

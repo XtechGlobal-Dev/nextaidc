@@ -8,6 +8,7 @@ import {
   Globe,
   Loader2,
   Mail,
+  Package,
   Palette,
   Power,
   RotateCcw,
@@ -15,6 +16,7 @@ import {
   ShieldCheck,
   Trash2,
   UserCog,
+  UserRound,
   Users,
   Wallet,
 } from "lucide-react";
@@ -38,6 +40,7 @@ import { BrandAccessSection, BrandLocaleFields } from "./BrandAccessSection";
 import { BrandContentSection } from "./BrandContentSection";
 import { BrandReadinessCard } from "./BrandReadinessCard";
 import { BrandPricingTab } from "./BrandPricingTab";
+import { BrandPlansTab } from "./BrandPlansTab";
 import { BLANK_SETUP, setupFrom, setupPayload, type SetupDraft } from "./brandSetupDraft";
 import { BrandDomainSection } from "./BrandDomainSection";
 import { BrandInsideTab } from "./BrandInsideTab";
@@ -300,6 +303,43 @@ export default function AdminBrandDetailPage() {
           </div>
         </div>
 
+        {/* The owner is the first admin account created with the brand. It lives
+            in the brand's own database, so it's a read-out here; the Team tab is
+            where accounts are managed. */}
+        <div className="sm:col-span-2">
+          <Label>Owner</Label>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            {brand?.owner ? (
+              <>
+                <span className="flex items-center gap-1.5 text-sm">
+                  <UserRound className="size-4 text-muted-foreground" />
+                  <span className="font-medium">{brand.owner.fullName || "—"}</span>
+                </span>
+                <a
+                  href={`mailto:${brand.owner.email}`}
+                  className="rounded bg-muted px-2 py-1 font-mono text-sm hover:underline"
+                >
+                  {brand.owner.email}
+                </a>
+                <span className="text-xs text-muted-foreground">
+                  Admin since {new Date(brand.owner.createdAt).toLocaleDateString()}.
+                </span>
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                No admin account yet — this brand has no owner until one is added.
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setTab("team")}
+              className="text-xs text-primary hover:underline"
+            >
+              View in Team →
+            </button>
+          </div>
+        </div>
+
         <div>
           <Label htmlFor="b-tagline">Tagline (optional)</Label>
           <Input
@@ -534,7 +574,10 @@ export default function AdminBrandDetailPage() {
               <Palette className="size-4" /> Theme
             </TabsTrigger>
             <TabsTrigger value="access">
-              <ShieldCheck className="size-4" /> Access &amp; plans
+              <ShieldCheck className="size-4" /> Access
+            </TabsTrigger>
+            <TabsTrigger value="plans">
+              <Package className="size-4" /> Plans
             </TabsTrigger>
             <TabsTrigger value="content">
               <FileText className="size-4" /> Content
@@ -572,6 +615,11 @@ export default function AdminBrandDetailPage() {
 
           <TabsContent value="access" className="space-y-5">
             <BrandAccessSection value={draft} onChange={patch} />
+            <div className="flex justify-end">{saveButton}</div>
+          </TabsContent>
+
+          <TabsContent value="plans" className="space-y-5">
+            <BrandPlansTab brandId={brand?.id} value={{ planIds: draft.planIds }} onChange={patch} />
             <div className="flex justify-end">{saveButton}</div>
           </TabsContent>
 

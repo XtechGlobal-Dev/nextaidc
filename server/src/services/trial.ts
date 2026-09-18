@@ -1214,12 +1214,19 @@ export async function reconcileSubscription(
       );
       // Reaching here means a trialing/past_due account just went active — tell them.
       void notifyPlanActivated(userId);
-      // Commission now (the invoice webhook never reaches local dev); idempotent on invoice id.
+      // Commission and the brand-wallet ledger row now (the invoice webhook never reaches local dev); both idempotent on invoice id.
       if (inv) {
         await accrueCommissionForInvoice({
           invoiceId: inv.id,
           customerId: inv.customerId,
           amountPaidCents: inv.amountPaidCents,
+        });
+        await recordPaidInvoice({
+          invoiceId: inv.id,
+          customerId: inv.customerId,
+          amountPaidCents: inv.amountPaidCents,
+          priceId: inv.priceId,
+          source: "reconcile",
         });
       }
     } else {

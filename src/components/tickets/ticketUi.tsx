@@ -3,6 +3,8 @@ import {
   Building2,
   Check,
   CreditCard,
+  Globe,
+  UserRound,
   FileText,
   KeyRound,
   MessageSquareText,
@@ -287,6 +289,22 @@ export function TicketPriorityBadge({
       <span className={cn("size-2 rounded-full", PRIORITY_DOT[priority])} />
       {PRIORITY_LABEL[priority]}
     </span>
+  );
+}
+
+/** Who the conversation is with, for a brand admin's inbox where both kinds sit in one list: a customer's
+ *  ticket to the brand, or the brand's own request to the platform. Just "Platform" — never who answers there. */
+export function TicketLaneBadge({ lane, className }: { lane: Ticket["lane"]; className?: string }) {
+  const platform = lane === "brand";
+  return (
+    <Badge
+      variant={platform ? "primary" : "neutral"}
+      className={cn("gap-1 text-[11px] font-medium", className)}
+      title={platform ? "Your request to the platform" : "A customer's request to your team"}
+    >
+      {platform ? <Globe className="size-3" /> : <UserRound className="size-3" />}
+      {platform ? "Platform" : "Customer"}
+    </Badge>
   );
 }
 

@@ -29,6 +29,8 @@ import {
   deleteMessage,
   editMessage,
   loadTicketForRequester,
+  requesterWhere,
+  type TicketRequester,
   markThreadRead,
   messageInclude,
   messagePreview,
@@ -101,6 +103,11 @@ async function requireRequesterLane(req: Request, _res: Response, next: NextFunc
 
 router.use(requireRequesterLane);
 
+/** The caller as a requester: on the brand lane that reaches the whole brand's requests, not one person's. */
+function requesterOf(req: Request): TicketRequester {
+  return { id: req.user!.sub, brandId: req.user!.brandId ?? null, lane: req.ticketLane! };
+}
+
 const attachmentSchema = z.object({
   name: z.string().min(1).max(255),
   mime: z.string().min(1).max(150),
@@ -160,7 +167,7 @@ router.get(
   "/",
   asyncHandler(async (req, res) => {
     const rows = await req.ticketDb!.ticket.findMany({
-      where: { requesterId: req.user!.sub, lane: req.ticketLane! },
+      where: requesterWhere(requesterOf(req)),
       orderBy: { lastMessageAt: "desc" },
       include: {
         ...ticketInclude,
@@ -284,7 +291,7 @@ router.get(
   "/:id",
   asyncHandler(async (req, res) => {
     const db = req.ticketDb!;
-    const ticket = await loadTicketForRequester(db, req.params.id, req.user!.sub);
+    const ticket = await loadTicketForRequester(db, req.params.id, requesterOf(req));
 
     const messages = await db.ticketMessage.findMany({
       where: { ticketId: ticket.id, internal: false },
@@ -317,7 +324,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const db = req.ticketDb!;
     const data = replySchema.parse(req.body);
-    const ticket = await loadTicketForRequester(db, req.params.id, req.user!.sub);
+    const ticket = await loadTicketForRequester(db, req.params.id, requesterOf(req));
     if (ticket.status === "closed") {
       throw badRequest("This request is closed. Reopen it to keep the conversation going.");
     }
@@ -365,7 +372,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const db = req.ticketDb!;
     const { status } = z.object({ status: z.enum(["closed", "open"]) }).parse(req.body);
-    const ticket = await loadTicketForRequester(db, req.params.id, req.user!.sub);
+    const ticket = await loadTicketForRequester(db, req.params.id, requesterOf(req));
 
     const updated = withRequester(
       await db.ticket.update({
@@ -416,7 +423,7 @@ router.patch(
     const { body } = z
       .object({ body: z.string().trim().max(MAX_MESSAGE_CHARS, MESSAGE_TOO_LONG) })
       .parse(req.body);
-    const ticket = await loadTicketForRequester(db, req.params.id, req.user!.sub);
+    const ticket = await loadTicketForRequester(db, req.params.id, requesterOf(req));
     const message = await editMessage(
       db,
       ticket.id,
@@ -434,7 +441,7 @@ router.delete(
   "/:id/messages/:messageId",
   asyncHandler(async (req, res) => {
     const db = req.ticketDb!;
-    const ticket = await loadTicketForRequester(db, req.params.id, req.user!.sub);
+    const ticket = await loadTicketForRequester(db, req.params.id, requesterOf(req));
     const message = await deleteMessage(
       db,
       ticket.id,
@@ -452,7 +459,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const db = req.ticketDb!;
     const { emoji } = z.object({ emoji: z.enum(ALLOWED_REACTIONS) }).parse(req.body);
-    const ticket = await loadTicketForRequester(db, req.params.id, req.user!.sub);
+    const ticket = await loadTicketForRequester(db, req.params.id, requesterOf(req));
     const message = await toggleReaction(
       db,
       ticket.id,
@@ -477,7 +484,7 @@ router.post(
         comment: z.string().trim().max(1000).default(""),
       })
       .parse(req.body);
-    const ticket = await loadTicketForRequester(db, req.params.id, req.user!.sub);
+    const ticket = await loadTicketForRequester(db, req.params.id, requesterOf(req));
     res.json(serializeTicketForRequester(await rateTicket(db, ticket, data.rating, data.comment)));
   }),
 );
@@ -486,7 +493,7 @@ router.post(
 router.post(
   "/:id/typing",
   asyncHandler(async (req, res) => {
-    const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, req.user!.sub);
+    const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, requesterOf(req));
     publishTyping(ticket, "requester", ticket.requester.fullName || "The requester");
     res.status(204).end();
   }),

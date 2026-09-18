@@ -117,7 +117,7 @@ describe("onboardingRedirectPath", () => {
 describe("canUseSection", () => {
   it("refuses the super admin the sections that belong to a brand", () => {
     // In a white-label setup one brand's customer list (table or conversation) is that brand's business.
-    for (const section of ["overview", "customers", "subscriptions", "voice_bank", "tickets"]) {
+    for (const section of ["overview", "customers", "subscriptions", "tickets"]) {
       expect({ section, allowed: canUseSection("SUPER_ADMIN", section) }).toEqual({
         section,
         allowed: false,
@@ -126,7 +126,7 @@ describe("canUseSection", () => {
   });
 
   it("keeps the platform sections open to the super admin", () => {
-    for (const section of ["plans", "coupons", "phone_numbers", "resellers", "emails", "audit"]) {
+    for (const section of ["plans", "coupons", "phone_numbers", "resellers", "emails", "audit", "voice_bank"]) {
       expect({ section, allowed: canUseSection("SUPER_ADMIN", section) }).toEqual({
         section,
         allowed: true,
@@ -145,8 +145,9 @@ describe("canUseSection", () => {
   });
 
   it("refuses the platform-only sections to everyone but the super admin", () => {
-    // An audit log a tenant's own admin can read is a weak one. Resellers is deliberately NOT here (see below).
-    expect([...PLATFORM_ONLY_SECTIONS].sort()).toEqual(["audit"]);
+    // An audit log a tenant's own admin can read is a weak one, and the voice library is the platform's catalog.
+    // Resellers is deliberately NOT here (see below).
+    expect([...PLATFORM_ONLY_SECTIONS].sort()).toEqual(["audit", "voice_bank"]);
     for (const section of PLATFORM_ONLY_SECTIONS) {
       expect({ section, superAdmin: canUseSection("SUPER_ADMIN", section) }).toEqual({
         section,

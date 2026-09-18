@@ -531,7 +531,6 @@ describe("brand-scoped admin sections are closed to the super admin", () => {
     "/api/admin/overview",
     "/api/admin/customers",
     "/api/admin/subscriptions",
-    "/api/admin/voice-categories",
   ];
 
   it("refuses them to the super admin", async () => {
@@ -560,7 +559,7 @@ describe("brand-scoped admin sections are closed to the super admin", () => {
   });
 
   it("leaves the platform sections open to the super admin", async () => {
-    for (const path of ["/api/admin/plans", "/api/admin/coupons", "/api/admin/audit"]) {
+    for (const path of ["/api/admin/plans", "/api/admin/coupons", "/api/admin/audit", "/api/admin/voice-categories"]) {
       const res = await authed(superToken, path);
       expect({ path, refused: res.status === 403 }).toEqual({ path, refused: false });
     }
@@ -570,6 +569,45 @@ describe("brand-scoped admin sections are closed to the super admin", () => {
     for (const path of BRAND_SECTIONS) {
       const res = await authed(brandToken, path);
       expect({ path, refused: res.status === 403 }).toEqual({ path, refused: false });
+    }
+  });
+});
+
+describe("plans are the platform's defaults", () => {
+  let superToken = "";
+  let brandToken = "";
+
+  beforeAll(async () => {
+    superToken = (await login(SUPER)).body.token;
+    brandToken = (await login(BRAND_ADMIN)).body.token;
+  });
+
+  // Create, edit, delete and the Stripe sync: a brand admin reads the plans and prices on
+  // top via its addon; changing the plans themselves is the super admin's alone.
+  const PLAN_WRITES: [string, string][] = [
+    ["POST", "/api/admin/plans"],
+    ["PATCH", "/api/admin/plans/starter"],
+    ["DELETE", "/api/admin/plans/starter"],
+    ["POST", "/api/admin/plans/sync-stripe"],
+  ];
+
+  it("lets a brand admin read them", async () => {
+    const res = await authed(brandToken, "/api/admin/plans");
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses every plan write to a brand admin, before any validation runs", async () => {
+    for (const [method, path] of PLAN_WRITES) {
+      const res = await authed(brandToken, path, { method, body: "{}" });
+      expect({ method, path, status: res.status }).toEqual({ method, path, status: 403 });
+    }
+  });
+
+  it("lets the super admin through the guard", async () => {
+    // Past the wall the stand-in DB has no plans model, so anything but 401/403 proves the guard opened.
+    for (const [method, path] of PLAN_WRITES) {
+      const res = await authed(superToken, path, { method, body: "{}" });
+      expect({ method, path, refused: res.status === 401 || res.status === 403 }).toEqual({ method, path, refused: false });
     }
   });
 });
@@ -585,7 +623,7 @@ describe("platform-only admin sections", () => {
 
   // Audit log is platform-only — one a tenant admin can read is a weak audit log. Resellers moved
   // out: a brand runs its own programme, with tenantScope inside the handlers as the wall.
-  const PLATFORM_APIS = ["/api/admin/audit"];
+  const PLATFORM_APIS = ["/api/admin/audit", "/api/admin/voice-categories"];
 
   it("refuses them to a brand admin", async () => {
     for (const path of PLATFORM_APIS) {
@@ -624,6 +662,7 @@ describe("platform-only admin sections", () => {
     const keys = cfg.sections.map((sec) => sec.key);
     expect(keys).not.toContain("resellers");
     expect(keys).not.toContain("audit");
+    expect(keys).not.toContain("voice_bank");
     // Same trap the other way: a brand-scoped box authorizes nothing for platform staff (no tenant to act on).
     expect(keys).not.toContain("customers");
     expect(keys).not.toContain("tickets");

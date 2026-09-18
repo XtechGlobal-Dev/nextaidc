@@ -754,6 +754,15 @@ export interface BrandTenantDb {
   };
 }
 
+/** The brand's owner: its first admin account, as created with the brand. */
+export interface BrandOwner {
+  id: string;
+  email: string;
+  fullName: string;
+  /** ISO. */
+  createdAt: string;
+}
+
 /** A brand as the super-admin panel sees it. */
 export interface Brand {
   id: string;
@@ -815,6 +824,11 @@ export interface Brand {
   counts?: { admins: number; customers: number; total: number };
   /** On the list: what the platform currently owes this brand, per currency. */
   walletBalances?: { currency: string; balanceCents: number }[];
+  /**
+   * Present on single-brand reads: the brand's owner — the first admin account
+   * created in its database. null while it has no admin yet.
+   */
+  owner?: BrandOwner | null;
   /** Present on single-brand reads: what is still missing before it's finished. */
   readiness?: BrandReadiness;
   /** Present on single-brand reads: where this brand's users sign in. */
@@ -1367,6 +1381,9 @@ export const api = {
     brands: {
       list: () => get<Brand[]>("/api/super/brands"),
       get: (id: string) => get<Brand>(`/api/super/brands/${id}`),
+      /** Live customers per plan id — the plans that can't be taken off the brand. */
+      planSubscribers: (id: string) =>
+        get<{ counts: Record<string, number> }>(`/api/super/brands/${id}/plan-subscribers`),
       /** Colour presets + font catalog powering the theme pickers. */
       catalog: () => get<BrandThemeCatalog>("/api/super/brands/catalog"),
       /** Live subdomain availability while the operator types. */
@@ -2145,6 +2162,8 @@ export interface FieldDef {
 export interface SectionDef {
   key: string;
   label: string;
+  /** One line under the label — which inbox or table this is. */
+  hint?: string;
   capabilities: string[];
   /** Column-level sub-permissions for this section's data table. */
   fields?: FieldDef[];

@@ -369,10 +369,10 @@ export default function AdminOverviewPage() {
           delay={0}
         />
         <ManageCard
-          label="Plans"
+          label="Default plans"
           value={livePlanCount}
           icon={Package}
-          sub="Manage pricing & tiers"
+          sub="The platform's plans & tiers"
           accent="var(--color-premium)"
           to="/dashboard/admin/plans"
           delay={60}

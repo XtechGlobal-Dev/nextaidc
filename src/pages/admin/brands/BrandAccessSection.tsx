@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
-import { CreditCard, Globe2, LayoutGrid, Mic, Timer, UserPlus } from "lucide-react";
+import { Globe2, LayoutGrid, Mic, Timer, UserPlus } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
@@ -14,13 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, BRAND_MODULES, type SubscriptionPlan } from "@/lib/api";
+import { api, BRAND_MODULES } from "@/lib/api";
 import { COUNTRIES } from "@/data/countries";
 import { listTimeZones } from "@/lib/timezone";
-import { formatMoney } from "@/lib/currency";
 import type { SetupDraft } from "./brandSetupDraft";
 
-// Brand access + product: sign-up policy, modules, plans, trial and default voice.
+// Brand access + product: sign-up policy, modules, trial and default voice. Plans live in BrandPlansTab.
 
 type Props = {
   value: SetupDraft;
@@ -99,15 +96,10 @@ export function BrandLocaleFields({ value, onChange }: Props) {
 }
 
 export function BrandAccessSection({ value, onChange }: Props) {
-  const [plans, setPlans] = useState<SubscriptionPlan[] | null>(null);
   const [voices, setVoices] = useState<{ id: string; label: string }[] | null>(null);
 
   useEffect(() => {
     let active = true;
-    api.admin.plans
-      .list()
-      .then((rows) => active && setPlans(rows.filter((p) => p.active)))
-      .catch(() => active && setPlans([]));
     api.voices
       .listAll()
       .then((all) => {
@@ -123,11 +115,6 @@ export function BrandAccessSection({ value, onChange }: Props) {
       active = false;
     };
   }, []);
-
-  const togglePlan = (id: string, on: boolean) =>
-    onChange({
-      planIds: on ? [...value.planIds, id] : value.planIds.filter((p) => p !== id),
-    });
 
   const intInput = (key: "trialDays" | "trialMinutes", label: string, unit: string) => (
     <div>
@@ -177,44 +164,6 @@ export function BrandAccessSection({ value, onChange }: Props) {
             </label>
           ))}
         </div>
-      </Card>
-
-      <Card className="space-y-4 p-5">
-        <Head
-          icon={CreditCard}
-          title="Plans this brand sells"
-          blurb="Tick the plans its subscribe page offers. Nothing ticked means every active platform plan."
-        />
-        {plans === null ? (
-          <p className="text-sm text-muted-foreground">Loading plans…</p>
-        ) : plans.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No active plans on the platform yet.</p>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {plans.map((p) => {
-              const on = value.planIds.includes(p.id);
-              return (
-                <label
-                  key={p.id}
-                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2.5"
-                >
-                  <Checkbox checked={on} onCheckedChange={(c) => togglePlan(p.id, c === true)} />
-                  <span className="min-w-0 flex-1">
-                    <span className="text-sm font-medium">{p.displayName}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {formatMoney(p.priceCents, p.currency)} / {p.intervalCount > 1 ? `${p.intervalCount} ` : ""}
-                      {p.interval}
-                      {p.includedMinutes ? ` · ${p.includedMinutes} min` : ""}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        )}
-        {value.planIds.length === 0 && plans && plans.length > 0 && (
-          <Badge variant="neutral">Selling every active plan</Badge>
-        )}
       </Card>
 
       <Card className="space-y-4 p-5">

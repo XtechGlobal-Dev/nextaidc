@@ -54,6 +54,7 @@ import {
   listBrandPricing,
   setBrandAddon,
 } from "../services/brandPricing.js";
+import { assertPickKeepsSubscribedPlans, livePlanSubscribers } from "../services/brandPlans.js";
 import {
   listWalletEntries,
   recordPayout,
@@ -447,15 +448,43 @@ router.post(
   }),
 );
 
-/** The detail-page payload: the brand plus its links, readiness checklist and database state. */
+/**
+ * The brand's owner: the first admin account in its own database (the one named
+ * at creation). Brands have no owner column, so this is read from the tenant;
+ * while the tenant is still being set up (or paused) we fall back to Main's
+ * directory mirror, and a brand with no admin yet has no owner.
+ */
+async function brandOwner(brandId: string) {
+  const fromTenant = await tenantFor(brandId)
+    .then((db) => db.user.findFirst({ where: { role: "ADMIN" }, select: adminView, orderBy: { createdAt: "asc" } }))
+    .catch((e: unknown) => {
+      if (e instanceof TenantUnavailableError) return undefined;
+      throw e;
+    });
+  const row =
+    fromTenant !== undefined
+      ? fromTenant
+      : await prisma.customerDirectory
+          .findFirst({ where: { brandId, role: "ADMIN" }, orderBy: { createdAt: "asc" } })
+          .then((d) => (d ? { id: d.userId, email: d.email, fullName: d.fullName, createdAt: d.createdAt } : null));
+  if (!row) return null;
+  return { id: row.id, email: row.email, fullName: row.fullName, createdAt: row.createdAt.toISOString() };
+}
+
+/** The detail-page payload: the brand plus its owner, links, readiness checklist and database state. */
 async function brandDetail(brand: Brand) {
-  const counts = await brandCounts([brand.id]);
+  const [counts, owner, tenantDb] = await Promise.all([
+    brandCounts([brand.id]),
+    brandOwner(brand.id),
+    tenantDbSummary(brand.id),
+  ]);
   return {
     ...serializeBrand(brand, counts.get(brand.id)),
+    owner,
     loginUrl: brandLoginUrl(brand),
     pathUrl: brandPathUrl(brand.slug),
     readiness: brandReadiness(brand, counts.get(brand.id)),
-    tenantDb: await tenantDbSummary(brand.id),
+    tenantDb,
   };
 }
 
@@ -505,11 +534,23 @@ router.post(
   }),
 );
 
+/** Live customers per plan for this brand — the plans the super admin may not take away. */
+router.get(
+  "/brands/:id/plan-subscribers",
+  asyncHandler(async (req, res) => {
+    const brand = await prisma.brand.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!brand) throw notFound("Brand not found");
+    res.json({ counts: Object.fromEntries(await livePlanSubscribers(brand.id)) });
+  }),
+);
+
 router.patch(
   "/brands/:id",
   asyncHandler(async (req, res) => {
     // slug/customDomain are locked after creation — omitted (not ignored) so sneaking them in gets a clear rejection.
     const body = brandBodySchema.partial().omit({ admin: true, slug: true, customDomain: true }).parse(req.body);
+    // A plan the brand's customers are on stays offered, whatever the pick says.
+    await assertPickKeepsSubscribedPlans(req.params.id, body.planIds);
     const brand = await updateBrand(req.params.id, body);
     void audit({
       actorId: req.user!.sub,

@@ -17,6 +17,8 @@ export interface FieldDef {
 export interface SectionDef {
   key: string;
   label: string;
+  /** One line under the label in the role matrix — which inbox or table this is, when the label alone is ambiguous. */
+  hint?: string;
   capabilities: readonly Capability[];
   /** Column-level sub-permissions for the section's data table (optional). */
   fields?: readonly FieldDef[];
@@ -44,23 +46,25 @@ export const SECTIONS: SectionDef[] = [
     // department grants. "delete" also covers moderating someone else's message.
     key: "tickets",
     label: "Support Tickets",
+    hint: "Your customers' requests to the brand.",
     capabilities: ["view", "create", "edit", "delete"],
   },
   {
-    // Platform inbox for brand admins' requests. Listed for the label; access is gated by
-    // PLATFORM_TEAM_SECTIONS, not by this row alone.
+    // Platform inbox for brand admins' requests — the platform team's "Support Tickets", so every Roles page
+    // has a row by that name. Access is gated by PLATFORM_TEAM_SECTIONS, not by this row alone.
     key: "brand_tickets",
-    label: "Brand Requests",
+    label: "Support Tickets",
+    hint: "The Brand Requests inbox: brand admins' requests to the platform, and tickets they escalate.",
     capabilities: ["view", "create", "edit", "delete"],
   },
-  { key: "plans", label: "Plans", capabilities: ["view", "create", "edit", "delete"] },
+  // View only: the plans are the platform's defaults, changed by the super admin alone (routes enforce it).
+  { key: "plans", label: "Default plans", capabilities: ["view"] },
   { key: "coupons", label: "Coupons", capabilities: ["view", "create", "edit", "delete"] },
-  { key: "voice_bank", label: "Voice Bank", capabilities: ["view", "create", "edit", "delete"] },
   { key: "phone_numbers", label: "Phone Numbers", capabilities: ["view", "create", "edit", "delete"] },
   { key: "emails", label: "System Emails", capabilities: ["view", "edit"] },
   { key: "pricing", label: "Pricing", capabilities: ["view", "edit"] },
   { key: "wallet", label: "Wallet", capabilities: ["view"] },
-  // Not listed on purpose: audit (platform-only), resellers (every ADMIN, never staff), and the
+  // Not listed on purpose: audit and voice_bank (platform-only), resellers (every ADMIN, never staff), and the
   // requireAdmin/requireSuperAdmin areas — a grantable box that authorizes nothing is worse than none.
 ];
 
@@ -70,7 +74,6 @@ export const BRAND_SCOPED_SECTIONS = new Set([
   "overview",
   "customers",
   "subscriptions",
-  "voice_bank",
   // The support inbox is the customer list in conversation form; the platform's own is `brand_tickets`.
   "tickets",
   // Brand markup and its wallet — the platform owner manages these from the brand's page.
@@ -78,9 +81,10 @@ export const BRAND_SCOPED_SECTIONS = new Set([
   "wallet",
 ]);
 
-/** Refused to everyone but the SUPER_ADMIN — an audit log a tenant admin can read is a weak audit log.
+/** Refused to everyone but the SUPER_ADMIN — an audit log a tenant admin can read is a weak audit log, and
+ *  the voice library is one platform-wide catalog attached to the platform's plans, not a brand's to curate.
  *  Resellers moved out: each brand runs its own programme, tenant-scoped on the routes. */
-export const PLATFORM_ONLY_SECTIONS = new Set(["audit"]);
+export const PLATFORM_ONLY_SECTIONS = new Set(["audit", "voice_bank"]);
 
 /** Worked by the platform's own team (no brand). Brand admins are refused outright; staff need no
  *  brand plus the key — a rival tenant must never see another brand's requests. */

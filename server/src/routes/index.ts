@@ -31,37 +31,53 @@ import industriesRouter from "./industries.routes.js";
 import eventsRouter from "./events.routes.js";
 import unsubscribeRouter from "./unsubscribe.routes.js";
 import { getEffective } from "../services/settings.js";
-import { getBranding } from "../services/branding.js";
+import { emptyBranding, getBranding } from "../services/branding.js";
 import { getSeoScripts } from "../services/seo.js";
 import { brandBySlug, publicBrand } from "../services/brands.js";
 import { brandScripts } from "../services/brandSetup.js";
 import { requireBrandModule } from "../middleware/brandModule.js";
+import { asyncHandler } from "../lib/http.js";
 
 export const apiRouter = Router();
 
 // Public, non-secret runtime config for the SPA. `brand` is the tenant the host
 // resolved to (null on the platform domain) so brand pages look right before sign-in.
-apiRouter.get("/config", async (req, res) => {
-  res.json({
-    vapiPublicKey: getEffective("vapi.publicKey", req.brand?.id ?? null),
-    branding: await getBranding(),
-    // A brand host gets the BRAND's snippets, not the platform's on top: a
-    // tenant's pages must never carry the platform's analytics or chat widget.
-    scripts: req.brand ? brandScripts(req.brand) : await getSeoScripts(),
-    brand: req.brand ? publicBrand(req.brand) : null,
-  });
-});
+//
+// Every async route goes through asyncHandler: Express 4 does not catch a rejected
+// handler, and Node exits on an unhandled rejection — so before this wrapper, one
+// page load during a database blip took the whole API down. The SPA can't boot
+// without /config, so the branding lookup also degrades to empty rather than 500.
+apiRouter.get(
+  "/config",
+  asyncHandler(async (req, res) => {
+    const branding = await getBranding().catch((err: unknown) => {
+      console.error("[config] branding unavailable, serving defaults:", err instanceof Error ? err.message : err);
+      return emptyBranding();
+    });
+    res.json({
+      vapiPublicKey: getEffective("vapi.publicKey", req.brand?.id ?? null),
+      branding,
+      // A brand host gets the BRAND's snippets, not the platform's on top: a
+      // tenant's pages must never carry the platform's analytics or chat widget.
+      scripts: req.brand ? brandScripts(req.brand) : await getSeoScripts(),
+      brand: req.brand ? publicBrand(req.brand) : null,
+    });
+  }),
+);
 
 // Brand by slug for the SPA's path-based tenant lookup. Public on purpose — it only
 // returns what a visitor sees anyway; unknown/suspended slug is a 404 so the SPA falls back.
-apiRouter.get("/brand/:slug", async (req, res) => {
-  const brand = brandBySlug(req.params.slug);
-  if (!brand) {
-    res.status(404).json({ error: "No such brand" });
-    return;
-  }
-  res.json(publicBrand(brand));
-});
+apiRouter.get(
+  "/brand/:slug",
+  asyncHandler(async (req, res) => {
+    const brand = brandBySlug(req.params.slug);
+    if (!brand) {
+      res.status(404).json({ error: "No such brand" });
+      return;
+    }
+    res.json(publicBrand(brand));
+  }),
+);
 
 apiRouter.use("/unsubscribe", unsubscribeRouter);
 apiRouter.use("/events", eventsRouter);

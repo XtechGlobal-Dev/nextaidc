@@ -14,6 +14,16 @@ import { securityHeaders } from "./middleware/securityHeaders.js";
 import { brandContext } from "./middleware/brand.js";
 import { brandsReady, loadBrands, resolveBrandForHost } from "./services/brands.js";
 import { markStaleTenants } from "./services/tenantProvisioning.js";
+
+// Safety net. Node exits on any unhandled promise rejection, and this server has
+// many best-effort fire-and-forget calls (emails, audits, schedulers) plus a
+// database that can blip. One missed `.catch` must not take every request down
+// with it — log it loudly and keep serving. Real programming errors still show
+// up here with a stack, so they are not hidden, just non-fatal.
+process.on("unhandledRejection", (reason) => {
+  console.error("⚠️  Unhandled promise rejection (kept running):", reason);
+});
+
 const app = express();
 
 // Don't advertise the framework, and set the baseline security headers on every

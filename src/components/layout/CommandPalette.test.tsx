@@ -76,7 +76,6 @@ describe("CommandPalette — what each role is offered", () => {
     expect(has("Dashboard")).toBe(true); // admins do hold a real profile
     for (const label of [
       "Coupons",
-      "Voice Library",
       "System Emails",
       "Roles",
       "Staff",
@@ -86,7 +85,7 @@ describe("CommandPalette — what each role is offered", () => {
     }
 
     // Platform-owner areas refused to a brand admin (see PLATFORM_ONLY_SECTIONS / superAdminOnly).
-    for (const label of ["API Center", "Audit Log", "Brands"]) {
+    for (const label of ["API Center", "Audit Log", "Voice Library", "Brands"]) {
       expect(has(label), label).toBe(false);
     }
   });

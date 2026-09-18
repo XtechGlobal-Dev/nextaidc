@@ -286,6 +286,51 @@ function reportStartError(e: unknown): void {
   activeCb?.onError?.(friendlyStartError(raw));
 }
 
+/** The slice of Daily's call object the mic recovery needs. The SDK types `call` as private, so it is
+ *  reached through a cast; a missing method just means the recovery is skipped. */
+interface DailyCallLike {
+  on: (event: string, handler: (e: { type?: string } | undefined) => void) => unknown;
+  updateInputSettings: (settings: unknown) => Promise<unknown>;
+  setLocalAudio: (enabled: boolean) => unknown;
+}
+
+/** Daily call objects already carrying the recovery listener (one per start(); the SDK creates a new one each call). */
+const micRecoveryArmed = new WeakSet<object>();
+
+/** How long to wait for the SDK to create its Daily call object after start() is invoked. */
+const MIC_RECOVERY_ARM_TIMEOUT_MS = 20_000;
+
+/** Keep the microphone alive when Daily's Krisp noise filter fails to initialise.
+ *
+ *  The SDK switches the filter on right after joining. On some machines that fails (a 192 kHz default
+ *  audio device gives `KrispInitError: NOT_SUPPORTED_SAMPLE_RATE`); Daily then stops the mic track and
+ *  reports a `nonfatal-error` of type "input-settings-error". The SDK (2.5.2 and 2.7.0 alike) only
+ *  recovers from "audio-processor-error", so the caller's mic stays OFF: the assistant greets, never
+ *  hears a word, Vapi never sends "listening" (the dialog sits on "Connecting…"), and the call ends
+ *  30 s later with silence-timed-out. Attach our own listener as soon as the call object exists —
+ *  polling, because the SDK creates it inside start() and the failure lands milliseconds after join. */
+function armMicRecovery(vapi: Vapi): void {
+  const startedAt = Date.now();
+  // Global timers, not window.*: the wrapper is also exercised under Node in unit tests.
+  const timer = setInterval(() => {
+    const call = (vapi as unknown as { call?: DailyCallLike | null }).call;
+    if (!call) {
+      if (Date.now() - startedAt > MIC_RECOVERY_ARM_TIMEOUT_MS) clearInterval(timer);
+      return;
+    }
+    clearInterval(timer);
+    if (micRecoveryArmed.has(call) || typeof call.on !== "function") return;
+    micRecoveryArmed.add(call);
+    call.on("nonfatal-error", (e) => {
+      if (e?.type !== "input-settings-error" && e?.type !== "audio-processor-error") return;
+      console.warn("[vapi] mic noise filter failed — turning it off and re-enabling the microphone", e);
+      Promise.resolve(call.updateInputSettings({ audio: { processor: { type: "none" } } }))
+        .then(() => call.setLocalAudio(true))
+        .catch((err) => console.error("[vapi] microphone recovery failed", err));
+    });
+  }, 25);
+}
+
 function getVapi(key: string): Vapi {
   if (sharedVapi && sharedVapiKey === key) return sharedVapi;
   if (sharedVapi) {
@@ -386,6 +431,7 @@ export function startTestCall(
     // Cancelled while queued (the user hit End call during "Connecting…") —
     // don't open a call nobody is waiting for.
     if (!isCurrent()) return null;
+    armMicRecovery(vapi);
     return vapi.start(payload as unknown as Parameters<typeof vapi.start>[0]);
   })
     .then((call) => {

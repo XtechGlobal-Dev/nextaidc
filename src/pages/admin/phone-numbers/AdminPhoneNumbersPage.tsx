@@ -239,10 +239,14 @@ export default function AdminPhoneNumbersPage() {
     [filteredUsers, start, pageSize],
   );
 
-  async function runAction(key: string, fn: () => Promise<string>) {
+  // An action reports back with a plain success message, or `{ error }` when
+  // the outcome is bad news that still deserves a reload (e.g. Twilio gone).
+  async function runAction(key: string, fn: () => Promise<string | { error: string }>) {
     setBusy(key);
     try {
-      toast.success(await fn());
+      const r = await fn();
+      if (typeof r === "string") toast.success(r);
+      else toast.error(r.error);
       await load();
     } catch (e) {
       toast.error(errMsg(e, "Action failed"));
@@ -281,7 +285,9 @@ export default function AdminPhoneNumbersPage() {
     if (!canSyncTwilio) return;
     return runAction("resync", async () => {
       const r = await api.admin.phoneNumbers.resyncTwilio();
-      if (!r.configured) return `Twilio disconnected — purged ${r.purged} stored number${r.purged === 1 ? "" : "s"}`;
+      if (!r.configured) {
+        return { error: `Twilio disconnected — purged ${r.purged} stored number${r.purged === 1 ? "" : "s"}` };
+      }
       return `Twilio: ${r.owned} owned, ${r.inPool} in pool, ${r.missing} not imported`;
     });
   };
