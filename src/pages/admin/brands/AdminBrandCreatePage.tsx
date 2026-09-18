@@ -34,6 +34,7 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Switch } from "@/components/ui/switch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { MultiSelect } from "@/components/ui/multi-select";
 import {
   Select,
   SelectContent,
@@ -41,7 +42,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, ApiError, type BrandFontOption, type BrandThemeCatalog } from "@/lib/api";
+import { api, ApiError, type BrandFontOption, type BrandThemeCatalog, type SubscriptionPlan } from "@/lib/api";
+import { formatMoney } from "@/lib/currency";
 import { COUNTRIES } from "@/data/countries";
 import { listTimeZones } from "@/lib/timezone";
 import { cn } from "@/lib/utils";
@@ -116,6 +118,8 @@ export default function AdminBrandCreatePage() {
 
   const [catalog, setCatalog] = useState<BrandThemeCatalog | null>(null);
   const [draft, setDraft] = useState<Draft>(BLANK);
+  // Active platform plans, for the "plans this brand sells" pick.
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [saving, setSaving] = useState(false);
 
   const [admin, setAdmin] = useState({
@@ -146,6 +150,17 @@ export default function AdminBrandCreatePage() {
   const [showAllPalettes, setShowAllPalettes] = useState(false);
 
   const patch = useCallback((p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p })), []);
+
+  useEffect(() => {
+    let active = true;
+    api.admin.plans
+      .list()
+      .then((rows) => active && setPlans(rows.filter((p) => p.active)))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   /* ------------------------------ loading ----------------------------- */
 
@@ -656,6 +671,26 @@ export default function AdminBrandCreatePage() {
                 onChange={(live) => patch({ live })}
               />
             </div>
+
+            <Field
+              id="b-plans"
+              label="Plans this brand sells"
+              hint="Only these show on the brand's Default plans page and its subscribe page. Leave empty to offer every active platform plan."
+              className="mt-4"
+            >
+              <MultiSelect
+                id="b-plans"
+                values={draft.planIds}
+                onChange={(planIds) => patch({ planIds })}
+                options={plans.map((p) => ({
+                  value: p.id,
+                  label: p.displayName,
+                  hint: `${formatMoney(p.priceCents, p.currency)} / ${p.intervalCount > 1 ? `${p.intervalCount} ` : ""}${p.interval}`,
+                }))}
+                placeholder="Every active plan"
+                searchPlaceholder="Search plans…"
+              />
+            </Field>
           </Section>
 
           {/* ------------------------ 5 · Colours & theme ------------------- */}

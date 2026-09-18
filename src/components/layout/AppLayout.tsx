@@ -25,6 +25,7 @@ import { cardWallActive } from "@/lib/cardWall";
 import { useHydrateData } from "@/hooks/useHydrateData";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useNotificationsPoll } from "@/hooks/useNotificationsPoll";
+import { useBrowserAlerts } from "@/hooks/useBrowserAlerts";
 import { usePermissionsSync } from "@/hooks/usePermissionsSync";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useAgentStore } from "@/stores/useAgentStore";
@@ -41,6 +42,7 @@ export function AppLayout() {
   useHydrateData();
   useLiveData();
   useNotificationsPoll();
+  useBrowserAlerts();
   usePermissionsSync();
   const user = useAuthStore((s) => s.user);
   const forceSuspendLogout = useAuthStore((s) => s.forceSuspendLogout);

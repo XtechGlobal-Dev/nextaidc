@@ -8,6 +8,7 @@ import {
   Globe,
   Loader2,
   Mail,
+  Package,
   Palette,
   Power,
   RotateCcw,
@@ -39,6 +40,7 @@ import { BrandAccessSection, BrandLocaleFields } from "./BrandAccessSection";
 import { BrandContentSection } from "./BrandContentSection";
 import { BrandReadinessCard } from "./BrandReadinessCard";
 import { BrandPricingTab } from "./BrandPricingTab";
+import { BrandPlansTab } from "./BrandPlansTab";
 import { BLANK_SETUP, setupFrom, setupPayload, type SetupDraft } from "./brandSetupDraft";
 import { BrandDomainSection } from "./BrandDomainSection";
 import { BrandInsideTab } from "./BrandInsideTab";
@@ -572,7 +574,10 @@ export default function AdminBrandDetailPage() {
               <Palette className="size-4" /> Theme
             </TabsTrigger>
             <TabsTrigger value="access">
-              <ShieldCheck className="size-4" /> Access &amp; plans
+              <ShieldCheck className="size-4" /> Access
+            </TabsTrigger>
+            <TabsTrigger value="plans">
+              <Package className="size-4" /> Plans
             </TabsTrigger>
             <TabsTrigger value="content">
               <FileText className="size-4" /> Content
@@ -610,6 +615,11 @@ export default function AdminBrandDetailPage() {
 
           <TabsContent value="access" className="space-y-5">
             <BrandAccessSection value={draft} onChange={patch} />
+            <div className="flex justify-end">{saveButton}</div>
+          </TabsContent>
+
+          <TabsContent value="plans" className="space-y-5">
+            <BrandPlansTab brandId={brand?.id} value={{ planIds: draft.planIds }} onChange={patch} />
             <div className="flex justify-end">{saveButton}</div>
           </TabsContent>
 

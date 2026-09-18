@@ -172,6 +172,7 @@ const ADMIN_NAV: NavItem[] = [
   // them here (they live on the brand's page under Brands instead).
   { to: "/dashboard/admin/pricing", label: "Price addon", icon: BadgeDollarSign, permission: "pricing" },
   { to: "/dashboard/admin/wallet", label: "Wallet", icon: Wallet, permission: "wallet" },
+  // Platform-only (like Audit): one catalog attached to the platform's plans, so the super admin curates it.
   { to: "/dashboard/admin/voice-bank", label: "Voice Library", icon: Mic, permission: "voice_bank" },
   { to: "/dashboard/admin/phone-numbers", label: "Phone Numbers", icon: Phone, permission: "phone_numbers" },
   { to: "/dashboard/admin/resellers", label: "Resellers", icon: Handshake, permission: "resellers" },

@@ -182,7 +182,7 @@ export default function AdminStaffDetailPage() {
 
   /** Does the chosen role let them open the support inbox at all? */
   const hasTicketAccess = useMemo(
-    () => (selectedRole?.permissions ?? []).some((p) => p.startsWith("tickets.")),
+    () => (selectedRole?.permissions ?? []).some((p) => p.startsWith("tickets.") || p.startsWith("brand_tickets.")),
     [selectedRole],
   );
 

@@ -87,9 +87,10 @@ export default function AdminRoleDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  /** Ticking any ticket capability without a queue is a dead end — warn. */
+  /** Ticking any ticket capability without a queue is a dead end — warn. Either lane's inbox: a brand's
+   *  `tickets.*` or the platform team's `brand_tickets.*` (both read "Support Tickets" in the matrix). */
   const hasTicketAccess = useMemo(
-    () => [...selectedPerms].some((p) => p.startsWith("tickets.")),
+    () => [...selectedPerms].some((p) => p.startsWith("tickets.") || p.startsWith("brand_tickets.")),
     [selectedPerms],
   );
 

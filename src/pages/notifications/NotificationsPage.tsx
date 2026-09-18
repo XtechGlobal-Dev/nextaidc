@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCheck, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { BrowserAlertsRow } from "@/components/notifications/BrowserAlertsRow";
 import { Button } from "@/components/ui/button";
 import {
   NotificationFilterChips,
@@ -58,6 +59,9 @@ export default function NotificationsPage() {
           </>
         }
       />
+
+      {/* Same switch as the panel's footer — whichever screen a viewer is on when they want alerts. */}
+      <BrowserAlertsRow className="mb-4 border border-border bg-card" />
 
       <NotificationFilterChips value={filter} onChange={setFilter} className="mb-4" />
 

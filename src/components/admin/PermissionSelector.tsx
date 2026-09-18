@@ -109,7 +109,12 @@ export function PermissionSelector({
                             onCheckedChange={() => toggleSection(s)}
                             className={BLUE_CHECK}
                           />
-                          {s.label}
+                          <span>
+                            {s.label}
+                            {s.hint && (
+                              <span className="block text-xs font-normal text-muted-foreground">{s.hint}</span>
+                            )}
+                          </span>
                         </label>
                         {hasFields && (
                           <button

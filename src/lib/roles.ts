@@ -31,7 +31,6 @@ export const BRAND_SCOPED_SECTIONS = new Set([
   "overview",
   "customers",
   "subscriptions",
-  "voice_bank",
   // A tenant's own customer inbox; the platform owner's inbox is `brand_tickets`.
   "tickets",
   // Brand's own markup and the wallet it lands in; the platform owner manages these from the brand's page.
@@ -40,8 +39,9 @@ export const BRAND_SCOPED_SECTIONS = new Set([
 ]);
 
 /** Platform-only sections, refused to everyone but the super admin (an audit log a tenant admin can read
- *  is a weak one). Resellers are NOT here: brands run their own. Mirrors server/src/lib/permissions.ts. */
-export const PLATFORM_ONLY_SECTIONS = new Set(["audit"]);
+ *  is a weak one; the voice library is the platform's catalog, attached to its plans). Resellers are NOT here:
+ *  brands run their own. Mirrors server/src/lib/permissions.ts. */
+export const PLATFORM_ONLY_SECTIONS = new Set(["audit", "voice_bank"]);
 
 /** Sections for the platform's own team (super admin + brand-less staff), never a brand's admin/staff.
  *  Mirrors PLATFORM_TEAM_SECTIONS in server/src/lib/permissions.ts. */

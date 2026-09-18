@@ -54,6 +54,7 @@ import {
   listBrandPricing,
   setBrandAddon,
 } from "../services/brandPricing.js";
+import { assertPickKeepsSubscribedPlans, livePlanSubscribers } from "../services/brandPlans.js";
 import {
   listWalletEntries,
   recordPayout,
@@ -533,11 +534,23 @@ router.post(
   }),
 );
 
+/** Live customers per plan for this brand — the plans the super admin may not take away. */
+router.get(
+  "/brands/:id/plan-subscribers",
+  asyncHandler(async (req, res) => {
+    const brand = await prisma.brand.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!brand) throw notFound("Brand not found");
+    res.json({ counts: Object.fromEntries(await livePlanSubscribers(brand.id)) });
+  }),
+);
+
 router.patch(
   "/brands/:id",
   asyncHandler(async (req, res) => {
     // slug/customDomain are locked after creation — omitted (not ignored) so sneaking them in gets a clear rejection.
     const body = brandBodySchema.partial().omit({ admin: true, slug: true, customDomain: true }).parse(req.body);
+    // A plan the brand's customers are on stays offered, whatever the pick says.
+    await assertPickKeepsSubscribedPlans(req.params.id, body.planIds);
     const brand = await updateBrand(req.params.id, body);
     void audit({
       actorId: req.user!.sub,

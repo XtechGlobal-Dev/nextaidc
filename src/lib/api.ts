@@ -1381,6 +1381,9 @@ export const api = {
     brands: {
       list: () => get<Brand[]>("/api/super/brands"),
       get: (id: string) => get<Brand>(`/api/super/brands/${id}`),
+      /** Live customers per plan id — the plans that can't be taken off the brand. */
+      planSubscribers: (id: string) =>
+        get<{ counts: Record<string, number> }>(`/api/super/brands/${id}/plan-subscribers`),
       /** Colour presets + font catalog powering the theme pickers. */
       catalog: () => get<BrandThemeCatalog>("/api/super/brands/catalog"),
       /** Live subdomain availability while the operator types. */
@@ -2159,6 +2162,8 @@ export interface FieldDef {
 export interface SectionDef {
   key: string;
   label: string;
+  /** One line under the label — which inbox or table this is. */
+  hint?: string;
   capabilities: string[];
   /** Column-level sub-permissions for this section's data table. */
   fields?: FieldDef[];

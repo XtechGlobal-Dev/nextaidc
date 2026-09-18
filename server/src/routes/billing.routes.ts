@@ -422,6 +422,22 @@ router.post(
           periodEnd,
           firstCycleInvoice?.id ?? null,
         );
+        // Book the charge now — reseller commission and the ledger row that credits the brand wallet.
+        // The invoice webhook does the same in production but never reaches local dev; both are idempotent on invoice id.
+        if (firstCycleInvoice) {
+          await accrueCommissionForInvoice({
+            invoiceId: firstCycleInvoice.id,
+            customerId: firstCycleInvoice.customerId,
+            amountPaidCents: firstCycleInvoice.amountPaidCents,
+          });
+          await recordPaidInvoice({
+            invoiceId: firstCycleInvoice.id,
+            customerId: firstCycleInvoice.customerId,
+            amountPaidCents: firstCycleInvoice.amountPaidCents,
+            priceId: firstCycleInvoice.priceId,
+            source: "go_live",
+          });
+        }
         void recordPlanEvent({
           userId,
           type: "trial_converted",

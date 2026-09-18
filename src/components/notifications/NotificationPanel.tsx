@@ -11,6 +11,7 @@ import {
   useOpenNotification,
 } from "./NotificationList";
 import { filterNotifications, type NotificationFilter } from "./notificationGroups";
+import { BrowserAlertsRow } from "./BrowserAlertsRow";
 
 export const NOTIFICATIONS_PATH = "/dashboard/notifications";
 
@@ -91,6 +92,7 @@ export function NotificationPanel() {
 
         {/* Footer */}
         <div className="border-t border-border p-2">
+          <BrowserAlertsRow />
           <button
             type="button"
             onClick={() => {

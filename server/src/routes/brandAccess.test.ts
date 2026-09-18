@@ -531,7 +531,6 @@ describe("brand-scoped admin sections are closed to the super admin", () => {
     "/api/admin/overview",
     "/api/admin/customers",
     "/api/admin/subscriptions",
-    "/api/admin/voice-categories",
   ];
 
   it("refuses them to the super admin", async () => {
@@ -560,7 +559,7 @@ describe("brand-scoped admin sections are closed to the super admin", () => {
   });
 
   it("leaves the platform sections open to the super admin", async () => {
-    for (const path of ["/api/admin/plans", "/api/admin/coupons", "/api/admin/audit"]) {
+    for (const path of ["/api/admin/plans", "/api/admin/coupons", "/api/admin/audit", "/api/admin/voice-categories"]) {
       const res = await authed(superToken, path);
       expect({ path, refused: res.status === 403 }).toEqual({ path, refused: false });
     }
@@ -624,7 +623,7 @@ describe("platform-only admin sections", () => {
 
   // Audit log is platform-only — one a tenant admin can read is a weak audit log. Resellers moved
   // out: a brand runs its own programme, with tenantScope inside the handlers as the wall.
-  const PLATFORM_APIS = ["/api/admin/audit"];
+  const PLATFORM_APIS = ["/api/admin/audit", "/api/admin/voice-categories"];
 
   it("refuses them to a brand admin", async () => {
     for (const path of PLATFORM_APIS) {
@@ -663,6 +662,7 @@ describe("platform-only admin sections", () => {
     const keys = cfg.sections.map((sec) => sec.key);
     expect(keys).not.toContain("resellers");
     expect(keys).not.toContain("audit");
+    expect(keys).not.toContain("voice_bank");
     // Same trap the other way: a brand-scoped box authorizes nothing for platform staff (no tenant to act on).
     expect(keys).not.toContain("customers");
     expect(keys).not.toContain("tickets");

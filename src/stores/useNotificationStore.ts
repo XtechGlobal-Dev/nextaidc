@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { api, type ApiNotification, type NotificationType } from "@/lib/api";
 import { sessionMark, sessionChanged } from "@/lib/sessionEpoch";
+import { showBrowserAlert } from "@/lib/browserNotifications";
 import { useCallsStore } from "@/stores/useCallsStore";
 
 // Call notifications (handled + missed) are the only ones that deep-link here —
@@ -148,9 +149,13 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
           (n) => !n.read && !seen.has(n.id) && !seenInThread.has(n.id),
         );
         for (const n of fresh.slice(0, MAX_TOASTS_PER_POLL)) {
-          // Purely informational — the notification bell in the header already
-          // lists everything, so a toast action would just be a redundant click.
-          toast(n.title, { description: n.message || undefined });
+          // A system alert first: it reaches a background tab, which a toast cannot. Exactly one
+          // alert per notification — the toast is the fallback when browser alerts are off,
+          // unpermitted or unsupported. Purely informational either way: the bell already lists
+          // everything, so an action button would just be a redundant click.
+          if (!showBrowserAlert(n)) {
+            toast(n.title, { description: n.message || undefined });
+          }
         }
         // A new call just landed (its notification links to the Call Logs) →
         // refresh the calls store so the row appears live, no manual reload.

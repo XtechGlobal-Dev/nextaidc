@@ -28,6 +28,7 @@ import {
 } from "../services/tenantDb.js";
 import { withPlan, withPlans } from "../services/planLookup.js";
 import { cachedBrand } from "../services/brands.js";
+import { brandPlanIds } from "../services/brandSetup.js";
 import type { Prisma as TenantPrisma } from "@prisma/tenant-client";
 import { refreshBrandPricesForPlan } from "../services/brandPricing.js";
 import { nextAvailableForBrand } from "../services/phones.js";
@@ -1994,8 +1995,12 @@ async function liveSubscribersByPlan(): Promise<Map<string | null, number>> {
 router.get(
   "/plans",
   requirePermission("plans"),
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    // A brand's people see only the plans the platform lets that brand sell (its planIds; empty = every
+    // plan). The platform's own people have no brand and see them all.
+    const allowed = brandPlanIds(cachedBrand(req.user!.brandId));
     const plans = await prisma.subscriptionPlan.findMany({
+      ...(allowed.length ? { where: { id: { in: allowed } } } : {}),
       // sortOrder first; ties broken by price, then creation time — so plans with
       // the same sort order always come out in a stable, predictable order.
       orderBy: [{ sortOrder: "asc" }, { priceCents: "asc" }, { createdAt: "asc" }],
@@ -3691,6 +3696,7 @@ router.get(
       sections: SECTIONS.filter((s) => !hidden.has(s.key)).map((s) => ({
         key: s.key,
         label: s.label,
+        ...(s.hint ? { hint: s.hint } : {}),
         capabilities: [...s.capabilities],
         fields: (s.fields ?? []).map((f) => ({ key: f.key, label: f.label })),
       })),
