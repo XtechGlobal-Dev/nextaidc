@@ -76,6 +76,7 @@ const {
   forgetDepartmentScopes,
   handlerTicketPath,
   handlerWhere,
+  handlersWhere,
   handoffLine,
   markThreadRead,
   notifyRequester,
@@ -318,17 +319,24 @@ describe("assertCan", () => {
 
 describe("handlerWhere — who answers a queue", () => {
   it("narrows the brand lane to the platform's own team", async () => {
-    // Up there are the owner and the platform's own staff — no brand, holding
-    // the key, granted the queue through their role or personally.
+    // Up there are the owner and the platform's own staff — holding the key,
+    // granted the queue through their role or personally.
     h.findManyRoles.mockResolvedValue([{ id: "r_platform" }]);
     const where = await handlerWhere(db, "brand", "d1");
     expect(where.OR?.[0]).toEqual({ role: "SUPER_ADMIN" });
     expect(where.OR?.[1]).toMatchObject({
       role: "STAFF",
       permissions: { has: "brand_tickets.view" },
-      AND: [{ brandId: null }],
       OR: [{ staffRoleId: { in: ["r_platform"] } }, { ticketDepartments: { some: { id: "d1" } } }],
     });
+  });
+
+  it("never filters the control plane's accounts by brand — they have no such column", async () => {
+    // A `brandId` clause here is a query Prisma refuses outright, and the fan-out
+    // swallows the throw: the platform owner's bell simply never rings.
+    h.findManyRoles.mockResolvedValue([{ id: "r_platform" }]);
+    expect(JSON.stringify(await handlerWhere(db, "brand", "d1"))).not.toContain("brandId");
+    expect(JSON.stringify(await handlersWhere(db, "brand", null))).not.toContain("brandId");
   });
 
   it("narrows the brand lane to the owner alone when no queue is named", async () => {
@@ -467,6 +475,17 @@ describe("notifyRequester", () => {
       userId: "cust1",
       link: "/dashboard/support?ticket=t1",
     });
+  });
+
+  it("mails without ringing the bell when the requester did it themselves", async () => {
+    await notifyRequester(ticketRow({ lane: "brand" }), {
+      title: "Received",
+      message: "…",
+      templateKey: "ticket_created",
+      inApp: false,
+    });
+    expect(h.createManyNotifications).not.toHaveBeenCalled();
+    expect(h.sendTemplate).toHaveBeenCalled();
   });
 
   it("tells the requester who is answering, in their own words", async () => {

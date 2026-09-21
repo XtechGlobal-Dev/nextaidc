@@ -280,6 +280,11 @@ router.post(
       title: `Request ${ticket.reference} received`,
       message: ticket.subject,
       templateKey: "ticket_created",
+      // Confirmation by mail only. The bell belongs to whoever has to answer:
+      // ringing it for the person who just filed the request lights their own
+      // inbox up — and on the brand lane that bell hangs off the very Support
+      // Tickets entry they filed it from.
+      inApp: false,
     });
 
     res.status(201).json(serializeTicketForRequester(ticket));

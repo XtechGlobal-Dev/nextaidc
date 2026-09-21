@@ -269,8 +269,6 @@ export async function loadTicketForRequester(db: TenantClient, id: string, who: 
 /** The platform owner. The control plane's Role has SUPER_ADMIN where the
  *  tenant's does not, so the clause is built loose and only ever run there. */
 const PLATFORM_OWNER = { role: "SUPER_ADMIN" } as unknown as Prisma.UserWhereInput;
-/** The control plane's own people carry no brand. Same story. */
-const PLATFORM_ONLY = { brandId: null } as unknown as Prisma.UserWhereInput;
 
 /** Roles holding any department that `match`es — by id, because a user's role
  *  is a plain id rather than a relation this query could walk. */
@@ -290,18 +288,18 @@ function staffHolding(
   match: Prisma.TicketDepartmentWhereInput,
   roleIds: string[],
   capabilityKey: string,
-  extra: Prisma.UserWhereInput[] = [],
 ): Prisma.UserWhereInput {
   return {
     role: "STAFF",
     permissions: { has: capabilityKey },
-    ...(extra.length ? { AND: extra } : {}),
     OR: [{ staffRoleId: { in: roleIds } }, { ticketDepartments: { some: match } }],
   };
 }
 
-// Platform inbox handlers: the super admin plus brand-less staff holding brand_tickets.*
-// and a grant on the queue. No queue named = the owner alone.
+// Platform inbox handlers: the super admin plus the platform's own staff holding
+// brand_tickets.* and a grant on the queue. No queue named = the owner alone.
+// Nothing narrows by brand: this only ever runs against the control plane, whose
+// accounts ARE the platform's (a brand's people live in that brand's database).
 async function platformHandlerWhere(
   db: TenantClient,
   match: Prisma.TicketDepartmentWhereInput | null,
@@ -310,7 +308,7 @@ async function platformHandlerWhere(
   if (!match) return PLATFORM_OWNER;
   const roleIds = await rolesGranted(db, match);
   return {
-    OR: [PLATFORM_OWNER, staffHolding(match, roleIds, `brand_tickets.${capability}`, [PLATFORM_ONLY])],
+    OR: [PLATFORM_OWNER, staffHolding(match, roleIds, `brand_tickets.${capability}`)],
   };
 }
 
@@ -1165,17 +1163,22 @@ export async function notifyRequester(
     link?: string;
     templateKey?: string;
     templateVars?: Record<string, string>;
+    /** Set false to mail only. For what the requester just did themselves there is
+     *  nothing to tell them — a bell on your own action reads as someone else's reply. */
+    inApp?: boolean;
   },
 ): Promise<void> {
   try {
-    const home = await planeOf(ticket.brandId);
-    await notifyIn(home, [ticket.requesterId], {
-      type: "ticket",
-      title: opts.title,
-      message: opts.message,
-      link: opts.link ?? requesterTicketPath(ticket.lane as TicketLane, ticket.id),
-    });
-    publishToUser(ticket.requesterId, { type: "ticket", ticketId: ticket.id });
+    if (opts.inApp !== false) {
+      const home = await planeOf(ticket.brandId);
+      await notifyIn(home, [ticket.requesterId], {
+        type: "ticket",
+        title: opts.title,
+        message: opts.message,
+        link: opts.link ?? requesterTicketPath(ticket.lane as TicketLane, ticket.id),
+      });
+      publishToUser(ticket.requesterId, { type: "ticket", ticketId: ticket.id });
+    }
 
     if (opts.templateKey && ticket.requester.email) {
       const mailBrand = mailBrandFor(ticket, "requester");

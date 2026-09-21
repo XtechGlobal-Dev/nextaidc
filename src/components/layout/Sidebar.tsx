@@ -413,6 +413,12 @@ export function Sidebar() {
     userNavAsPanel &&
     visibleUserItems(false).some(({ to, end }) => matchPath({ path: to, end: !!end }, pathname) !== null);
 
+  // An admin has no Support entry of their own — their platform requests are folded into
+  // Support Tickets. Without this the sidebar goes blank the moment they open one of those
+  // threads, and nothing on screen says which section they're reading.
+  const onFoldedRequesterPage =
+    isAdmin && matchPath({ path: "/dashboard/support", end: false }, pathname) !== null;
+
   const minutesUsed = profile.webTestMinutesUsed;
   const hasEntitlement = trial?.phase === "trial" || trial?.phase === "active";
 
@@ -553,7 +559,15 @@ export function Sidebar() {
                   // One nav definition, two prefixes: the super admin's panel
                   // lives at /superadmin, everyone else's at /dashboard/admin.
                   to={adminHref(to, user?.role)}
-                  className={(state) => cn(navItemClass(isCollapsed)(state), hidden && "hidden")}
+                  className={({ isActive }) =>
+                    cn(
+                      navItemClass(isCollapsed)({
+                        // Support Tickets also owns the admin's own platform requests.
+                        isActive: isActive || (permission === "tickets" && onFoldedRequesterPage),
+                      }),
+                      hidden && "hidden",
+                    )
+                  }
                   title={isCollapsed ? label : undefined}
                   onClick={isMobile ? () => setMobileSidebarOpen(false) : undefined}
                 >

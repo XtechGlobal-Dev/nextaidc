@@ -97,10 +97,6 @@ function dbOf(req: Request): TenantClient {
   return req.ticketDb!;
 }
 
-/** The control plane's own people carry no brand. The tenant's Role type has
- *  no such column, so the clause is built loose and only ever run there. */
-const PLATFORM_ONLY = { brandId: null } as unknown as Prisma.UserWhereInput;
-
 function actorOf(req: Request): TicketActor {
   return {
     id: req.user!.sub,
@@ -171,15 +167,13 @@ router.get(
 );
 
 /** Keeps only real STAFF ids of the caller's tenant. Stale ids are dropped, not 400'd; full admins are excluded since they already work every queue. */
-async function validStaffIds(db: TenantClient, ids: string[], actor: TicketActor): Promise<string[]> {
+async function validStaffIds(db: TenantClient, ids: string[]): Promise<string[]> {
   if (ids.length === 0) return [];
+  // Never a cross-tenant grant — the database alone settles it: on support it IS
+  // the brand, on the brand lane it's the control plane, whose accounts are the
+  // platform's own. Neither plane holds the other's people.
   const rows = await db.user.findMany({
-    where: {
-      id: { in: ids },
-      role: "STAFF",
-      // Never a cross-tenant grant. On support the DB is the brand; on the brand lane pick out the platform's own people.
-      ...(actor.lane === "brand" ? PLATFORM_ONLY : {}),
-    },
+    where: { id: { in: ids }, role: "STAFF" },
     select: { id: true },
   });
   return rows.map((r) => r.id);
@@ -194,7 +188,7 @@ router.post(
     const { staffIds, ...data } = departmentSchema.parse(req.body);
     await assertDepartmentNameFree(db, actor.lane, ownTenant(actor), data.name);
 
-    const members = await validStaffIds(db, staffIds ?? [], actor);
+    const members = await validStaffIds(db, staffIds ?? []);
     const dept = await db.ticketDepartment.create({
       data: {
         ...data,
@@ -249,7 +243,7 @@ router.patch(
 
     // `set`, not `connect` — the picker posts the full membership, so someone
     // who was unticked has to actually lose the department.
-    const members = staffIds ? await validStaffIds(db, staffIds, actor) : null;
+    const members = staffIds ? await validStaffIds(db, staffIds) : null;
     const dept = await db.ticketDepartment.update({
       where: { id: exists.id },
       data: { ...data, ...(members ? { staff: { set: members.map((id) => ({ id })) } } : {}) },
