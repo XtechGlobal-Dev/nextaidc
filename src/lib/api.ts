@@ -1091,11 +1091,20 @@ export const api = {
       ),
     callRecording: (callId: string) =>
       get<{ recordingUrl: string | null }>(`/api/agent/call-recording/${callId}`),
-    /** Ring a real phone with this account's own agent. The draft config is sent so
-     *  unsaved AI Brain edits are heard on the call; the number it dials FROM is
-     *  resolved server-side (own number → brand → platform). */
+    /** Ring a real phone with this account's own agent. The number it dials FROM is
+     *  resolved server-side (own number → brand → platform).
+     *
+     *  Pass `agentConfig` ONLY for an unsaved draft: without it the server dials the
+     *  saved assistant as-is, skipping a prompt rebuild that costs seconds. */
     testCall: (toNumber: string, agentConfig?: AgentConfig) =>
       post<TestCallStart>("/api/agent/test-call", { toNumber, ...(agentConfig ? { agentConfig } : {}) }),
+    /** Settle everything the call needs before the button is pressed: the caller ID,
+     *  the phone-number lookup, and (for a dirty draft) the compressed prompt. */
+    testCallPreflight: (agentConfig?: AgentConfig) =>
+      post<TestCallPreflight>(
+        "/api/agent/test-call/preflight",
+        agentConfig ? { agentConfig } : {},
+      ),
     testCallStatus: (callId: string) =>
       get<TestCallStatus>(`/api/agent/test-call/${encodeURIComponent(callId)}`),
     testCallEnd: (callId: string) =>
@@ -2125,6 +2134,16 @@ export interface TestCallStart {
   fromSource: CallerIdSource;
   to: string;
   maxDurationSeconds: number | null;
+  /** False when the saved assistant was dialled as-is (the fast path). */
+  usedDraft: boolean;
+}
+
+export interface TestCallPreflight {
+  /** False when no outbound number is configured — `reason` says what to do. */
+  ready: boolean;
+  reason: string;
+  from: string | null;
+  fromSource: CallerIdSource | null;
 }
 
 export interface TestCallStatus {

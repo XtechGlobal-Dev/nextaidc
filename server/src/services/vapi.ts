@@ -1218,6 +1218,7 @@ export async function importTwilioNumber(opts: {
   number: string;
   assistantId: string;
 }): Promise<string> {
+  clearVapiPhoneNumberCache();
   // If this number is already imported into Vapi (e.g. an orphan from an earlier
   // run), re-route it to the assistant instead of failing on a duplicate import.
   try {
@@ -1302,6 +1303,7 @@ export async function setNumberAssistant(
 
 /** Delete a Vapi phone-number by id (releases it from Vapi). Best-effort. */
 export async function deleteVapiPhoneNumber(id: string): Promise<void> {
+  clearVapiPhoneNumberCache();
   try {
     await vapiFetch(`/phone-number/${id}`, { method: "DELETE" });
   } catch {
@@ -1320,6 +1322,7 @@ export async function deleteAssistant(assistantId: string): Promise<void> {
 
 /** Releases a number from Vapi so it can be re-imported for another customer. Never throws. */
 export async function releaseVapiNumber(number: string): Promise<void> {
+  clearVapiPhoneNumberCache();
   try {
     const list = (await vapiFetch(`/phone-number`, { method: "GET" })) as unknown as Array<{
       id?: string;
@@ -1336,18 +1339,38 @@ export async function releaseVapiNumber(number: string): Promise<void> {
 
 /* ------------------------- Outbound (test) calling ------------------------- */
 
+const digitsOf = (s: string) => (s ?? "").replace(/\D/g, "");
+
+/** E.164 digits → Vapi phone-number id.
+ *
+ *  Resolving a caller ID means listing every number in the org, and that round
+ *  trip sits directly between the customer pressing "call me" and their phone
+ *  ringing. The mapping only changes when we import or release a number, and
+ *  both of those clear this — so a stale entry isn't reachable. */
+const phoneNumberIdCache = new Map<string, string>();
+
+/** Drop the cache. Called from every path that imports, releases or deletes a
+ *  Vapi number, so the next lookup goes back to Vapi. */
+export function clearVapiPhoneNumberCache(): void {
+  phoneNumberIdCache.clear();
+}
+
 /** Vapi's id for an E.164 number already imported into the org, or null. */
 export async function vapiPhoneNumberIdFor(number: string): Promise<string | null> {
   const clean = (number ?? "").trim();
   if (!clean) return null;
+  const key = digitsOf(clean);
+  const cached = phoneNumberIdCache.get(key);
+  if (cached) return cached;
   const list = (await vapiFetch(`/phone-number`, { method: "GET" })) as unknown as Array<{
     id?: string;
     number?: string;
   }>;
   if (!Array.isArray(list)) return null;
-  const digits = (s: string) => s.replace(/\D/g, "");
-  const match = list.find((p) => p.number && digits(p.number) === digits(clean));
-  return match?.id ?? null;
+  // Cache the whole listing, not just the hit: we paid for all of it, and the
+  // next customer's caller ID is very likely in the same response.
+  for (const p of list) if (p.id && p.number) phoneNumberIdCache.set(digitsOf(p.number), p.id);
+  return phoneNumberIdCache.get(key) ?? null;
 }
 
 /** Import a caller-ID number into Vapi WITHOUT binding an assistant to it.
@@ -1369,7 +1392,9 @@ export async function importCallerIdNumber(number: string): Promise<string> {
       twilioAuthToken: getEffective("twilio.authToken"),
     }),
   });
-  return created.id as string;
+  const id = created.id as string;
+  if (id) phoneNumberIdCache.set(digitsOf(number), id);
+  return id;
 }
 
 /** Vapi's id for a caller-ID number, importing it on first use. */
