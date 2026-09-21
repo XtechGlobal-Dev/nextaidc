@@ -295,7 +295,7 @@ export default function LoginPage() {
 
             {screen === "login" ? (
               <form onSubmit={submitLogin} noValidate className="space-y-3">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <Input
                     id="email"
@@ -334,7 +334,7 @@ export default function LoginPage() {
               </form>
             ) : screen === "register" ? (
               <form onSubmit={submitRegisterStart} noValidate className="space-y-3">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="fullName">Full Name</Label>
                   <Input
                     id="fullName"
@@ -345,11 +345,11 @@ export default function LoginPage() {
                   />
                   <FieldError msg={errors.fullName} />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="businessName">Business Name</Label>
                   <Input id="businessName" maxLength={NAME_MAX} value={form.businessName} onChange={set("businessName")} />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <Input
                     id="email"
@@ -361,7 +361,7 @@ export default function LoginPage() {
                   />
                   <FieldError msg={errors.email} />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
                   <PasswordInput
                     id="password"
@@ -393,7 +393,7 @@ export default function LoginPage() {
                 <p className="text-center text-sm text-muted-foreground">
                   Sent to <span className="font-medium text-foreground">{form.email}</span>
                 </p>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="otp">Verification Code</Label>
                   <OtpInput
                     id="otp"
@@ -421,7 +421,7 @@ export default function LoginPage() {
               </form>
             ) : screen === "forgot" ? (
               <form onSubmit={submitForgot} noValidate className="space-y-3">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <Input
                     id="email"
@@ -443,7 +443,7 @@ export default function LoginPage() {
                 <p className="text-center text-sm text-muted-foreground">
                   Sent to <span className="font-medium text-foreground">{form.email}</span>
                 </p>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="otp">Verification Code</Label>
                   <OtpInput
                     id="otp"
@@ -456,7 +456,7 @@ export default function LoginPage() {
                   />
                   <FieldError msg={errors.otp} />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="newPassword">New Password</Label>
                   <PasswordInput
                     id="newPassword"

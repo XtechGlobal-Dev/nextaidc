@@ -392,7 +392,7 @@ export function SettingsTab() {
           {/* Slot settings only matter for booking on the call, so they belong
               in this card too. */}
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="bk-tz">Timezone</Label>
               {/* Searchable — the full IANA list is hundreds of entries deep. */}
               <SearchableSelect
@@ -407,7 +407,7 @@ export function SettingsTab() {
                 Bookable hours and offered slots are read in this timezone.
               </p>
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="bk-dur">Slot length (minutes)</Label>
               <Input
                 id="bk-dur"

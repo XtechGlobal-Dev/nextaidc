@@ -378,7 +378,7 @@ function ChannelCard({
       </CardHeader>
 
       <CardContent className="flex flex-1 flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <Label htmlFor={`channel-${kind}`}>{isEmail ? "Email Address" : "Phone Number"}</Label>
           {isEmail ? (
             <Input
@@ -482,7 +482,7 @@ function ConversationLinkControls({
       </div>
 
       {enabled && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <Label className="text-xs text-muted-foreground">Link stays valid for</Label>
           <div className="flex flex-wrap gap-1.5">
             {LINK_VALIDITY_OPTIONS.map((opt) => (

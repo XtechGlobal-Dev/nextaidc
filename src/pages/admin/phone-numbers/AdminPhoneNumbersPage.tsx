@@ -14,6 +14,7 @@ import {
   Users,
   KeyRound,
   MessageSquare,
+  PhoneOutgoing,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -89,6 +90,12 @@ export default function AdminPhoneNumbersPage() {
   const [pool, setPool] = useState<PhonePoolNumber[]>([]);
   const [userNumbers, setUserNumbers] = useState<PhoneUserNumber[]>([]);
   const [senderNumber, setSenderNumber] = useState<string | null>(null);
+  // Caller ID for outbound test calls. Customers who hold their own number dial
+  // from it instead — this is only the stand-in for those who don't.
+  const [outboundCaller, setOutboundCaller] = useState<string | null>(null);
+  const [outboundInherited, setOutboundInherited] = useState(false);
+  const [outboundDraft, setOutboundDraft] = useState("");
+  const [confirmUnassignOutbound, setConfirmUnassignOutbound] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [tab, setTab] = useState<TabKey>("pool");
@@ -136,6 +143,8 @@ export default function AdminPhoneNumbersPage() {
       setPool(data.pool);
       setUserNumbers(data.userNumbers);
       setSenderNumber(data.smsSender);
+      setOutboundCaller(data.outboundCaller);
+      setOutboundInherited(data.outboundCallerInherited);
       return true;
     } catch (e) {
       if (!silent) toast.error(errMsg(e, "Couldn't load phone numbers"));
@@ -318,6 +327,39 @@ export default function AdminPhoneNumbersPage() {
       await load();
     } catch (e) {
       toast.error(errMsg(e, "Couldn't clear the SMS sender"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Platform admins set the shared caller ID; a brand admin's save becomes that
+   *  brand's own override of it. The server decides which from `req.user.brandId`. */
+  async function assignOutboundNumber() {
+    const v = outboundDraft.trim();
+    if (!v || !canEdit) return;
+    setBusy("outbound");
+    try {
+      const r = await api.admin.phoneNumbers.assignOutbound(v);
+      setOutboundDraft("");
+      toast.success(`Outbound caller ID set to ${r.outboundCaller}`);
+      await load();
+    } catch (e) {
+      toast.error(errMsg(e, "Couldn't set the outbound caller ID"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function unassignOutboundNumber() {
+    if (!canEdit) return;
+    setBusy("outbound");
+    try {
+      await api.admin.phoneNumbers.unassignOutbound();
+      setConfirmUnassignOutbound(false);
+      toast.success(isSuperAdmin ? "Outbound caller ID cleared" : "Now using the platform's outbound number");
+      await load();
+    } catch (e) {
+      toast.error(errMsg(e, "Couldn't clear the outbound caller ID"));
     } finally {
       setBusy(null);
     }
@@ -536,7 +578,7 @@ export default function AdminPhoneNumbersPage() {
           )}
 
           {canEdit && (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <label
               htmlFor={senderNumber ? "test-to" : "sender"}
               className="text-xs font-medium text-muted-foreground"
@@ -667,6 +709,87 @@ export default function AdminPhoneNumbersPage() {
       </Card>
           </div>
           )}
+
+      {/* Outbound caller ID — brand admins set their own brand's, so this sits
+          outside the super-admin block above. */}
+      <Card className="overflow-hidden p-0">
+        <div className="flex items-start gap-3 border-b border-border/60 px-5 py-4">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary-tint text-primary">
+            <PhoneOutgoing className="size-5" />
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold leading-tight">Outbound Caller ID</h3>
+            <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+              The number test calls are placed <strong>from</strong> when a customer has no number
+              of their own. A customer who has activated a number always dials from that one
+              instead — and either way the caller hears their own agent, with their own knowledge.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4 p-5">
+          {outboundCaller ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-base font-semibold tabular-nums text-foreground">
+                  {outboundCaller}
+                </span>
+                {outboundInherited ? (
+                  <Badge variant="neutral">Using the platform number</Badge>
+                ) : (
+                  <Badge variant="success">Active</Badge>
+                )}
+              </div>
+              {canEdit && !outboundInherited && (
+                <button
+                  type="button"
+                  disabled={busy === "outbound"}
+                  onClick={() => setConfirmUnassignOutbound(true)}
+                  className="shrink-0 text-xs font-medium text-danger hover:underline disabled:opacity-50"
+                >
+                  {isSuperAdmin ? "Unassign" : "Use the platform number"}
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+              No outbound number set — customers without a number of their own can&apos;t place a
+              test call yet.
+            </p>
+          )}
+
+          {canEdit && (
+            <div className="flex flex-col gap-2">
+              <label htmlFor="outbound" className="text-xs font-medium text-muted-foreground">
+                {outboundCaller && !outboundInherited
+                  ? "Replace outbound number"
+                  : "Assign outbound number"}
+              </label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="outbound"
+                  placeholder="e.g. +14155551234"
+                  value={outboundDraft}
+                  onChange={(e) => setOutboundDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && assignOutboundNumber()}
+                  className="flex-1 font-mono"
+                />
+                <Button
+                  onClick={assignOutboundNumber}
+                  disabled={!outboundDraft.trim() || busy === "outbound"}
+                >
+                  {busy === "outbound" && <Loader2 className="size-4 animate-spin" />} Assign
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Must be a Twilio number on the connected account. It is imported for outbound
+                dialling on first use and is never routed to an agent, so it won&apos;t answer
+                inbound calls.
+              </p>
+            </div>
+          )}
+        </div>
+      </Card>
 
       {/* Customer number countries */}
       <Card className="overflow-hidden p-0">
@@ -1044,6 +1167,33 @@ export default function AdminPhoneNumbersPage() {
             </Button>
             <Button variant="danger" disabled={busy === "sms"} onClick={unassignSenderNumber}>
               {busy === "sms" && <Loader2 className="size-4 animate-spin" />} Unassign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmUnassignOutbound}
+        onOpenChange={(o) => !o && setConfirmUnassignOutbound(false)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {isSuperAdmin ? "Unassign the outbound caller ID?" : "Use the platform's outbound number?"}
+            </DialogTitle>
+            <DialogDescription>
+              {isSuperAdmin
+                ? "Customers who haven't activated a number of their own won't be able to place a test call until another outbound number is set. Customers with their own number are unaffected."
+                : "Your customers will place test calls from the platform's shared number instead of yours. Customers with their own number are unaffected."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmUnassignOutbound(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" disabled={busy === "outbound"} onClick={unassignOutboundNumber}>
+              {busy === "outbound" && <Loader2 className="size-4 animate-spin" />}{" "}
+              {isSuperAdmin ? "Unassign" : "Use platform number"}
             </Button>
           </DialogFooter>
         </DialogContent>

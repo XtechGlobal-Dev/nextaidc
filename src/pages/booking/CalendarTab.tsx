@@ -523,11 +523,11 @@ function ApptDialog({
 
         {rescheduling && appt.status !== "cancelled" && (
           <div className="grid grid-cols-2 gap-3 rounded-lg border border-border p-3">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="rs-date">New date</Label>
               <Input id="rs-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="rs-time">New time</Label>
               <Input id="rs-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
             </div>
@@ -626,30 +626,30 @@ function AddDialog({ tz, onClose, onCreated }: { tz: string; onClose: () => void
         </DialogHeader>
         <form onSubmit={submit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="ad-date">Date</Label>
               <Input id="ad-date" type="date" value={form.date} onChange={set("date")} required />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="ad-time">Time</Label>
               <Input id="ad-time" type="time" value={form.time} onChange={set("time")} required />
             </div>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="ad-name">Customer name</Label>
             <Input id="ad-name" value={form.customerName} onChange={set("customerName")} placeholder="Customer" />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="ad-phone">Phone</Label>
               <Input id="ad-phone" value={form.customerPhone} onChange={set("customerPhone")} />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="ad-email">Email</Label>
               <Input id="ad-email" type="email" value={form.customerEmail} onChange={set("customerEmail")} />
             </div>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="ad-notes">Notes</Label>
             <Textarea id="ad-notes" rows={2} value={form.notes} onChange={set("notes")} />
           </div>

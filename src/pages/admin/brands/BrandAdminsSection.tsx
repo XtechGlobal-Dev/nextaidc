@@ -155,7 +155,7 @@ export function BrandAdminsSection({ brand }: { brand: Brand }) {
               <Label htmlFor="ba-name">Full name</Label>
               <Input
                 id="ba-name"
-                className="mt-1.5"
+                className="mt-2"
                 value={form.fullName}
                 onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))}
                 placeholder="Jordan Blake"
@@ -166,7 +166,7 @@ export function BrandAdminsSection({ brand }: { brand: Brand }) {
               <Input
                 id="ba-email"
                 type="email"
-                className="mt-1.5"
+                className="mt-2"
                 autoComplete="off"
                 value={form.email}
                 onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
@@ -177,7 +177,7 @@ export function BrandAdminsSection({ brand }: { brand: Brand }) {
               <Label htmlFor="ba-password">Temporary password</Label>
               <PasswordInput
                 id="ba-password"
-                className="mt-1.5"
+                className="mt-2"
                 autoComplete="new-password"
                 value={form.password}
                 onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}

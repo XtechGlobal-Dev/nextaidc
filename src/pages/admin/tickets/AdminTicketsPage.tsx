@@ -2176,7 +2176,7 @@ function DetailField({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <label
         htmlFor={htmlFor}
         className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"

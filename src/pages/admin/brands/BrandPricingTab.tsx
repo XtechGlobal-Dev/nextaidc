@@ -63,7 +63,7 @@ export function BrandPricingTab({
           </div>
           <div>
             <Label htmlFor="b-addon-cap">Addon cap per cycle</Label>
-            <div className="mt-1.5 flex items-center gap-2">
+            <div className="mt-2 flex items-center gap-2">
               <Input
                 id="b-addon-cap"
                 type="number"

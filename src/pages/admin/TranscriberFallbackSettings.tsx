@@ -151,7 +151,7 @@ export function TranscriberFallbackSettings() {
                 </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label className="text-xs text-muted-foreground">Provider</Label>
                   <Select value={provider || NONE} onValueChange={onProviderChange}>
                     <SelectTrigger>
@@ -167,7 +167,7 @@ export function TranscriberFallbackSettings() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label className="text-xs text-muted-foreground">Model</Label>
                   <Select
                     value={model}

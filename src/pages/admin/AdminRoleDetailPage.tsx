@@ -203,7 +203,7 @@ export default function AdminRoleDetailPage() {
 
       <Card className="mt-6 p-6">
         <div className="grid max-w-2xl gap-5">
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="role-name">
               Role title <span className="text-danger">*</span>
             </Label>
@@ -221,7 +221,7 @@ export default function AdminRoleDetailPage() {
             {errors.name && <p className="text-xs text-danger">{errors.name}</p>}
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="role-desc">Description</Label>
             <Input
               id="role-desc"

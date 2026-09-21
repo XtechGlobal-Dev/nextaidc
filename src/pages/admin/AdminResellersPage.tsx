@@ -395,7 +395,7 @@ export default function AdminResellersPage() {
               if (!saving) void submit();
             }}
           >
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="rs-name">Full name</Label>
               <Input
                 id="rs-name"
@@ -408,7 +408,7 @@ export default function AdminResellersPage() {
             </div>
             {!editing && (
               <>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="rs-email">Email (login)</Label>
                   <Input
                     id="rs-email"
@@ -420,7 +420,7 @@ export default function AdminResellersPage() {
                   />
                   {errors.email && <p className="text-xs text-danger">{errors.email}</p>}
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="rs-pass">Temporary password</Label>
                   <PasswordInput
                     id="rs-pass"
@@ -439,7 +439,7 @@ export default function AdminResellersPage() {
                 </div>
               </>
             )}
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="rs-pct">Commission %</Label>
               <Input
                 id="rs-pct"

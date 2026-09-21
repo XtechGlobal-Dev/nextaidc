@@ -2,7 +2,14 @@ import { prisma } from "../prisma.js";
 import { allTenants, tenantFor, tenantForUser, TenantUnavailableError } from "./tenantDb.js";
 import { brandIdForOwner } from "./customerDirectory.js";
 import { badRequest, notFound, notImplemented, HttpError } from "../lib/http.js";
-import { getEffective, integrationsStatus, setSettingValue } from "./settings.js";
+import {
+  getEffective,
+  getBrandOverride,
+  integrationsStatus,
+  setSettingValue,
+  saveBrandIntegrations,
+  INHERIT_SENTINEL,
+} from "./settings.js";
 import {
   isTwilioConfigured,
   listTwilioNumbersDetailed,
@@ -93,6 +100,11 @@ export interface OverviewDto {
   pool: PoolNumberDto[];
   userNumbers: UserNumberDto[];
   smsSender: string | null;
+  /** Caller ID outbound test calls go out from for customers with no number of
+   *  their own. For a brand admin this is their brand's effective value. */
+  outboundCaller: string | null;
+  /** True when that value is the platform's, seen by a brand that hasn't set its own. */
+  outboundCallerInherited: boolean;
 }
 export interface AgentDto {
   id: string;
@@ -113,6 +125,13 @@ export interface ImportableDto {
 /** Pool vs user numbers for a viewer. Platform (null) sees everything it's billed for, brand-tagged; a brand sees ONLY its own numbers — never the shared pool or another brand's. */
 export async function getOverview(viewerBrandId: string | null = null): Promise<OverviewDto> {
   const sender = normalize(getEffective("twilio.fromNumber")) || null;
+  // Same rule as the SMS sender: the number shown in the outbound card isn't
+  // repeated in the free pool below it. Only while it is unassigned — once a
+  // customer holds it, it belongs in their row.
+  const outboundSender =
+    normalize(
+      viewerBrandId ? getBrandOverride(viewerBrandId, "twilio.outboundNumber") : "",
+    ) || normalize(getEffective("twilio.outboundNumber")) || null;
   const reclaimDays = await getReclaimDays();
   const rows = await prisma.phoneNumber.findMany({
     where: viewerBrandId ? { brandId: viewerBrandId } : {},
@@ -145,6 +164,7 @@ export async function getOverview(viewerBrandId: string | null = null): Promise<
   const userNumbers: UserNumberDto[] = [];
   for (const r of rows) {
     if (sender && normalize(r.number) === sender) continue; // shown in the SMS card
+    if (!r.userId && outboundSender && normalize(r.number) === outboundSender) continue; // shown in the outbound card
     const livePriceCents = await monthlyPriceCentsFor(r.number);
     const base: PoolNumberDto = {
       id: r.id,
@@ -176,19 +196,50 @@ export async function getOverview(viewerBrandId: string | null = null): Promise<
       pool.push(base);
     }
   }
+  // A brand admin sees their brand's effective caller ID (own override, else the
+  // platform's); a platform admin sees the platform value itself.
+  const brandOutbound = viewerBrandId
+    ? normalize(getBrandOverride(viewerBrandId, "twilio.outboundNumber"))
+    : "";
+  const platformOutbound = normalize(getEffective("twilio.outboundNumber"));
+  const outbound = brandOutbound || platformOutbound;
   return {
     pool,
     userNumbers,
     smsSender: sender ? getEffective("twilio.fromNumber") : null,
+    outboundCaller: outbound || null,
+    outboundCallerInherited: Boolean(viewerBrandId) && !brandOutbound && Boolean(platformOutbound),
   };
+}
+
+/** Numbers no customer may be handed, however free they look.
+ *
+ *  The shared outbound caller IDs are dialling identities other customers' test
+ *  calls go out on. Assign one to a customer and every other customer of that
+ *  brand (or of the platform) starts calling from that customer's private line —
+ *  and their callbacks land there too. Both spellings are listed because the
+ *  setting is normalised on save but a legacy value may have no leading "+". */
+function reservedCallerIds(brandId: string | null | undefined): string[] {
+  const out = new Set<string>();
+  const add = (raw: string) => {
+    const clean = normalize(raw);
+    if (!clean) return;
+    out.add(clean);
+    out.add(clean.startsWith("+") ? clean.slice(1) : `+${clean}`);
+  };
+  add(getEffective("twilio.outboundNumber"));
+  if (brandId) add(getBrandOverride(brandId, "twilio.outboundNumber"));
+  return [...out];
 }
 
 /** Where clause for numbers a brand's customer may take: own pool or shared. Without it "AVAILABLE with a brandId" would go to anyone, and Acme would pay for Northwind's number. */
 export function availableForBrand(brandId: string | null | undefined) {
+  const reserved = reservedCallerIds(brandId);
   return {
     userId: null,
     poolStatus: "AVAILABLE",
     status: "active",
+    ...(reserved.length ? { number: { notIn: reserved } } : {}),
     // Null brandId is the shared pool, open to everyone; a platform-direct
     // customer (no brand) may only ever draw from it.
     ...(brandId ? { OR: [{ brandId }, { brandId: null }] } : { brandId: null }),
@@ -198,15 +249,17 @@ export function availableForBrand(brandId: string | null | undefined) {
 /** Pick the next number a customer of `brandId` may have — their brand's own
  *  inventory before the shared pool. Null when nothing is free to them. */
 export async function nextAvailableForBrand(brandId: string | null | undefined) {
+  const reserved = reservedCallerIds(brandId);
+  const notReserved = reserved.length ? { number: { notIn: reserved } } : {};
   if (brandId) {
     const own = await prisma.phoneNumber.findFirst({
-      where: { userId: null, poolStatus: "AVAILABLE", status: "active", brandId },
+      where: { userId: null, poolStatus: "AVAILABLE", status: "active", brandId, ...notReserved },
       orderBy: { createdAt: "asc" },
     });
     if (own) return own;
   }
   return prisma.phoneNumber.findFirst({
-    where: { userId: null, poolStatus: "AVAILABLE", status: "active", brandId: null },
+    where: { userId: null, poolStatus: "AVAILABLE", status: "active", brandId: null, ...notReserved },
     orderBy: { createdAt: "asc" },
   });
 }
@@ -474,6 +527,77 @@ export async function sendTestSms(to: string): Promise<{ from: string; to: strin
 /** Clears the SMS sender with an empty override (not a delete) so it also masks TWILIO_FROM_NUMBER from .env. */
 export async function unassignSmsSender(): Promise<void> {
   await setSettingValue("twilio.fromNumber", "");
+}
+
+/* --------------------- Outbound caller ID (test calls) --------------------- */
+
+/** Where the caller ID on an outbound test call came from. The customer hears
+ *  their own agent either way — this only says whose number appears on the
+ *  handset, which is what decides who pays for the line. */
+export type CallerIdSource = "customer" | "brand" | "platform";
+
+export interface OutboundCallerId {
+  /** E.164 number the call is placed FROM. */
+  number: string;
+  source: CallerIdSource;
+}
+
+/** Set the platform-wide outbound caller ID (super admin), or a single brand's
+ *  override of it. A brand's value wins for that brand's customers. */
+export async function assignOutboundCaller(
+  number: string,
+  brandId: string | null = null,
+): Promise<string> {
+  const clean = normalize(number);
+  if (!/^\+?\d{6,15}$/.test(clean)) throw badRequest("That doesn't look like a valid phone number");
+  // The other half of reservedCallerIds: a shared caller ID must not be a line a
+  // customer already answers on, or their callers reach a stranger's agent.
+  const held = await prisma.phoneNumber.findFirst({
+    where: { number: { in: [clean, clean.startsWith("+") ? clean.slice(1) : `+${clean}`] }, userId: { not: null } },
+    select: { number: true },
+  });
+  if (held)
+    throw badRequest(
+      `${held.number} is assigned to a customer — pick a number that isn't in use as someone's receptionist line.`,
+    );
+  if (brandId) await saveBrandIntegrations(brandId, { "twilio.outboundNumber": clean });
+  else await setSettingValue("twilio.outboundNumber", clean);
+  return clean;
+}
+
+/** Clear with an empty override rather than a delete, so it also masks
+ *  TWILIO_OUTBOUND_NUMBER from .env (same reason as the SMS sender). */
+export async function unassignOutboundCaller(brandId: string | null = null): Promise<void> {
+  // A brand clearing its own override falls back to the platform number, so the row is
+  // deleted (INHERIT) rather than blanked — a blank would read as "no outbound calling".
+  if (brandId) await saveBrandIntegrations(brandId, { "twilio.outboundNumber": INHERIT_SENTINEL });
+  else await setSettingValue("twilio.outboundNumber", "");
+}
+
+/** The number a customer's own outbound calls go out from.
+ *
+ *  Their own line first — a customer (or a brand) that bought a number should
+ *  dial from it, so the person they ring sees a number they can ring back. Only
+ *  when they have none does the shared platform caller ID stand in. Which number
+ *  is used never changes WHICH agent answers: that is always the caller's own
+ *  assistant, picked separately by the route. */
+export async function resolveOutboundCallerId(userId: string): Promise<OutboundCallerId | null> {
+  const own = await prisma.phoneNumber.findFirst({
+    where: { userId, poolStatus: "ASSIGNED", status: "active" },
+    orderBy: { createdAt: "desc" },
+    select: { number: true },
+  });
+  if (own?.number) return { number: own.number, source: "customer" };
+
+  const brandId = await brandIdForOwner(userId).catch(() => null);
+  if (brandId) {
+    const brandOwn = normalize(getBrandOverride(brandId, "twilio.outboundNumber"));
+    if (brandOwn) return { number: brandOwn, source: "brand" };
+  }
+
+  const platform = normalize(getEffective("twilio.outboundNumber"));
+  if (platform) return { number: platform, source: "platform" };
+  return null;
 }
 
 /** Drop pool rows whose Twilio number the account no longer owns. */

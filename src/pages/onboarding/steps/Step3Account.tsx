@@ -119,7 +119,7 @@ export default function Step3Account() {
         }}
       >
         <div className="space-y-3 rounded-[var(--radius-card)] border border-border bg-card p-6 shadow-[var(--shadow-soft)]">
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="fullName">
             Your name <span className="text-danger">*</span>
           </Label>
@@ -135,7 +135,7 @@ export default function Step3Account() {
           />
           {errors.fullName && <p className="text-xs text-danger">{errors.fullName}</p>}
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="email">
             Email address <span className="text-danger">*</span>
           </Label>
@@ -152,7 +152,7 @@ export default function Step3Account() {
           />
           {errors.email && <p className="text-xs text-danger">{errors.email}</p>}
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="mobile">
             Mobile number <span className="text-danger">*</span>
           </Label>
@@ -170,7 +170,7 @@ export default function Step3Account() {
           <p className="text-xs font-medium text-primary">This number will be used for SMS and WhatsApp notifications.</p>
           {errors.mobile && <p className="text-xs text-danger">{errors.mobile}</p>}
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="phone">
             Business number <span className="font-normal text-muted-foreground">(optional)</span>
           </Label>
@@ -184,7 +184,7 @@ export default function Step3Account() {
             placeholder="Support number customers call"
           />
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="address">
             Address <span className="font-normal text-muted-foreground">(optional)</span>
           </Label>
@@ -197,7 +197,7 @@ export default function Step3Account() {
             placeholder="Business address"
           />
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="password">
             Password <span className="text-danger">*</span>
           </Label>

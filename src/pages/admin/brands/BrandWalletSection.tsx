@@ -223,7 +223,7 @@ function PayoutForm({
         <div>
           <Label htmlFor="po-currency">Currency</Label>
           <Select value={currency} onValueChange={setCurrency}>
-            <SelectTrigger id="po-currency" className="mt-1.5">
+            <SelectTrigger id="po-currency" className="mt-2">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -243,7 +243,7 @@ function PayoutForm({
             min={0}
             step="0.01"
             inputMode="decimal"
-            className="mt-1.5 tabular-nums"
+            className="mt-2 tabular-nums"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder={(available / 100).toFixed(2)}
@@ -253,7 +253,7 @@ function PayoutForm({
           <Label htmlFor="po-ref">Reference</Label>
           <Input
             id="po-ref"
-            className="mt-1.5"
+            className="mt-2"
             value={reference}
             onChange={(e) => setReference(e.target.value)}
             placeholder="Bank ref / transfer id"
@@ -263,7 +263,7 @@ function PayoutForm({
           <Label htmlFor="po-note">Note</Label>
           <Input
             id="po-note"
-            className="mt-1.5"
+            className="mt-2"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="Optional"

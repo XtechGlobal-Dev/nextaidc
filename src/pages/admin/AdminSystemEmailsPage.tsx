@@ -322,11 +322,11 @@ function BrandingCard({
       </CardHeader>
       <CardContent className="grid gap-4 lg:grid-cols-2">
         <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="from-name">Email from name</Label>
             <Input id="from-name" value={fromName} onChange={(e) => setFromName(e.target.value)} />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="email-header">Email header (HTML)</Label>
             <textarea
               id="email-header"
@@ -335,7 +335,7 @@ function BrandingCard({
               onChange={(e) => setHeader(e.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <Label htmlFor="email-footer">Email footer (HTML)</Label>
             <textarea
               id="email-footer"
@@ -352,7 +352,7 @@ function BrandingCard({
             </div>
           )}
         </div>
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <Label>Preview</Label>
           <div className="overflow-hidden rounded-lg border border-border">
             <div dangerouslySetInnerHTML={{ __html: header }} />
@@ -426,7 +426,7 @@ function EditDialog({
           {/* Editor — min-w-0 lets each grid column shrink below its content's
               intrinsic width, so a long sample URL can't widen the dialog. */}
           <div className="flex min-w-0 flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="tpl-subject">Subject</Label>
               <Input
                 id="tpl-subject"
@@ -434,7 +434,7 @@ function EditDialog({
                 onChange={(e) => setSubject(e.target.value)}
               />
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="tpl-body">Body</Label>
               <textarea
                 id="tpl-body"
@@ -444,7 +444,7 @@ function EditDialog({
                 onChange={(e) => setBody(e.target.value)}
               />
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Label>Insert variable</Label>
               <div className="flex flex-wrap gap-1.5">
                 {template.variables.map((v) => (
@@ -462,7 +462,7 @@ function EditDialog({
           </div>
 
           {/* Live preview */}
-          <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-2">
             <Label>Live preview (sample data)</Label>
             <div className="min-w-0 rounded-lg border border-border bg-white p-4 [overflow-wrap:anywhere]">
               <p className="mb-2 border-b border-border pb-2 text-sm font-semibold text-black">

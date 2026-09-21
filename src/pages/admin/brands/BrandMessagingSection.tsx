@@ -170,7 +170,7 @@ export function BrandMessagingSection({ brandId }: { brandId: string }) {
                     </Label>
                     <Field
                       id={id}
-                      className="mt-1.5"
+                      className="mt-2"
                       autoComplete="off"
                       placeholder={f.inherited ? f.placeholder || "Using the platform value" : f.value}
                       value={draft[f.key] ?? ""}

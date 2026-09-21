@@ -76,7 +76,7 @@ export function AgentDefaultsSettings() {
         ) : (
           <>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="agent-male-name" className="text-xs text-muted-foreground">
                   Male voice → name
                 </Label>
@@ -88,7 +88,7 @@ export function AgentDefaultsSettings() {
                   onChange={(e) => setMale(e.target.value)}
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="agent-female-name" className="text-xs text-muted-foreground">
                   Female voice → name
                 </Label>

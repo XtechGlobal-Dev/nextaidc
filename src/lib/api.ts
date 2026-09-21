@@ -1091,6 +1091,15 @@ export const api = {
       ),
     callRecording: (callId: string) =>
       get<{ recordingUrl: string | null }>(`/api/agent/call-recording/${callId}`),
+    /** Ring a real phone with this account's own agent. The draft config is sent so
+     *  unsaved AI Brain edits are heard on the call; the number it dials FROM is
+     *  resolved server-side (own number → brand → platform). */
+    testCall: (toNumber: string, agentConfig?: AgentConfig) =>
+      post<TestCallStart>("/api/agent/test-call", { toNumber, ...(agentConfig ? { agentConfig } : {}) }),
+    testCallStatus: (callId: string) =>
+      get<TestCallStatus>(`/api/agent/test-call/${encodeURIComponent(callId)}`),
+    testCallEnd: (callId: string) =>
+      post<{ ok: true }>(`/api/agent/test-call/${encodeURIComponent(callId)}/end`),
   },
   voices: {
     /** Voice catalog annotated for the current user (entitlement + upsell hint). */
@@ -1805,6 +1814,12 @@ export const api = {
       unassignSms: () => post<{ smsSender: null }>("/api/admin/phones/unassign-sms"),
       testSms: (to: string) =>
         post<{ ok: true; from: string; to: string }>("/api/admin/phones/test-sms", { to }),
+      /** Caller ID for outbound test calls. Platform-wide for a platform admin; the
+       *  caller's own brand override when a brand admin saves it. */
+      assignOutbound: (number: string) =>
+        post<{ outboundCaller: string }>("/api/admin/phones/assign-outbound", { number }),
+      unassignOutbound: () =>
+        post<{ outboundCaller: null }>("/api/admin/phones/unassign-outbound"),
       cleanupOrphaned: () =>
         post<{ removed: number; numbers: string[] }>("/api/admin/phones/cleanup-orphaned"),
       clearSync: () =>
@@ -2092,6 +2107,32 @@ export interface PhoneOverview {
   pool: PhonePoolNumber[];
   userNumbers: PhoneUserNumber[];
   smsSender: string | null;
+  /** Number outbound test calls are placed FROM for customers with no number of their own. */
+  outboundCaller: string | null;
+  /** The value above is the platform's, seen by a brand that hasn't set its own. */
+  outboundCallerInherited: boolean;
+}
+
+/** Whose line the test call went out on. The agent that answers is always the
+ *  caller's own — this only says which number the handset shows. */
+export type CallerIdSource = "customer" | "brand" | "platform";
+
+export interface TestCallStart {
+  /** Vapi call id, used to poll status and to match the logged call. */
+  callId: string;
+  status: string;
+  from: string;
+  fromSource: CallerIdSource;
+  to: string;
+  maxDurationSeconds: number | null;
+}
+
+export interface TestCallStatus {
+  id: string;
+  /** queued | ringing | in-progress | forwarding | ended */
+  status: string;
+  endedReason: string;
+  durationSec: number;
 }
 export interface PhoneAgent {
   id: string;

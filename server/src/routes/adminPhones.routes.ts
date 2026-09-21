@@ -12,6 +12,8 @@ import {
   reassign,
   assignSmsSender,
   unassignSmsSender,
+  assignOutboundCaller,
+  unassignOutboundCaller,
   sendTestSms,
   cleanupOrphaned,
   clearSync,
@@ -176,6 +178,51 @@ router.post(
       ip: req.ip,
     });
     res.json({ ok: true, ...result });
+  }),
+);
+
+/* ----------------------- Outbound caller ID ----------------------- */
+
+/** Set the number outbound test calls are placed FROM. A platform admin sets the
+ *  shared default; a brand admin sets their own brand's override of it. Customers
+ *  who hold a number of their own dial from that instead — see
+ *  `resolveOutboundCallerId`. */
+router.post(
+  "/assign-outbound",
+  requirePermission("phone_numbers", "edit"),
+  asyncHandler(async (req, res) => {
+    const { number } = z.object({ number: z.string() }).parse(req.body);
+    const brandId = viewerBrand(req);
+    const outboundCaller = await assignOutboundCaller(number, brandId);
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: brandId,
+      actorEmail: req.user!.email,
+      action: "phones.outboundCaller.set",
+      targetType: "setting",
+      metadata: { number: outboundCaller, scope: brandId ? "brand" : "platform" },
+      ip: req.ip,
+    });
+    res.json({ outboundCaller });
+  }),
+);
+
+router.post(
+  "/unassign-outbound",
+  requirePermission("phone_numbers", "edit"),
+  asyncHandler(async (req, res) => {
+    const brandId = viewerBrand(req);
+    await unassignOutboundCaller(brandId);
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: brandId,
+      actorEmail: req.user!.email,
+      action: "phones.outboundCaller.clear",
+      targetType: "setting",
+      metadata: { scope: brandId ? "brand" : "platform" },
+      ip: req.ip,
+    });
+    res.json({ outboundCaller: null });
   }),
 );
 

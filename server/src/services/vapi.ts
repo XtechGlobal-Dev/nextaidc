@@ -1117,19 +1117,23 @@ export async function getCallRecordingUrl(callId: string): Promise<string | null
   }
 }
 
-/** Create or update the live Vapi assistant for this config. Returns the assistant id. */
-export async function upsertAssistant(
+/** The exact payload the LIVE assistant runs on — prompt, transfer plan, booking
+ *  and info-SMS tools, all resolved for this owner.
+ *
+ *  Shared by `upsertAssistant` (which persists it) and the outbound test call
+ *  (which sends it as `assistantOverrides`), so a test call can't quietly drift
+ *  from what a real inbound caller reaches. */
+export async function buildLiveAssistantPayload(
   config: AgentConfig,
-  existingId?: string | null,
   opts?: { maxDurationSeconds?: number | null; ownerId?: string | null },
-): Promise<string> {
+): Promise<VapiAssistantPayload> {
   const owner = await assistantOwner(opts?.ownerId);
   // Owner is passed so the country can come from their number when not on the config.
   const systemPrompt = await buildVapiSystemPrompt(config, opts?.ownerId ?? owner?.id);
   const transfer = await getTransferPlan(opts?.ownerId ?? owner?.id ?? null);
   const booking = await getBookingToolConfig(opts?.ownerId ?? owner?.id ?? null);
   const infoSms = await getSmsInfoToolConfig(opts?.ownerId ?? owner?.id ?? null);
-  const payload = buildAssistantPayload(config, {
+  return buildAssistantPayload(config, {
     ...opts,
     owner,
     systemPrompt,
@@ -1137,12 +1141,22 @@ export async function upsertAssistant(
     booking,
     infoSms,
   });
+}
+
+/** Create or update the live Vapi assistant for this config. Returns the assistant id. */
+export async function upsertAssistant(
+  config: AgentConfig,
+  existingId?: string | null,
+  opts?: { maxDurationSeconds?: number | null; ownerId?: string | null },
+): Promise<string> {
+  const payload = await buildLiveAssistantPayload(config, opts);
   // Trace what human-transfer config the live assistant is being given, so an
   // "it transferred immediately" report can be checked against what we pushed.
+  // Read off the built payload rather than the plan: this is what actually goes to Vapi.
   const pushedTool = payload.model.tools?.find((t) => t.type === "transferCall") ?? null;
   console.log(
-    `[transfer] assistant push owner=${opts?.ownerId ?? owner?.id ?? "?"} ` +
-      `enabled=${transfer.enabled} number=${transfer.transferNumber || "-"} ` +
+    `[transfer] assistant push owner=${opts?.ownerId ?? "?"} ` +
+      `enabled=${Boolean(pushedTool)} ` +
       `mode=${pushedTool?.destinations?.[0]?.transferPlan?.mode ?? "none"} ` +
       `destinations=${pushedTool?.destinations?.length ?? 0}`,
   );
@@ -1317,5 +1331,131 @@ export async function releaseVapiNumber(number: string): Promise<void> {
     }
   } catch {
     /* best-effort */
+  }
+}
+
+/* ------------------------- Outbound (test) calling ------------------------- */
+
+/** Vapi's id for an E.164 number already imported into the org, or null. */
+export async function vapiPhoneNumberIdFor(number: string): Promise<string | null> {
+  const clean = (number ?? "").trim();
+  if (!clean) return null;
+  const list = (await vapiFetch(`/phone-number`, { method: "GET" })) as unknown as Array<{
+    id?: string;
+    number?: string;
+  }>;
+  if (!Array.isArray(list)) return null;
+  const digits = (s: string) => s.replace(/\D/g, "");
+  const match = list.find((p) => p.number && digits(p.number) === digits(clean));
+  return match?.id ?? null;
+}
+
+/** Import a caller-ID number into Vapi WITHOUT binding an assistant to it.
+ *
+ *  The platform/brand outbound number is a dialling identity, not a receptionist
+ *  line: every outbound call names the assistant it should run, so leaving the
+ *  number unbound keeps a shared caller ID from answering one customer's inbound
+ *  calls with another customer's agent. `importTwilioNumber` can't be reused —
+ *  it requires an assistantId. */
+export async function importCallerIdNumber(number: string): Promise<string> {
+  const existing = await vapiPhoneNumberIdFor(number).catch(() => null);
+  if (existing) return existing;
+  const created = await vapiFetch(`/phone-number`, {
+    method: "POST",
+    body: JSON.stringify({
+      provider: "twilio",
+      number,
+      twilioAccountSid: getEffective("twilio.accountSid"),
+      twilioAuthToken: getEffective("twilio.authToken"),
+    }),
+  });
+  return created.id as string;
+}
+
+/** Vapi's id for a caller-ID number, importing it on first use. */
+export async function ensureVapiPhoneNumberId(number: string): Promise<string> {
+  const existing = await vapiPhoneNumberIdFor(number).catch(() => null);
+  if (existing) return existing;
+  return importCallerIdNumber(number);
+}
+
+export interface OutboundCallResult {
+  id: string;
+  status: string;
+}
+
+/** Place an outbound call.
+ *
+ *  `assistantId` + `assistantOverrides` rather than a transient `assistant`: the
+ *  saved assistant is what the end-of-call webhook resolves the owner from, while
+ *  the overrides let an unsaved AI-Brain draft be heard on this one call without
+ *  rewriting the live agent. Falls back to a transient assistant (attributed via
+ *  `metadata.userId`) for an account that has no saved assistant yet. */
+export async function createOutboundCall(opts: {
+  phoneNumberId: string;
+  toNumber: string;
+  assistantId?: string | null;
+  assistant?: VapiAssistantPayload | null;
+  assistantOverrides?: Partial<VapiAssistantPayload> | null;
+  metadata?: Record<string, unknown>;
+  name?: string;
+}): Promise<OutboundCallResult> {
+  const body: Record<string, unknown> = {
+    phoneNumberId: opts.phoneNumberId,
+    customer: { number: opts.toNumber },
+    ...(opts.name ? { name: opts.name } : {}),
+    ...(opts.metadata ? { metadata: opts.metadata } : {}),
+  };
+  if (opts.assistantId) {
+    body.assistantId = opts.assistantId;
+    if (opts.assistantOverrides) body.assistantOverrides = opts.assistantOverrides;
+  } else if (opts.assistant) {
+    body.assistant = opts.assistant;
+  } else {
+    throw new HttpError(500, "No assistant to run the call with");
+  }
+  const created = await vapiFetch(`/call`, { method: "POST", body: JSON.stringify(body) });
+  return {
+    id: String(created.id ?? ""),
+    status: String(created.status ?? "queued"),
+  };
+}
+
+export interface VapiCallStatus {
+  id: string;
+  /** queued | ringing | in-progress | forwarding | ended */
+  status: string;
+  endedReason: string;
+  durationSec: number;
+}
+
+/** Poll one call's live status, so the dialog can say "ringing" vs "answered". */
+export async function getCallStatus(callId: string): Promise<VapiCallStatus> {
+  const call = await vapiFetch(`/call/${callId}`, { method: "GET" });
+  const started = typeof call.startedAt === "string" ? Date.parse(call.startedAt) : NaN;
+  const ended = typeof call.endedAt === "string" ? Date.parse(call.endedAt) : NaN;
+  const durationSec =
+    Number.isFinite(started) && Number.isFinite(ended)
+      ? Math.max(0, Math.round((ended - started) / 1000))
+      : Number.isFinite(started)
+        ? Math.max(0, Math.round((Date.now() - started) / 1000))
+        : 0;
+  return {
+    id: String(call.id ?? callId),
+    status: String(call.status ?? ""),
+    endedReason: String(call.endedReason ?? ""),
+    durationSec,
+  };
+}
+
+/** End a live call from the server (the "Hang up" button on a phone test call). Best-effort. */
+export async function endVapiCall(callId: string): Promise<void> {
+  try {
+    await vapiFetch(`/call/${callId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "ended" }),
+    });
+  } catch {
+    /* the caller can always hang up their own handset */
   }
 }

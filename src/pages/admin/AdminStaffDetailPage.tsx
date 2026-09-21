@@ -244,7 +244,7 @@ export default function AdminStaffDetailPage() {
             </div>
           )}
 
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="st-name">Full Name <span className="text-danger">*</span></Label>
             <Input
               id="st-name"
@@ -263,7 +263,7 @@ export default function AdminStaffDetailPage() {
 
           {isNew ? (
             <>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="st-email">Email <span className="text-danger">*</span></Label>
                 <Input
                   id="st-email"
@@ -280,7 +280,7 @@ export default function AdminStaffDetailPage() {
                 />
                 {errors.email && <p className="text-xs text-danger">{errors.email}</p>}
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="st-pass">Temporary Password <span className="text-danger">*</span></Label>
                 <PasswordInput
                   id="st-pass"
@@ -303,7 +303,7 @@ export default function AdminStaffDetailPage() {
               </div>
             </>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label>Email</Label>
               <Input value={email} disabled className="bg-muted" />
               <p className="text-xs text-muted-foreground">
@@ -370,7 +370,7 @@ export default function AdminStaffDetailPage() {
 
         {/* Support queues — a read-out of the role picked above, plus any queue
             granted to this person directly. */}
-        <div className="mt-6 space-y-1.5 border-t border-border pt-6">
+        <div className="mt-6 space-y-2 border-t border-border pt-6">
           <Label className="flex items-center gap-2">
             <Building2 className="size-4 text-primary" /> Support departments
           </Label>

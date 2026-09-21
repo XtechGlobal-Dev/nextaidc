@@ -96,7 +96,7 @@ export function EscalateTicketDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="escalate-department" className="text-sm font-medium">
               Platform department
             </Label>
@@ -114,7 +114,7 @@ export function EscalateTicketDialog({
             </Select>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <label htmlFor="escalate-note" className="text-sm font-medium">
               What the platform needs to know
             </label>

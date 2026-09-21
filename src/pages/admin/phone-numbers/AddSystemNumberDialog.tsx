@@ -262,7 +262,7 @@ export function AddSystemNumberDialog({ open, onClose, onChanged }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label>Country</Label>
               <Select
                 value={country}
@@ -288,7 +288,7 @@ export function AddSystemNumberDialog({ open, onClose, onChanged }: Props) {
             </div>
 
             {countryPrefixes.length > 0 ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label>Number prefix</Label>
                 <Select value={prefix} onValueChange={handlePrefixChange}>
                   <SelectTrigger>
@@ -308,7 +308,7 @@ export function AddSystemNumberDialog({ open, onClose, onChanged }: Props) {
                 </Select>
               </div>
             ) : (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="area-code">Area code (optional)</Label>
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">

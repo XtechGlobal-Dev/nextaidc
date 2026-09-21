@@ -416,6 +416,21 @@ async function conversionByAssistant(assistantId: string) {
   }
   return null;
 }
+
+/** The agent belonging to a user id stamped on the call's `metadata`.
+ *
+ *  Backstop for the assistant-id lookup: an outbound test call carries the owner
+ *  in metadata, so the report still lands in the right tenant if the assistant
+ *  was replaced or deleted upstream between the call and its report. */
+async function conversionByMetadataUser(userId: string) {
+  const db = await tenantForUser(userId).catch(() => null);
+  if (!db) return null;
+  const conversion = await db.conversion.findFirst({
+    where: { userId },
+    select: { id: true, userId: true, agentConfig: true },
+  });
+  return conversion ? { db, conversion } : null;
+}
 /** Find the authenticated user's Conversion id, creating the Conversion if missing. */
 async function getConversionId(userId: string): Promise<string> {
   const existing = await (await tenantForUser(userId)).conversion.findUnique({
@@ -657,9 +672,17 @@ router.post(
       if (typeof call.id === "string") cancelWrapUp(call.id);
 
       const assistantId: unknown = call.assistantId ?? body.assistantId;
+      // Owner stamp we put on outbound calls (see POST /api/agent/test-call).
+      const callMetadata = (call.metadata ?? message.metadata ?? {}) as Record<string, unknown>;
+      const metadataUserId =
+        typeof callMetadata.userId === "string" ? callMetadata.userId.trim() : "";
 
-      if (typeof assistantId === "string" && assistantId) {
-        const conversion = (await conversionByAssistant(assistantId))?.conversion ?? null;
+      {
+        const conversion =
+          (typeof assistantId === "string" && assistantId
+            ? ((await conversionByAssistant(assistantId))?.conversion ?? null)
+            : null) ??
+          (metadataUserId ? ((await conversionByMetadataUser(metadataUserId))?.conversion ?? null) : null);
 
         if (conversion) {
           // Notification prefs. summary* overrides redirect summaries only — login/OTP always use the default. Legacy configs default on.

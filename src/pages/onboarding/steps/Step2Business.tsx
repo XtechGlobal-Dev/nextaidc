@@ -53,7 +53,7 @@ export default function Step2Business() {
 
         {editing ? (
           <div className="mt-4 space-y-3">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground">Business name *</label>
               <Input
                 value={businessName}
@@ -62,7 +62,7 @@ export default function Step2Business() {
                 placeholder="Business name"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <label className="text-xs font-medium text-muted-foreground">Description *</label>
               <Textarea
                 value={businessDescription}

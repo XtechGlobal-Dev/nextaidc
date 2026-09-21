@@ -174,7 +174,7 @@ export function BrandDomainSection({ brand }: { brand: Brand }) {
                 <Label htmlFor="vanity-domain">Domain</Label>
                 <Input
                   id="vanity-domain"
-                  className="mt-1.5 font-mono"
+                  className="mt-2 font-mono"
                   spellCheck={false}
                   autoCapitalize="none"
                   value={draft}
