@@ -19,7 +19,19 @@ import {
 import { normalizeCountry } from "../lib/countryStyles.js";
 import { isoCountryForPhone, normalizeTimeZone, resolveBusinessTimeZone } from "../lib/phoneTimeZone.js";
 import { getPlanFeatures, getCallDurationCap, getEntitlement, entitlementError } from "../services/trial.js";
-import { upsertAssistant, buildAssistantPayload, buildVapiSystemPrompt, getCallRecording, getBookingToolConfig, getSmsInfoToolConfig } from "../services/vapi.js";
+import {
+  upsertAssistant,
+  buildAssistantPayload,
+  buildLiveAssistantPayload,
+  buildVapiSystemPrompt,
+  getCallRecording,
+  getBookingToolConfig,
+  getSmsInfoToolConfig,
+  ensureVapiPhoneNumberId,
+  createOutboundCall,
+  getCallStatus,
+  endVapiCall,
+} from "../services/vapi.js";
 import { markVapiSyncPending, markVapiSynced } from "../services/vapiSync.js";
 import {
   integrationsStatus,
@@ -29,7 +41,7 @@ import {
   DEFAULT_AGENT_NAME_FEMALE,
 } from "../services/settings.js";
 import { isTwilioConfigured } from "../services/sms.js";
-import { availableForBrand } from "../services/phones.js";
+import { availableForBrand, resolveOutboundCallerId } from "../services/phones.js";
 import { provisionAgentForUser, canProvisionForUser } from "../services/provisioning.js";
 import {
   canSelectVoice,
@@ -586,6 +598,158 @@ router.post(
         maxDurationSeconds: await getCallDurationCap(req.user!.sub),
       }),
     });
+  }),
+);
+
+
+/* ------------------------- Outbound test call ------------------------- */
+
+/** Strip a typed number down to E.164. Vapi rejects anything else outright. */
+function toE164(raw: string): string {
+  const trimmed = (raw ?? "").trim();
+  const digits = trimmed.replace(/[^\d]/g, "");
+  if (!digits) return "";
+  // A leading "+" or "00" both mean "already international".
+  if (trimmed.startsWith("+")) return `+${digits}`;
+  if (digits.startsWith("00")) return `+${digits.slice(2)}`;
+  return `+${digits}`;
+}
+
+/** The entitlement gate shared by every call-placing route. Placing a real
+ *  outbound call spends money, so a blocked account is refused outright rather
+ *  than capped. Mirrors /test-token. */
+async function refuseIfBlocked(
+  req: express.Request,
+  res: express.Response,
+): Promise<boolean> {
+  if (isAdminRole(req.user!.role)) return false;
+  const ent = await getEntitlement(req.user!.sub);
+  if (!ent.blocked) return false;
+  const { code, message } = entitlementError(ent);
+  res.status(403).json({ success: false, code, message });
+  return true;
+}
+
+/** Ring the customer on a real phone with their own agent.
+ *
+ *  Two things are resolved independently and must not be confused:
+ *   - WHICH AGENT answers is always this customer's own assistant (their
+ *     knowledge, prompt, voice and tools), whoever owns the line.
+ *   - WHICH NUMBER it calls from is their own number if they hold one, else
+ *     their brand's caller ID, else the platform's — see resolveOutboundCallerId.
+ *
+ *  `assistantId` + `assistantOverrides` (rather than a transient assistant) is
+ *  what lets the end-of-call webhook find the owner and log the call, bill the
+ *  minutes and send the summary, exactly as a real inbound call does — while an
+ *  unsaved AI-Brain draft is still heard on this one call. */
+router.post(
+  "/test-call",
+  requireAuth,
+  requireCustomerAccount,
+  asyncHandler(async (req, res) => {
+    if (await refuseIfBlocked(req, res)) return;
+
+    const { toNumber, agentConfig: draft } = z
+      .object({ toNumber: z.string(), agentConfig: z.any().optional() })
+      .parse(req.body);
+
+    const to = toE164(toNumber);
+    if (!/^\+\d{7,15}$/.test(to))
+      throw badRequest("Enter the number to call in full international format, e.g. +61412345678.");
+
+    const from = await resolveOutboundCallerId(req.user!.sub);
+    if (!from)
+      throw badRequest(
+        "Test calls aren't available yet — no outbound number is set up. Ask your administrator to set an outbound caller ID, or activate your own number.",
+      );
+    if (toE164(from.number) === to)
+      throw badRequest("That's the number the call is placed from — enter the phone you want us to ring.");
+
+    const conversion = await getConversion(req.user!.sub);
+    const config = (
+      draft?.identity && draft?.advanced && draft?.knowledge && draft?.rules
+        ? draft
+        : conversion.agentConfig
+    ) as unknown as AgentConfig;
+
+    // Same cap a real call gets — an outbound call bills the same minutes.
+    const maxDurationSeconds = await getCallDurationCap(req.user!.sub);
+
+    // The live assistant is the attribution anchor. Create it on first use so a
+    // customer who hasn't provisioned yet can still test, gated the same way
+    // /assistant is (an unentitled account gets no live agent at all).
+    let assistantId = conversion.vapiAssistantId;
+    if (!assistantId) {
+      if (!(await canProvisionForUser(req.user!.sub, req.user!.role)))
+        throw badRequest("Your AI assistant goes live once you choose a plan.");
+      assistantId = await upsertAssistant(
+        conversion.agentConfig as unknown as AgentConfig,
+        null,
+        { ownerId: req.user!.sub, maxDurationSeconds },
+      );
+      await (await requestTenant(req)).conversion.update({
+        where: { id: conversion.id },
+        data: { vapiAssistantId: assistantId },
+      });
+    }
+
+    // What the customer hears on THIS call: the live payload rebuilt from the
+    // draft. `name`, `server` and `metadata` are dropped — they belong to the
+    // saved assistant and overriding them would detach the webhook or the owner stamp.
+    const live = await buildLiveAssistantPayload(config, {
+      ownerId: req.user!.sub,
+      maxDurationSeconds,
+    });
+    const { name: _name, server: _server, metadata: _metadata, ...assistantOverrides } = live;
+
+    const phoneNumberId = await ensureVapiPhoneNumberId(from.number);
+    const call = await createOutboundCall({
+      phoneNumberId,
+      toNumber: to,
+      assistantId,
+      assistantOverrides,
+      // Second attribution path: a call whose assistant was deleted upstream can
+      // still be traced back to its owner from the report.
+      metadata: {
+        userId: req.user!.sub,
+        brandId: req.user!.brandId ?? "",
+        testCall: "true",
+        callerIdSource: from.source,
+      },
+      name: `Test call — ${config.identity?.businessName?.trim() || req.user!.email}`,
+    });
+
+    res.json({
+      callId: call.id,
+      status: call.status,
+      from: from.number,
+      fromSource: from.source,
+      to,
+      maxDurationSeconds: maxDurationSeconds ?? null,
+    });
+  }),
+);
+
+/** Live status of a test call the caller placed, so the dialog can say "ringing"
+ *  vs "answered" vs why it ended. Scoped by the Vapi call id, which the caller
+ *  only learns from their own POST above. */
+router.get(
+  "/test-call/:callId",
+  requireAuth,
+  requireCustomerAccount,
+  asyncHandler(async (req, res) => {
+    res.json(await getCallStatus(req.params.callId));
+  }),
+);
+
+/** Hang up from the dashboard, for a caller who started the call and wants it stopped. */
+router.post(
+  "/test-call/:callId/end",
+  requireAuth,
+  requireCustomerAccount,
+  asyncHandler(async (req, res) => {
+    await endVapiCall(req.params.callId);
+    res.json({ ok: true });
   }),
 );
 

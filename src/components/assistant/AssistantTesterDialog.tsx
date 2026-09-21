@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mic, PhoneOff, Loader2, Radio, AlertCircle, CreditCard } from "lucide-react";
+import { Mic, Phone, PhoneOff, Loader2, Radio, AlertCircle, CreditCard } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAgentStore } from "@/stores/useAgentStore";
 import { useCallsStore } from "@/stores/useCallsStore";
@@ -24,7 +26,7 @@ import {
   type VapiCallHandle,
   type VapiCallState,
 } from "@/lib/vapi";
-import { api } from "@/lib/api";
+import { api, ApiError, type CallerIdSource } from "@/lib/api";
 import { env } from "@/lib/env";
 import { cn, formatDuration } from "@/lib/utils";
 import { preCallCap, tightest } from "@/lib/callCap";
@@ -44,7 +46,23 @@ export function AssistantTesterDialog() {
   const promptTemplate = useAgentStore((s) => s.promptTemplate);
   const trial = useTrialStore((s) => s.trial);
   const subscriptionStatus = useAuthStore((s) => s.user?.profile?.subscriptionStatus);
+  const savedMobile = useAuthStore((s) => s.user?.profile?.mobile ?? "");
   const navigate = useNavigate();
+
+  /** How the test call is placed. A real phone call is the default: a browser call
+   *  spends several seconds negotiating WebRTC before the agent speaks, and on some
+   *  machines the mic never opens at all. The browser path stays as a fallback for
+   *  anyone without a phone to hand, or before an outbound number is configured. */
+  const [mode, setMode] = useState<"phone" | "web">("phone");
+  const [toNumber, setToNumber] = useState("");
+  const [placing, setPlacing] = useState(false);
+  /** Vapi id of the phone call in flight — also what stops the status poll. */
+  const phoneCallIdRef = useRef<string | null>(null);
+  const [phoneFrom, setPhoneFrom] = useState<{ number: string; source: CallerIdSource } | null>(null);
+  /** Vapi's own lifecycle word (queued/ringing/in-progress/ended) — finer than
+   *  our three states, so the caller can tell "ringing" from "answered". */
+  const [phoneStage, setPhoneStage] = useState("");
+  const [phoneEndedReason, setPhoneEndedReason] = useState("");
 
   // Test calls run off the current AI Brain config, so no live assistant/number needed; only trial minutes gate them.
 
@@ -104,7 +122,10 @@ export function AssistantTesterDialog() {
       .config()
       .then((c) => setVapiKey(c.vapiPublicKey || ""))
       .catch(() => {});
-    // Warm the payload. Keyed on `open` only: re-requesting per keystroke would fire an LLM summarization per edit.
+    // Browser path only: /test-token builds the whole inline assistant, which a phone
+    // call never uses (the server builds its own from the draft when the call is placed).
+    if (mode !== "web") return;
+    // Warm the payload. Keyed on `open`/`mode` only: re-requesting per keystroke would fire an LLM summarization per edit.
     setServerCapSeconds(null);
     payloadRef.current = api.agent
       .testToken(config)
@@ -114,6 +135,14 @@ export function AssistantTesterDialog() {
         return p;
       })
       .catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode]);
+
+  // Prefill the number to ring from the account's own mobile, so the common case is one click.
+  useEffect(() => {
+    if (!open) return;
+    setToNumber((n) => n || savedMobile);
+    // Keyed on `open` only — a profile edit mid-call must not rewrite what was typed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -142,9 +171,11 @@ export function AssistantTesterDialog() {
   }, [state]);
 
   // Client-side cap in case Vapi's maxDurationSeconds cutoff lags; 30s before, warn and cue the assistant to wrap up.
+  // Browser calls only: a phone call runs entirely on Vapi, which enforces the same cap and hangs up itself —
+  // cutting it here would only stop the timer, leaving the caller on a line the page no longer tracks.
   useEffect(() => {
     const cap = capSecondsRef.current;
-    if (state !== "active" || cap == null) return;
+    if (mode !== "web" || state !== "active" || cap == null) return;
     if (!warnedRef.current && cap > 60 && elapsed >= cap - 30) {
       warnedRef.current = true;
       toast.info("About 30 seconds of call time left — the assistant will wrap up.");
@@ -155,7 +186,7 @@ export function AssistantTesterDialog() {
       setState("ended");
       toast.warning("You've reached your available call minutes — the call was ended.");
     }
-  }, [elapsed, state]);
+  }, [elapsed, state, mode]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -169,7 +200,7 @@ export function AssistantTesterDialog() {
   // Save immediately with keepalive (a refresh during the old 2.5s summarize-then-create window lost the
   // call and its billed minutes), then enrich summary/recording after. Keyed on `state` only; see refs above.
   useEffect(() => {
-    if (state !== "ended" || savedRef.current) return;
+    if (mode !== "web" || state !== "ended" || savedRef.current) return;
     // Snapshot now (begin()/close() reset the refs). Any transcript bills at least 1s, rounded up to a minute server-side.
     const finalLines = linesRef.current;
     const finalElapsed = Math.max(elapsedRef.current, finalLines.length > 0 ? 1 : 0);
@@ -231,11 +262,13 @@ export function AssistantTesterDialog() {
         toast.error("Couldn't save the call");
       }
     })();
-  }, [state, config.identity.assistantName]);
+  }, [state, mode, config.identity.assistantName]);
 
   // Mid-call reload/tab close never reaches "ended", so persist what we have as a `missed` call via
   // keepalive so the minutes are still billed. `savedRef` stops it duplicating the normal save.
+  // Browser calls only — a phone call survives the page and is logged from the webhook.
   useEffect(() => {
+    if (mode !== "web") return;
     if (state !== "active" && state !== "connecting") return;
     const savePartial = () => {
       if (savedRef.current) return;
@@ -271,7 +304,106 @@ export function AssistantTesterDialog() {
       window.removeEventListener("pagehide", savePartial);
       window.removeEventListener("beforeunload", savePartial);
     };
-  }, [state, config.identity.assistantName]);
+  }, [state, mode, config.identity.assistantName]);
+
+  /** Place the call to a real handset. The server picks the number it dials FROM
+   *  (the account's own if it holds one, else its brand's, else the platform's)
+   *  and always runs THIS account's agent, so the knowledge the caller hears is
+   *  theirs whichever line it arrives on. */
+  async function beginPhone() {
+    if (trialBlocked) {
+      toast.error(blocked?.reason ?? "Your free trial has ended.");
+      return;
+    }
+    const dial = toNumber.trim();
+    if (!dial) {
+      toast.error("Enter the phone number you want us to ring.");
+      return;
+    }
+    setPlacing(true);
+    setElapsed(0);
+    setLines([]);
+    setPhoneEndedReason("");
+    setPhoneStage("queued");
+    savedRef.current = false;
+    phoneCallIdRef.current = null;
+    warnedRef.current = false;
+    applyCap(plannedCapSeconds);
+    // Only after the request is accepted, so a rejected number doesn't leave the
+    // dialog stuck on "Connecting…" with no call behind it.
+    try {
+      const started = await api.agent.testCall(dial, config);
+      phoneCallIdRef.current = started.callId;
+      setPhoneFrom({ number: started.from, source: started.fromSource });
+      applyCap(tightest(started.maxDurationSeconds, callCapSeconds));
+      setPhoneStage(started.status || "queued");
+      setState("connecting");
+    } catch (e) {
+      setState("idle");
+      toast.error(e instanceof ApiError ? e.message : "Couldn't place the call. Please try again.");
+    } finally {
+      setPlacing(false);
+    }
+  }
+
+  // Poll the call Vapi is running. It is the only view the browser has of a phone
+  // call — nothing about it happens on this page, so without the poll the dialog
+  // could not tell ringing from answered, or say why the call ended.
+  useEffect(() => {
+    if (mode !== "phone") return;
+    if (state !== "connecting" && state !== "active") return;
+    let cancelled = false;
+    const tick = async () => {
+      const id = phoneCallIdRef.current;
+      if (!id) return;
+      try {
+        const s = await api.agent.testCallStatus(id);
+        if (cancelled) return;
+        setPhoneStage(s.status);
+        if (s.status === "in-progress" || s.status === "forwarding") {
+          setState("active");
+          // Vapi's own clock wins: the local 1s timer starts when the poll first
+          // sees the call answered, which is a beat or two after it really was.
+          if (s.durationSec > 0) setElapsed(s.durationSec);
+        } else if (s.status === "ended") {
+          setPhoneEndedReason(s.endedReason);
+          if (s.durationSec > 0) setElapsed(s.durationSec);
+          setState("ended");
+        }
+      } catch {
+        /* a dropped poll is not a dropped call — try again on the next tick */
+      }
+    };
+    void tick();
+    const timer = window.setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [mode, state]);
+
+  // The call was logged, billed and summarised by the webhook while it ran; pull
+  // the fresh numbers in once it ends so the inbox and the minutes agree.
+  useEffect(() => {
+    if (mode !== "phone" || state !== "ended" || !phoneCallIdRef.current) return;
+    const id = phoneCallIdRef.current;
+    phoneCallIdRef.current = null;
+    // The end-of-call report lands a moment after the call drops.
+    const timer = window.setTimeout(() => {
+      void useCallsStore.getState().hydrate();
+      void useTrialStore.getState().hydrate();
+    }, 4000);
+    void id;
+    return () => window.clearTimeout(timer);
+  }, [mode, state]);
+
+  /** Hang up a phone call from here. The caller can also just put their handset
+   *  down — the poll sees that too. */
+  async function endPhone() {
+    const id = phoneCallIdRef.current;
+    setState("ended");
+    if (id) await api.agent.testCallEnd(id).catch(() => {});
+  }
 
   async function begin() {
     if (trialBlocked) {
@@ -337,16 +469,27 @@ export function AssistantTesterDialog() {
   }
 
   function end() {
+    if (mode === "phone") {
+      void endPhone();
+      return;
+    }
     handleRef.current?.stop();
     setState("ended");
   }
 
   function close(next: boolean) {
     if (!next && (state === "active" || state === "connecting")) {
-      // Closing mid-call must reach "ended" or the save effect never runs (no log, no minutes billed).
-      // Don't reset elapsed/lines here: clearing them in the same render would save an empty call.
-      handleRef.current?.stop();
-      setState("ended");
+      if (mode === "phone") {
+        // A phone call is NOT hung up by closing the dialog — the caller is holding a
+        // live handset. Stop watching it; the webhook still logs and bills it, and the
+        // end-effect below still refreshes the inbox.
+        setState("ended");
+      } else {
+        // Closing mid-call must reach "ended" or the save effect never runs (no log, no minutes billed).
+        // Don't reset elapsed/lines here: clearing them in the same render would save an empty call.
+        handleRef.current?.stop();
+        setState("ended");
+      }
     }
     setOpen(next);
   }
@@ -397,12 +540,44 @@ export function AssistantTesterDialog() {
   const initial = (config.identity.assistantName?.trim()?.[0] || "A").toUpperCase();
   const statusText =
     state === "connecting"
-      ? "Connecting…"
+      ? mode === "phone"
+        ? phoneStage === "ringing"
+          ? "Ringing your phone…"
+          : "Placing the call…"
+        : "Connecting…"
       : state === "active"
         ? "Call in progress"
         : state === "ended"
           ? "Call ended"
-          : "Ready to test";
+          : mode === "phone"
+            ? "Ready to call you"
+            : "Ready to test";
+
+  /** Plain-English reason a phone call ended, for the cases a caller can act on.
+   *  Vapi's own reasons are engine-speak ("customer-did-not-answer"). */
+  const endedNote = (() => {
+    if (mode !== "phone" || state !== "ended" || !phoneEndedReason) return "";
+    const r = phoneEndedReason.toLowerCase();
+    if (r.includes("did-not-answer") || r.includes("no-answer")) return "No answer — nobody picked up.";
+    if (r.includes("busy")) return "The line was busy.";
+    if (r.includes("declin") || r.includes("rejected")) return "The call was declined.";
+    if (r.includes("max-duration")) return "The call reached its time limit.";
+    if (r.includes("customer-ended")) return "You hung up.";
+    if (r.includes("assistant-ended")) return "Your assistant ended the call.";
+    if (r.includes("failed") || r.includes("error"))
+      return "The call couldn't be completed. Check the number and try again.";
+    return "";
+  })();
+
+  /** Whose line the handset showed. Worth saying out loud: it is the one thing a
+   *  test call can't show you about itself, and it's what a brand admin is checking. */
+  const fromNote =
+    phoneFrom &&
+    (phoneFrom.source === "customer"
+      ? `Called from your number, ${phoneFrom.number}.`
+      : phoneFrom.source === "brand"
+        ? `Called from your provider's number, ${phoneFrom.number} — activate your own number to call from it instead.`
+        : `Called from our shared number, ${phoneFrom.number} — activate your own number to call from it instead.`);
 
   return (
     <Dialog open={open} onOpenChange={close}>
@@ -410,7 +585,11 @@ export function AssistantTesterDialog() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Test {config.identity.assistantName || "your assistant"}
-            {hasVapiKey ? (
+            {mode === "phone" ? (
+              <Badge variant="success" className="gap-1">
+                <Phone className="size-3" /> Phone
+              </Badge>
+            ) : hasVapiKey ? (
               <Badge variant="success" className="gap-1">
                 <Radio className="size-3" /> Live
               </Badge>
@@ -419,9 +598,11 @@ export function AssistantTesterDialog() {
             )}
           </DialogTitle>
           <DialogDescription>
-            {hasVapiKey
-              ? "A real browser call using your current AI Brain config (voice + master prompt)."
-              : "Simulated call — configure the voice provider key in Admin → Settings to place a real call."}
+            {mode === "phone"
+              ? "We'll ring the number you enter and your assistant will answer — the same agent, voice and knowledge a real caller reaches."
+              : hasVapiKey
+                ? "A real browser call using your current AI Brain config (voice + master prompt)."
+                : "Simulated call — configure the voice provider key in Admin → Settings to place a real call."}
           </DialogDescription>
         </DialogHeader>
 
@@ -511,12 +692,53 @@ export function AssistantTesterDialog() {
               </div>
             ))}
           </div>
+        ) : mode === "phone" ? (
+          <div className="flex min-h-[7rem] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-warm p-3 text-center text-sm text-muted-foreground">
+            {state === "connecting" ? (
+              <span>Answer your phone — {assistantName} is calling.</span>
+            ) : state === "active" ? (
+              <span>You're on the call. Talk to {assistantName} as a customer would.</span>
+            ) : state === "ended" ? (
+              <>
+                {endedNote && <span className="font-medium text-foreground">{endedNote}</span>}
+                <span>The recording, transcript and summary land in your inbox shortly.</span>
+              </>
+            ) : (
+              <span>
+                The transcript and recording are saved to your inbox — this call is logged and billed
+                exactly like a real one.
+              </span>
+            )}
+            {fromNote && state !== "idle" && <span className="text-xs">{fromNote}</span>}
+          </div>
         ) : (
           live && (
             <div className="flex min-h-[7rem] items-center justify-center rounded-xl border border-dashed border-border bg-warm p-3 text-center text-sm text-muted-foreground">
               {state === "connecting" ? "Connecting your call…" : "Listening… start speaking 🎤"}
             </div>
           )
+        )}
+
+        {/* Number to ring. Hidden while a call is up so there is nothing to edit mid-call. */}
+        {mode === "phone" && !live && !trialBlocked && (
+          <div className="space-y-2">
+            <Label htmlFor="test-call-number">Number to call</Label>
+            <Input
+              id="test-call-number"
+              type="tel"
+              autoComplete="tel"
+              inputMode="tel"
+              placeholder="+61 412 345 678"
+              value={toNumber}
+              onChange={(e) => setToNumber(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void beginPhone();
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              Include the country code. Your own mobile is the easiest one to test with.
+            </p>
+          </div>
         )}
 
         {blocked && (
@@ -546,10 +768,39 @@ export function AssistantTesterDialog() {
             >
               <CreditCard className="size-4" /> {upgradeLabel}
             </Button>
+          ) : mode === "phone" ? (
+            <Button
+              onClick={() => void beginPhone()}
+              disabled={placing || !toNumber.trim()}
+              className="h-11 w-full gap-2 text-[15px]"
+            >
+              {placing ? <Loader2 className="size-4 animate-spin" /> : <Phone className="size-4" />}
+              {placing ? "Calling…" : state === "ended" ? "Call again" : "Call me now"}
+            </Button>
           ) : (
             <Button onClick={begin} className="h-11 w-full gap-2 text-[15px]">
               <Mic className="size-4" /> {state === "ended" ? "Call again" : "Start test call"}
             </Button>
+          )}
+
+          {/* Fallback for anyone without a phone to hand, or before an outbound number exists. */}
+          {!live && !trialBlocked && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode((m) => (m === "phone" ? "web" : "phone"));
+                setState("idle");
+                setElapsed(0);
+                setLines([]);
+                setPhoneEndedReason("");
+                setPhoneFrom(null);
+              }}
+              className="mt-2 w-full text-center text-xs text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+            >
+              {mode === "phone"
+                ? "No phone handy? Test in the browser instead"
+                : "Ring my phone instead (connects faster)"}
+            </button>
           )}
         </div>
       </DialogContent>

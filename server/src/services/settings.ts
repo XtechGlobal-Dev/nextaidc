@@ -108,6 +108,10 @@ export const INTEGRATIONS: IntegrationDef[] = [
       { key: "twilio.accountSid", label: "Account SID", secret: false, envVar: "TWILIO_ACCOUNT_SID" },
       { key: "twilio.authToken", label: "Auth Token", secret: true, envVar: "TWILIO_AUTH_TOKEN" },
       { key: "twilio.fromNumber", label: "From Number", secret: false, envVar: "TWILIO_FROM_NUMBER" },
+      // Caller ID for outbound test calls. Deliberately NOT in `required`: a brand
+      // with no outbound number still has working SMS, and its customers fall back
+      // to the platform's number.
+      { key: "twilio.outboundNumber", label: "Outbound Caller ID", secret: false, envVar: "TWILIO_OUTBOUND_NUMBER", placeholder: "number test calls are placed FROM when a customer has none of their own" },
     ],
   },
   {
