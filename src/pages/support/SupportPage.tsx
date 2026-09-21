@@ -1166,7 +1166,7 @@ function NewRequestDialog({
         </DialogHeader>
 
         <div className="space-y-4 px-6 pt-4">
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <label htmlFor="ticket-subject" className="text-sm font-medium">
               Subject <span className="text-danger">*</span>
             </label>
@@ -1180,7 +1180,7 @@ function NewRequestDialog({
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <label className="text-sm font-medium">
                 What's it about? <span className="text-danger">*</span>
               </label>
@@ -1205,7 +1205,7 @@ function NewRequestDialog({
               )}
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <label className="text-sm font-medium">Priority</label>
               <Select value={priority} onValueChange={(v) => setPriority(v as TicketPriority)}>
                 <SelectTrigger aria-label="Priority">

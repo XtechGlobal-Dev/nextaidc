@@ -324,7 +324,7 @@ export default function AdminSettingsPage() {
               {/* fields */}
               <div className="grid flex-1 gap-3 px-4 py-4 sm:grid-cols-2">
                 {integ.fields.map((f) => (
-                  <div key={f.key} className={cn("space-y-1.5", integ.fields.length === 1 && "sm:col-span-2")}>
+                  <div key={f.key} className={cn("space-y-2", integ.fields.length === 1 && "sm:col-span-2")}>
                     <Label htmlFor={f.key} className="text-xs text-muted-foreground">
                       {f.label}
                     </Label>

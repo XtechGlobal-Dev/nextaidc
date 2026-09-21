@@ -357,7 +357,7 @@ function SmsInfoRow({
       {open && (
         <div className="flex flex-col gap-3 border-t border-border/70 bg-warm/40 px-3 py-3">
           {item.custom && (
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Label htmlFor={`sms-label-${item.id}`}>Name</Label>
               <Input
                 id={`sms-label-${item.id}`}
@@ -370,7 +370,7 @@ function SmsInfoRow({
             </div>
           )}
 
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <Label htmlFor={`sms-when-${item.id}`}>Send it when</Label>
             <Input
               id={`sms-when-${item.id}`}

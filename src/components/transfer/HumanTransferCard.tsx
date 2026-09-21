@@ -388,7 +388,7 @@ function DepartmentsSection({
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="dept-name">
                 Department name <span className="text-danger">*</span>
               </Label>
@@ -409,7 +409,7 @@ function DepartmentsSection({
               />
               {errors.name && <p className="text-xs text-danger">{errors.name}</p>}
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="dept-number">
                 Phone number <span className="text-danger">*</span>
               </Label>
@@ -425,7 +425,7 @@ function DepartmentsSection({
               />
               {errors.number && <p className="text-xs text-danger">{errors.number}</p>}
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="dept-desc">Description (optional)</Label>
               <input
                 id="dept-desc"
@@ -460,7 +460,7 @@ function DepartmentsSection({
             </div>
 
             {/* Per-department end message */}
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="dept-end-msg">End message</Label>
               <textarea
                 id="dept-end-msg"

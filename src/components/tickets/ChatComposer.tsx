@@ -588,7 +588,7 @@ export function ChatComposer({
       ) : (
         <div className="p-3">
           {label && (
-            <label htmlFor={textareaId} className="mb-1.5 block text-sm font-medium text-foreground">
+            <label htmlFor={textareaId} className="mb-2 block text-sm font-medium text-foreground">
               {label} {required && <span className="text-danger">*</span>}
             </label>
           )}

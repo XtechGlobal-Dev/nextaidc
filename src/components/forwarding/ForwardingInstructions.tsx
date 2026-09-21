@@ -98,7 +98,7 @@ export default function ForwardingInstructions({
 
       {/* Country + carrier */}
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Where's your phone?
           </label>
@@ -115,7 +115,7 @@ export default function ForwardingInstructions({
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Carrier
           </label>

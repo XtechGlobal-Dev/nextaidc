@@ -128,7 +128,7 @@ export function AlertRulesPanel() {
       {adding && (
         <Card className="p-4">
           <form onSubmit={add} className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-xs">
+            <label className="flex flex-col gap-2 text-xs">
               <span className="font-medium text-muted-foreground">Provider</span>
               <select
                 value={draft.provider}
@@ -143,7 +143,7 @@ export function AlertRulesPanel() {
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-xs">
+            <label className="flex flex-col gap-2 text-xs">
               <span className="font-medium text-muted-foreground">Metric</span>
               <select
                 value={draft.metric}
@@ -157,7 +157,7 @@ export function AlertRulesPanel() {
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-xs">
+            <label className="flex flex-col gap-2 text-xs">
               <span className="font-medium text-muted-foreground">
                 {selectedMetric?.comparator === "lt" ? "Falls below" : "Rises above"}
               </span>
@@ -173,7 +173,7 @@ export function AlertRulesPanel() {
                 <span className="text-xs text-muted-foreground">{selectedMetric?.unit}</span>
               </div>
             </label>
-            <label className="flex flex-col gap-1 text-xs">
+            <label className="flex flex-col gap-2 text-xs">
               <span className="font-medium text-muted-foreground">Severity</span>
               <select
                 value={draft.severity}

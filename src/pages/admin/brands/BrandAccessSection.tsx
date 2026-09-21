@@ -48,7 +48,7 @@ export function BrandLocaleFields({ value, onChange }: Props) {
             value={value.defaultCountry || NONE}
             onValueChange={(v) => onChange({ defaultCountry: v === NONE ? "" : v })}
           >
-            <SelectTrigger id="b-country" className="mt-1.5">
+            <SelectTrigger id="b-country" className="mt-2">
               <SelectValue placeholder="Platform default" />
             </SelectTrigger>
             <SelectContent>
@@ -63,7 +63,7 @@ export function BrandLocaleFields({ value, onChange }: Props) {
         </div>
         <div>
           <Label htmlFor="b-timezone">Default timezone</Label>
-          <div className="mt-1.5">
+          <div className="mt-2">
             <SearchableSelect
               value={value.defaultTimezone}
               onChange={(defaultTimezone) => onChange({ defaultTimezone })}
@@ -119,7 +119,7 @@ export function BrandAccessSection({ value, onChange }: Props) {
   const intInput = (key: "trialDays" | "trialMinutes", label: string, unit: string) => (
     <div>
       <Label htmlFor={`b-${key}`}>{label}</Label>
-      <div className="mt-1.5 flex items-center gap-2">
+      <div className="mt-2 flex items-center gap-2">
         <Input
           id={`b-${key}`}
           type="number"
@@ -183,7 +183,7 @@ export function BrandAccessSection({ value, onChange }: Props) {
                 onChange({ cardRequired: v === NONE ? null : v === "yes" })
               }
             >
-              <SelectTrigger id="b-card" className="mt-1.5">
+              <SelectTrigger id="b-card" className="mt-2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

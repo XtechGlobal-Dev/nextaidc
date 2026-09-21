@@ -90,31 +90,31 @@ export function BookingDialog({
               <DialogDescription>Pick a time that suits you — we'll confirm by email.</DialogDescription>
             </DialogHeader>
             <form onSubmit={submit} className="space-y-3">
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="bk-name">Full name</Label>
                 <Input id="bk-name" value={form.name} onChange={set("name")} required />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="bk-email">Email</Label>
                   <Input id="bk-email" type="email" value={form.email} onChange={set("email")} required />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="bk-phone">Phone</Label>
                   <Input id="bk-phone" value={form.phone} onChange={set("phone")} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="bk-date">Preferred date</Label>
                   <Input id="bk-date" type="date" value={form.date} onChange={set("date")} />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="bk-time">Preferred time</Label>
                   <Input id="bk-time" type="time" value={form.time} onChange={set("time")} />
                 </div>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="bk-msg">Anything we should know? (optional)</Label>
                 <Textarea id="bk-msg" rows={2} value={form.message} onChange={set("message")} />
               </div>

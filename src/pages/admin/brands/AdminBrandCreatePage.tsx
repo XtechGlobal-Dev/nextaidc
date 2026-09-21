@@ -411,7 +411,7 @@ export default function AdminBrandCreatePage() {
                 </Field>
                 <div>
                   <Label className="text-sm font-medium">Preview</Label>
-                  <div className="mt-1.5 flex h-[7.5rem] flex-col items-center justify-center gap-2 rounded-xl border border-border bg-warm px-3">
+                  <div className="mt-2 flex h-[7.5rem] flex-col items-center justify-center gap-2 rounded-xl border border-border bg-warm px-3">
                     <BrandMark
                       logoUrl={logoPreview}
                       name={draft.name}
@@ -443,7 +443,7 @@ export default function AdminBrandCreatePage() {
                   <span className="ml-1 text-danger">*</span>
                 </Label>
 
-                <div className="mt-1.5 flex items-stretch">
+                <div className="mt-2 flex items-stretch">
                   <span className="inline-flex items-center rounded-l-xl border border-r-0 border-border bg-muted px-3 text-sm text-muted-foreground">
                     https://
                   </span>
@@ -498,7 +498,7 @@ export default function AdminBrandCreatePage() {
                   <span className="ml-1 font-normal text-muted-foreground">(optional)</span>
                 </Label>
 
-                <div className="mt-1.5 flex items-stretch">
+                <div className="mt-2 flex items-stretch">
                   <span className="inline-flex items-center rounded-l-xl border border-r-0 border-border bg-muted px-3 text-sm text-muted-foreground">
                     https://
                   </span>
@@ -1113,7 +1113,7 @@ function Field({
         {required && <span className="ml-1 text-danger">*</span>}
         {optional && <span className="ml-1 font-normal text-muted-foreground">(optional)</span>}
       </Label>
-      <div className="mt-1.5">{children}</div>
+      <div className="mt-2">{children}</div>
       {hint && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{hint}</p>}
     </div>
   );

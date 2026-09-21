@@ -95,7 +95,7 @@ export function TicketRatingDialog({
           </p>
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <label htmlFor="rating-note" className="text-sm font-medium">
             Add a note <span className="font-normal text-muted-foreground">(optional)</span>
           </label>

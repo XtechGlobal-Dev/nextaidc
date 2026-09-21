@@ -272,7 +272,7 @@ function NexleonPanel({
             Leads are being sent to Nexleon CRM.
           </p>
         )}
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <Label htmlFor="nexleon-url">Nexleon CRM URL</Label>
           <Input
             id="nexleon-url"
@@ -288,7 +288,7 @@ function NexleonPanel({
             </p>
           )}
         </div>
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <Label htmlFor="nexleon-form-key">Web-to-Lead Form Key</Label>
           <Input
             id="nexleon-form-key"
@@ -362,7 +362,7 @@ function ContactAdmin({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2">
         <Label htmlFor={`${idPrefix}-connect`}>Connect to admin</Label>
         <Select value={method} onValueChange={setMethod}>
           <SelectTrigger id={`${idPrefix}-connect`}>

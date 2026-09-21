@@ -482,7 +482,7 @@ export default function AdminVoiceBankPage() {
           </DialogHeader>
 
           <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="vc-title">Category name</Label>
               <Input
                 id="vc-title"

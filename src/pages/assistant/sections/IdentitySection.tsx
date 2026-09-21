@@ -314,7 +314,7 @@ export function IdentitySection() {
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="profileCountry">Country / Region</Label>
               <SearchableSelect
                 id="profileCountry"
@@ -332,7 +332,7 @@ export function IdentitySection() {
                 clearLabel="Not set"
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="profileIndustry">Industry / Niche</Label>
               <IndustryCombobox
                 id="profileIndustry"
@@ -348,7 +348,7 @@ export function IdentitySection() {
 
           {/* Blank = auto-generated and follows a rename; once the owner writes their own,
               AUTO_GREETING_RE tells `resolveGreeting` to leave it alone (no separate flag needed). */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="greetingMessage">Opening greeting</Label>
             <Input
               id="greetingMessage"
@@ -645,7 +645,7 @@ export function IdentitySection() {
               )}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="genderSwitchName">Assistant Name</Label>
             <Input
               id="genderSwitchName"

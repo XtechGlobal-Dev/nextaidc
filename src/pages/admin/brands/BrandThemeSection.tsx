@@ -251,7 +251,7 @@ function HexField({
   return (
     <div>
       <Label htmlFor={id}>{label}</Label>
-      <div className="mt-1.5 flex items-center gap-2">
+      <div className="mt-2 flex items-center gap-2">
         {/* The native swatch is the fast path; the text field is there because a
             brand guideline is handed over as a hex code, not as a colour wheel. */}
         <input

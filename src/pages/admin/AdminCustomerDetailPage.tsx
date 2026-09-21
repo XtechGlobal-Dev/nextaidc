@@ -426,7 +426,7 @@ export default function AdminCustomerDetailPage() {
           </DialogHeader>
 
           {confirm === "suspend" && (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label htmlFor="suspend-reason">Reason (optional)</Label>
               <Textarea
                 id="suspend-reason"

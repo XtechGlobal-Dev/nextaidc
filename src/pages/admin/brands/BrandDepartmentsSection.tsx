@@ -218,7 +218,7 @@ export function BrandDepartmentsSection({ brand }: { brand: { id: string; name: 
           {draft && (
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-[1fr_7rem]">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="brand-dept-name">
                     Name <span className="text-danger">*</span>
                   </Label>
@@ -231,7 +231,7 @@ export function BrandDepartmentsSection({ brand }: { brand: { id: string; name: 
                     autoFocus
                   />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="brand-dept-order">Order</Label>
                   <Input
                     id="brand-dept-order"
@@ -243,7 +243,7 @@ export function BrandDepartmentsSection({ brand }: { brand: { id: string; name: 
                   />
                 </div>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="brand-dept-desc">Description</Label>
                 <Input
                   id="brand-dept-desc"

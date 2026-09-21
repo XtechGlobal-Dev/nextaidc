@@ -95,7 +95,7 @@ export default function Step4Verify() {
             </>
           )}
         </p>
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="otp">Verification code</Label>
           <OtpInput
             id="otp"

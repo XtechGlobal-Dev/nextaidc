@@ -58,7 +58,7 @@ export function HandoffNoteDialog({
           <DialogDescription>{audience}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <label htmlFor="handoff-note" className="text-sm font-medium">
             Message <span className="font-normal text-muted-foreground">(optional)</span>
           </label>

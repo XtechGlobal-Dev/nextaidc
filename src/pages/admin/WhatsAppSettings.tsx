@@ -220,7 +220,7 @@ export function WhatsAppSettings() {
               {view.fields.map((f) => {
                 const Icon = FIELD_ICONS[f.key] ?? KeyRound;
                 return (
-                  <div key={f.key} className="space-y-1.5">
+                  <div key={f.key} className="space-y-2">
                     <Label
                       htmlFor={f.key}
                       className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"

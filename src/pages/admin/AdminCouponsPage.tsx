@@ -670,7 +670,7 @@ export default function AdminCouponsPage() {
             <section className="space-y-3">
               <SectionHeading icon={Ticket} tone="blue">Code</SectionHeading>
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="code">Code</Label>
                   <Input
                     id="code"
@@ -681,7 +681,7 @@ export default function AdminCouponsPage() {
                     className="font-mono uppercase"
                   />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="displayName">Name shown to customers</Label>
                   <Input
                     id="displayName"
@@ -696,7 +696,7 @@ export default function AdminCouponsPage() {
             <section className="space-y-3 border-t border-border pt-5">
               <SectionHeading icon={BadgePercent} tone="violet">Discount</SectionHeading>
               <div className="grid gap-4 sm:grid-cols-3">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="percentOff">% off</Label>
                   <Input
                     id="percentOff"
@@ -709,7 +709,7 @@ export default function AdminCouponsPage() {
                     placeholder="30"
                   />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="bonusMinutes">Bonus minutes</Label>
                   <Input
                     id="bonusMinutes"
@@ -721,7 +721,7 @@ export default function AdminCouponsPage() {
                     placeholder="200"
                   />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="durationCycles">Billing cycles</Label>
                   <Input
                     id="durationCycles"
@@ -743,7 +743,7 @@ export default function AdminCouponsPage() {
             <section className="space-y-3 border-t border-border pt-5">
               <SectionHeading icon={CalendarDays} tone="sky">Redemption window</SectionHeading>
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="startsAt">Redeemable from</Label>
                   <Input
                     id="startsAt"
@@ -754,7 +754,7 @@ export default function AdminCouponsPage() {
                     onChange={(e) => setForm({ ...form, startsAt: e.target.value })}
                   />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="expiresAt">
                     Redeemable until <span className="text-danger">*</span>
                   </Label>

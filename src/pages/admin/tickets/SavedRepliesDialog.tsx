@@ -194,7 +194,7 @@ export function SavedRepliesDialog({
             /* ------------------------------ Editor ---------------------------- */
             <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="grid gap-4 sm:grid-cols-[1fr_14rem]">
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label htmlFor="saved-reply-title">
                     Name <span className="text-danger">*</span>
                   </Label>
@@ -207,7 +207,7 @@ export function SavedRepliesDialog({
                     autoFocus
                   />
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Label>Offered on</Label>
                   <Select
                     value={draft.departmentId}
@@ -228,7 +228,7 @@ export function SavedRepliesDialog({
                 </div>
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label htmlFor="saved-reply-body">
                   Reply <span className="text-danger">*</span>
                 </Label>

@@ -187,7 +187,7 @@ export function RulesSection() {
 
       <Collapsible icon={<DollarSign className="size-5" />} title="Pricing Questions">
         <div className="space-y-4">
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <label className="text-sm font-medium">How should the assistant handle pricing?</label>
             <Textarea
               rows={3}

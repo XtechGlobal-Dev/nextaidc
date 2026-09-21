@@ -246,7 +246,7 @@ export default function AdminBrandDetailPage() {
           <Label htmlFor="b-name">Brand name</Label>
           <Input
             id="b-name"
-            className="mt-1.5"
+            className="mt-2"
             value={draft.name}
             onChange={(e) => patch({ name: e.target.value })}
             placeholder="Acme Voice"
@@ -260,7 +260,7 @@ export default function AdminBrandDetailPage() {
             here it is a plain read-out, never a field. */}
         <div className="sm:col-span-2">
           <Label>Address</Label>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
               {brand?.customDomain ? (
                 <>
                   <code className="rounded bg-muted px-2 py-1 font-mono text-sm">
@@ -308,7 +308,7 @@ export default function AdminBrandDetailPage() {
             where accounts are managed. */}
         <div className="sm:col-span-2">
           <Label>Owner</Label>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {brand?.owner ? (
               <>
                 <span className="flex items-center gap-1.5 text-sm">
@@ -344,7 +344,7 @@ export default function AdminBrandDetailPage() {
           <Label htmlFor="b-tagline">Tagline (optional)</Label>
           <Input
             id="b-tagline"
-            className="mt-1.5"
+            className="mt-2"
             value={draft.tagline}
             onChange={(e) => patch({ tagline: e.target.value })}
             placeholder="Never miss a call"
@@ -357,7 +357,7 @@ export default function AdminBrandDetailPage() {
           <Input
             id="b-support-email"
             type="email"
-            className="mt-1.5"
+            className="mt-2"
             value={draft.supportEmail}
             onChange={(e) => patch({ supportEmail: e.target.value })}
             placeholder="help@acmevoice.com"
@@ -368,7 +368,7 @@ export default function AdminBrandDetailPage() {
           <Label htmlFor="b-support-phone">Support phone (optional)</Label>
           <Input
             id="b-support-phone"
-            className="mt-1.5"
+            className="mt-2"
             value={draft.supportPhone}
             onChange={(e) => patch({ supportPhone: e.target.value })}
             placeholder="+61 2 8000 0000"

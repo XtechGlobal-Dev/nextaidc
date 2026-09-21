@@ -578,7 +578,7 @@ export default function AdminPhoneNumbersPage() {
           )}
 
           {canEdit && (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-2">
             <label
               htmlFor={senderNumber ? "test-to" : "sender"}
               className="text-xs font-medium text-muted-foreground"

@@ -352,7 +352,7 @@ export default function Step3Number() {
         </div>
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Select your country
         </label>

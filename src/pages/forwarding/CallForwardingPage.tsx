@@ -374,7 +374,7 @@ function LandlinePanel({ aiNumber, businessNumber }: { aiNumber: string; busines
           instead of loose controls floating on the page background. */}
       <div className="animate-rise rounded-[var(--radius-card)] border border-border bg-card p-4 shadow-[var(--shadow-soft)]">
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Where's your phone?
             </label>
@@ -393,7 +393,7 @@ function LandlinePanel({ aiNumber, businessNumber }: { aiNumber: string; busines
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Carrier
             </label>
