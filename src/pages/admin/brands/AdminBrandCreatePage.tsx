@@ -20,6 +20,7 @@ import {
   Phone,
   Save,
   Sparkles,
+  Sun,
   Upload,
   UserCog,
   Users,
@@ -43,6 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api, ApiError, type BrandFontOption, type BrandThemeCatalog, type SubscriptionPlan } from "@/lib/api";
+import { readableInk } from "@/lib/brandTheme";
 import { formatMoney } from "@/lib/currency";
 import { COUNTRIES } from "@/data/countries";
 import { listTimeZones } from "@/lib/timezone";
@@ -1227,6 +1229,8 @@ const FONT_GROUP: Record<BrandFontOption["group"], { label: string; icon: typeof
 };
 
 // Live specimen of app chrome in the chosen font + colours. Every colour comes from the draft so it repaints on any picker change.
+// Shown once per theme: customers pick their own, and a colour that reads on white can vanish on
+// the dark surface (and the reverse), so both have to be on screen while the palette is chosen.
 function TypeSpecimen({
   font,
   primary,
@@ -1236,77 +1240,117 @@ function TypeSpecimen({
   primary: string;
   accent: string;
 }) {
-  const group = FONT_GROUP[font.group];
-  const GroupIcon = group.icon;
-
   return (
     <div>
       <Label className="text-sm font-medium">Preview</Label>
-      {/* Full-bleed to the card's edges; bottom radius matches the card so there's no dead gap. */}
-      <div className="relative -mx-5 -mb-5 mt-1.5 overflow-hidden rounded-b-[var(--radius-card)] border-t border-border sm:-mx-6 sm:-mb-6">
-        {/* Colour wash — the brand's own hues, not the app's. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background: `radial-gradient(120% 140% at 100% 0%, ${primary}17 0%, transparent 55%),
-              radial-gradient(90% 120% at 0% 100%, ${accent}14 0%, transparent 60%)`,
-          }}
-        />
-        <SpecimenGlyphs primary={primary} accent={accent} font={font} />
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        Your customers choose light or dark for themselves — check the palette reads in both.
+      </p>
+      <div className="mt-2 grid gap-4 xl:grid-cols-2">
+        <SpecimenPane theme="light" font={font} primary={primary} accent={accent} />
+        <SpecimenPane theme="dark" font={font} primary={primary} accent={accent} />
+      </div>
+    </div>
+  );
+}
 
-        {/* Group badge — top-right corner, tinted with the brand's primary. */}
-        <span
-          className="absolute right-5 top-5 z-10 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold sm:right-8 sm:top-7"
-          style={{ backgroundColor: `${primary}1a`, color: primary }}
-        >
-          <GroupIcon className="size-3.5" />
-          {group.label}
-        </span>
+function SpecimenPane({
+  theme,
+  font,
+  primary,
+  accent,
+}: {
+  theme: "light" | "dark";
+  font: BrandFontOption;
+  primary: string;
+  accent: string;
+}) {
+  const group = FONT_GROUP[font.group];
+  const GroupIcon = group.icon;
+  const dark = theme === "dark";
+  const ThemeIcon = dark ? Moon : Sun;
+  // Mirror the live app's rule exactly, or the preview would lie: fills keep the brand's
+  // literal hex, anything read as text or an outline uses the re-levelled ink.
+  const primaryInk = `hsl(${readableInk(primary, theme) ?? primary})`;
+  const accentInk = `hsl(${readableInk(accent, theme) ?? accent})`;
 
-        <div className="relative z-10 px-5 py-7 sm:px-8 sm:py-8 lg:max-w-[62%]">
-          <div className="flex items-center gap-3">
-            <span
-              className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-semibold text-white shadow-sm"
-              style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
-            >
-              <span style={{ fontFamily: font.stack }}>Aa</span>
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-semibold">{font.label}</p>
-              <p className="truncate text-xs text-muted-foreground">{font.note}</p>
+  return (
+    <div>
+      {/* Caption sits OUTSIDE the island, so it stays in the admin's own theme. */}
+      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <ThemeIcon className="size-3.5" />
+        {dark ? "Dark mode" : "Light mode"}
+      </p>
+      {/* The island class repaints surfaces and text only — `primary`/`accent` stay the
+          brand's real hex on both, which is exactly what needs judging. `@container` so the
+          panel lays itself out by its OWN width, side by side or stacked. */}
+      <div className={dark ? "preview-dark" : "preview-light"}>
+        <div className="@container relative overflow-hidden rounded-[var(--radius-card)] border border-border bg-background text-foreground">
+          {/* Colour wash — the brand's own hues, not the app's. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background: `radial-gradient(120% 140% at 100% 0%, ${primary}17 0%, transparent 55%),
+                radial-gradient(90% 120% at 0% 100%, ${accent}14 0%, transparent 60%)`,
+            }}
+          />
+          {/* Ornament only where the pane is actually wide — i.e. stacked, not side by side. */}
+          <SpecimenGlyphs primary={primary} accent={accent} font={font} />
+
+          {/* Group badge — top-right corner, tinted with the brand's primary. */}
+          <span
+            className="absolute right-5 top-5 z-10 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold @lg:right-8 @lg:top-7"
+            style={{ backgroundColor: `${primary}1a`, color: primaryInk }}
+          >
+            <GroupIcon className="size-3.5" />
+            {group.label}
+          </span>
+
+          <div className="relative z-10 px-5 py-7 @lg:px-8 @lg:py-8 @2xl:max-w-[62%]">
+            <div className="flex items-center gap-3">
+              <span
+                className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-semibold text-white shadow-sm"
+                style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
+              >
+                <span style={{ fontFamily: font.stack }}>Aa</span>
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-base font-semibold">{font.label}</p>
+                <p className="truncate text-xs text-muted-foreground">{font.note}</p>
+              </div>
             </div>
-          </div>
 
-          <div className="mt-6" style={{ fontFamily: font.stack }}>
-            <p className="text-3xl font-bold leading-[1.15] tracking-tight sm:text-[2.25rem]">
-              Never miss another call
-            </p>
-            <p className="mt-2 max-w-md text-sm text-muted-foreground">
-              Body text in {font.label} — roughly the density a customer reads on the dashboard.
-            </p>
-          </div>
+            <div className="mt-6" style={{ fontFamily: font.stack }}>
+              <p className="text-2xl font-bold leading-[1.15] tracking-tight @lg:text-[2rem]">
+                Never miss another call
+              </p>
+              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+                Body text in {font.label} — roughly the density a customer reads on the dashboard.
+              </p>
+            </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-2.5">
-            <span
-              className="inline-flex h-10 items-center gap-1.5 rounded-xl px-4 text-sm font-medium text-white shadow-sm"
-              style={{ backgroundColor: primary }}
-            >
-              Primary action
-              <ArrowRight className="size-3.5" />
-            </span>
-            <span
-              className="inline-flex h-10 items-center rounded-xl border-[1.5px] bg-card px-4 text-sm font-medium"
-              style={{ borderColor: primary, color: primary }}
-            >
-              Secondary
-            </span>
-            <span
-              className="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold"
-              style={{ backgroundColor: `${accent}22`, color: accent }}
-            >
-              Accent badge
-            </span>
+            <div className="mt-6 flex flex-wrap items-center gap-2.5">
+              <span
+                className="inline-flex h-10 items-center gap-1.5 rounded-xl px-4 text-sm font-medium text-white shadow-sm"
+                style={{ backgroundColor: primary }}
+              >
+                Primary action
+                <ArrowRight className="size-3.5" />
+              </span>
+              <span
+                className="inline-flex h-10 items-center rounded-xl border-[1.5px] bg-card px-4 text-sm font-medium"
+                style={{ borderColor: primaryInk, color: primaryInk }}
+              >
+                Secondary
+              </span>
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold"
+                style={{ backgroundColor: `${accent}22`, color: accentInk }}
+              >
+                Accent badge
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -1314,7 +1358,7 @@ function TypeSpecimen({
   );
 }
 
-// Decorative "Aa" composition in brand hues. Ornamental only (aria-hidden), dropped below `lg`.
+// Decorative "Aa" composition in brand hues. Ornamental only (aria-hidden), dropped in a narrow pane.
 function SpecimenGlyphs({
   primary,
   accent,
@@ -1328,7 +1372,7 @@ function SpecimenGlyphs({
     // Inset from top/bottom, not `inset-0` — the strip's overflow-hidden hard-clipped the panel shadow at the edge.
     <div
       aria-hidden
-      className="pointer-events-none absolute inset-x-0 inset-y-8 hidden lg:block xl:inset-y-10"
+      className="pointer-events-none absolute inset-x-0 inset-y-8 hidden @2xl:block"
     >
       <div
         className="absolute -right-10 top-1/2 size-56 -translate-y-1/2 rotate-[14deg] rounded-[2rem]"

@@ -31,6 +31,9 @@
   /* Brand — blue (#2C76ED) */
   --color-primary: hsl(217 84% 55%);
   --color-primary-foreground: hsl(0 0% 100%);
+  /* The brand hue as INK (text, icons, outlines) rather than as a fill — see the
+     block under the dark overrides for why the two can't be one value. */
+  --color-primary-ink: hsl(217 84% 48%);
   --color-primary-tint: hsl(217 84% 55% / 0.12);
   --color-primary-tint-soft: hsl(217 84% 55% / 0.06);
 
@@ -107,6 +110,74 @@
   --color-chart-grid: hsl(220 14% 20%);
   --color-chart-axis: hsl(220 14% 28%);
 
+  --shadow-soft: 0 1px 2px 0 hsl(0 0% 0% / 0.2),
+    0 8px 24px -10px hsl(0 0% 0% / 0.4);
+  --shadow-panel: 0 12px 40px -8px hsl(0 0% 0% / 0.5);
+}
+
+/* --------------------------- Brand hue as ink ---------------------------- *
+ * `--color-primary` is the brand's literal colour. That is right for a FILL, where white
+ * sits on top of it, and wrong for text or an outline, which has to out-contrast the surface
+ * BEHIND it. No single value does both on two themes: Graphite (#334155) scores 9.0:1 under
+ * white button text and 1.55:1 as text on the dark card — which is how a brand's initials,
+ * links and nav labels went near-invisible in dark mode.
+ *
+ * So brandTheme.ts re-levels the hue per surface and parks both on <html> as --brand-ink-*;
+ * these rules pick whichever surface is in play, islands included. The fallbacks are the
+ * platform's own blue for when no brand is applied. */
+:root,
+.preview-light {
+  --color-primary-ink: var(--brand-ink-light, hsl(217 84% 48%));
+}
+.dark,
+.preview-dark {
+  --color-primary-ink: var(--brand-ink-dark, hsl(217 84% 62%));
+}
+
+/* Redirect the two ink utilities at the readable variant. Doing it here rather than at 350+
+ * call sites keeps `text-primary` meaning "the brand colour" everywhere — it just stops
+ * meaning "the brand colour even where nobody can read it". Fills, tints, gradients and the
+ * faded `border-primary/40` accents are deliberately untouched: they stay exactly on-brand. */
+@layer utilities {
+  .text-primary {
+    color: var(--color-primary-ink);
+  }
+  .border-primary {
+    border-color: var(--color-primary-ink);
+  }
+}
+
+/* Theme islands — a subtree painted in one theme regardless of the app's own, so a
+ * brand-creation preview can show both surfaces at once.
+ *
+ * SURFACE AND TEXT ONLY, on purpose. Brand hues (--color-primary*, --color-chart-1/2)
+ * are set inline on <html> by brandTheme.ts, and a custom property re-declared here
+ * would shadow that inline value for everything inside. Leaving them out is what lets
+ * an island show the REAL brand colour against the other surface — which is the whole
+ * point of previewing it. Keep these two blocks in step with each other and with `.dark`. */
+.preview-light {
+  color-scheme: light;
+  --color-background: hsl(210 20% 98%);
+  --color-foreground: hsl(0 0% 8%);
+  --color-muted: hsl(0 0% 96%);
+  --color-muted-foreground: hsl(0 0% 40%);
+  --color-border: hsl(0 0% 90%);
+  --color-warm: hsl(210 20% 99%);
+  --color-card: hsl(0 0% 100%);
+  --shadow-soft: 0 1px 2px 0 hsl(0 0% 0% / 0.04),
+    0 8px 24px -10px hsl(0 0% 0% / 0.1);
+  --shadow-panel: 0 12px 40px -8px hsl(0 0% 0% / 0.18);
+}
+
+.preview-dark {
+  color-scheme: dark;
+  --color-background: hsl(222 20% 10%);
+  --color-foreground: hsl(210 20% 92%);
+  --color-muted: hsl(220 14% 16%);
+  --color-muted-foreground: hsl(215 12% 58%);
+  --color-border: hsl(220 14% 20%);
+  --color-warm: hsl(222 18% 12%);
+  --color-card: hsl(222 16% 14%);
   --shadow-soft: 0 1px 2px 0 hsl(0 0% 0% / 0.2),
     0 8px 24px -10px hsl(0 0% 0% / 0.4);
   --shadow-panel: 0 12px 40px -8px hsl(0 0% 0% / 0.5);
