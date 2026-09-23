@@ -36,11 +36,13 @@ export const BRAND_SCOPED_SECTIONS = new Set([
   // Brand's own markup and the wallet it lands in; the platform owner manages these from the brand's page.
   "pricing",
   "wallet",
+  // A brand recruits and pays its own resellers; the platform owner has no programme of their own.
+  "resellers",
 ]);
 
 /** Platform-only sections, refused to everyone but the super admin (an audit log a tenant admin can read
  *  is a weak one; the voice library is the platform's catalog, attached to its plans). Resellers are NOT here:
- *  brands run their own. Mirrors server/src/lib/permissions.ts. */
+ *  they are brand-scoped above. Mirrors server/src/lib/permissions.ts. */
 export const PLATFORM_ONLY_SECTIONS = new Set(["audit", "voice_bank"]);
 
 /** Sections for the platform's own team (super admin + brand-less staff), never a brand's admin/staff.

@@ -48,6 +48,7 @@
     "hello22": "file:..",
     "jsonwebtoken": "^9.0.2",
     "libphonenumber-js": "^1.13.7",
+    "livekit-server-sdk": "^2.19.1",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.16",

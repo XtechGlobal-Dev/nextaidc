@@ -46,6 +46,17 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
   {
+    id: "livekit",
+    name: "LiveKit",
+    description: "Voice & video calls inside support tickets — point the LiveKit project's webhook at /api/webhooks/livekit on this API",
+    required: ["livekit.url", "livekit.apiKey", "livekit.apiSecret"],
+    fields: [
+      { key: "livekit.url", label: "Server URL", secret: false, envVar: "LIVEKIT_URL", placeholder: "wss://your-project.livekit.cloud" },
+      { key: "livekit.apiKey", label: "API Key", secret: true, envVar: "LIVEKIT_API_KEY" },
+      { key: "livekit.apiSecret", label: "API Secret", secret: true, envVar: "LIVEKIT_API_SECRET" },
+    ],
+  },
+  {
     id: "deepgram",
     name: "Deepgram",
     description: "Text-to-speech voice samples for the landing page, onboarding & AI-Brain preview",

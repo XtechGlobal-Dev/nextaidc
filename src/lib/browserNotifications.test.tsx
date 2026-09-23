@@ -3,10 +3,12 @@ import {
   alertPermission,
   alertState,
   alertsEnabled,
+  alertsPreferred,
   askedAlready,
   markAsked,
   requestAlertPermission,
   setAlertClickHandler,
+  setAlertsPreferred,
   showBrowserAlert,
   subscribeAlertState,
 } from "./browserNotifications";
@@ -81,11 +83,64 @@ describe("the browser's permission is the only gate", () => {
     expect(showBrowserAlert(payload)).toBe(false);
   });
 
-  it("keeps nothing of its own in storage — granting is the whole opt-in", () => {
+  it("treats granting as the opt-in — nothing of its own is stored until the viewer switches off", () => {
     browserWith("granted");
+    expect(alertsPreferred()).toBe(true);
     expect(showBrowserAlert(payload)).toBe(true);
-    // No in-app switch to fall out of step with the browser.
     expect(localStorage.length).toBe(0);
+  });
+});
+
+describe("the viewer's own switch", () => {
+  it("stops delivery when switched off, without touching the browser's permission", () => {
+    browserWith("granted");
+    setAlertsPreferred(false);
+    expect(alertPermission()).toBe("granted");
+    expect(alertsEnabled()).toBe(false);
+    // False is the signal the store falls back to an in-app toast on.
+    expect(showBrowserAlert(payload)).toBe(false);
+    expect(raised).toHaveLength(0);
+  });
+
+  it("resumes delivery when switched back on, with no second prompt", () => {
+    browserWith("granted");
+    setAlertsPreferred(false);
+    setAlertsPreferred(true);
+    expect(alertsEnabled()).toBe(true);
+    expect(showBrowserAlert(payload)).toBe(true);
+    expect(window.Notification.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it("survives a reload — the choice is remembered in this browser", () => {
+    browserWith("granted");
+    setAlertsPreferred(false);
+    expect(localStorage.getItem("notifications.browserAlerts.enabled")).toBe("0");
+    // Switching on clears the key rather than storing "1": absent means on.
+    setAlertsPreferred(true);
+    expect(localStorage.getItem("notifications.browserAlerts.enabled")).toBeNull();
+  });
+
+  it("cannot open the gate on its own — a switched-on row still needs the browser's grant", () => {
+    browserWith("default");
+    setAlertsPreferred(true);
+    expect(alertsEnabled()).toBe(false);
+    expect(showBrowserAlert(payload)).toBe(false);
+  });
+
+  it("tells every subscriber when flipped, so the panel and the page stay in step", () => {
+    browserWith("granted");
+    const panel = vi.fn();
+    const page = vi.fn();
+    const offPanel = subscribeAlertState(panel);
+    const offPage = subscribeAlertState(page);
+
+    setAlertsPreferred(false);
+    expect(panel).toHaveBeenCalledTimes(1);
+    expect(page).toHaveBeenCalledTimes(1);
+    expect(alertState()).toBe("off");
+
+    offPanel();
+    offPage();
   });
 });
 
@@ -156,6 +211,9 @@ describe("the state the footer row renders", () => {
     expect(alertState()).toBe("ask");
     browserWith("granted");
     expect(alertState()).toBe("on");
+    // Granted but switched off here: the switch shows off, and flipping it needs no new prompt.
+    setAlertsPreferred(false);
+    expect(alertState()).toBe("off");
   });
 
   it("tells every subscriber when the answer changes, so two copies can't disagree", async () => {

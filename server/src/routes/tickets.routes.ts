@@ -1,8 +1,9 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
-import { asyncHandler, badRequest, forbidden } from "../lib/http.js";
+import { asyncHandler, badRequest, forbidden, notImplemented } from "../lib/http.js";
 import { requireAuth } from "../middleware/auth.js";
+import { livekitConfigured, mintAccessToken, roomNameFor } from "../services/livekit.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 import { ticketUpload, storeTicketUpload } from "../middleware/ticketUpload.js";
 import {
@@ -38,6 +39,7 @@ import {
   notifyRequester,
   notifyTicketStaff,
   preview,
+  publishCallSignal,
   publishThreadChanged,
   publishTyping,
   rateTicket,
@@ -500,6 +502,69 @@ router.post(
   asyncHandler(async (req, res) => {
     const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, requesterOf(req));
     publishTyping(ticket, "requester", ticket.requester.fullName || "The requester");
+    res.status(204).end();
+  }),
+);
+
+const callTokenSchema = z.object({ mode: z.enum(["audio", "video"]).default("audio") });
+
+/** A join token for this ticket's call room. Side effects (the "call started" line,
+ *  ringing the team) come from LiveKit's webhook once someone actually connects. */
+router.post(
+  "/:id/call-token",
+  rateLimit({ windowMs: 60_000, max: 20 }),
+  asyncHandler(async (req, res) => {
+    if (!livekitConfigured()) throw notImplemented("Calls aren't set up yet.");
+    const { mode } = callTokenSchema.parse(req.body ?? {});
+    const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, requesterOf(req));
+    if (ticket.status === "closed") {
+      throw badRequest("This request is closed. Reopen it to start a call.");
+    }
+    const grant = await mintAccessToken({
+      roomName: roomNameFor(ticket.lane as TicketLane, ticket.brandId, ticket.id),
+      side: "requester",
+      userId: req.user!.sub,
+      name: ticket.requester.fullName || ticket.requester.email,
+      mode,
+    });
+    res.json({ ...grant, mode });
+  }),
+);
+
+/** The caller has joined an empty room: ring the team. Live push for whoever is
+ *  online, a bell for everyone else. */
+router.post(
+  "/:id/call/ring",
+  asyncHandler(async (req, res) => {
+    const { mode } = callTokenSchema.parse(req.body ?? {});
+    const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, requesterOf(req));
+    const name = ticket.requester.fullName || ticket.requester.email;
+    await publishCallSignal(req.ticketDb!, ticket, "requester", {
+      type: "call-invite",
+      mode,
+      fromName: name,
+    });
+    await notifyTicketStaff(req.ticketDb!, ticket, {
+      title: `Incoming ${mode} call`,
+      message: `${name} is calling about "${ticket.subject}".`,
+    });
+    res.status(204).end();
+  }),
+);
+
+const callEndSchema = z.object({ reason: z.enum(["hangup", "declined", "missed"]).default("hangup") });
+
+/** Hang-up / decline / no-answer: tells the other side to stop ringing or leave. */
+router.post(
+  "/:id/call/end",
+  asyncHandler(async (req, res) => {
+    const { reason } = callEndSchema.parse(req.body ?? {});
+    const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, requesterOf(req));
+    await publishCallSignal(req.ticketDb!, ticket, "requester", {
+      type: "call-ended",
+      reason,
+      fromName: ticket.requester.fullName || ticket.requester.email,
+    });
     res.status(204).end();
   }),
 );

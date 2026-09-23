@@ -624,10 +624,12 @@ describe("shouldEmailForMessage — the quiet-for-an-hour rule", () => {
 });
 
 describe("paths and previews", () => {
-  it("sends a customer to the Support page, a brand admin to their inbox, and each handler to their own inbox", () => {
+  it("sends every requester straight to their conversation, and each handler to their own inbox", () => {
     expect(requesterTicketPath("support", "t1")).toBe("/dashboard/support?ticket=t1");
-    // A brand's requests to the platform sit in its own inbox next to its customers' tickets.
-    expect(requesterTicketPath("brand", "t1")).toBe("/dashboard/admin/tickets?ticket=t1");
+    // A brand admin's request is read on the Support page too — never via their inbox, which would
+    // mount, 404 on the admin API and only then hop across (two screens flashing past). `from=inbox`
+    // is the way back.
+    expect(requesterTicketPath("brand", "t1")).toBe("/dashboard/support?ticket=t1&from=inbox");
     expect(handlerTicketPath("support", "t1")).toBe("/dashboard/admin/tickets?ticket=t1");
     expect(handlerTicketPath("brand", "t1")).toBe("/superadmin/tickets?ticket=t1");
   });

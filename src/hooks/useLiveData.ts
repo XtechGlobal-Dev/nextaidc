@@ -66,9 +66,36 @@ export function useLiveData() {
             type?: string;
             ticketId?: string;
             name?: string;
+            mode?: string;
+            fromName?: string;
+            to?: string;
+            link?: string;
+            reason?: string;
           };
           if (data?.type === "ticket-typing" && data.ticketId) {
             useLiveStore.getState().noteTyping(data.ticketId, data.name || "Someone");
+            return;
+          }
+          // A ring must be instant, and the call-started line it comes with still
+          // needs the normal refresh — so note it, then fall through.
+          if (data?.type === "call-invite" && data.ticketId && data.link) {
+            useLiveStore.getState().noteCallInvite({
+              ticketId: data.ticketId,
+              mode: data.mode === "video" ? "video" : "audio",
+              fromName: data.fromName || "Someone",
+              to: data.to === "staff" ? "staff" : "requester",
+              link: data.link,
+            });
+            return;
+          }
+          if (data?.type === "call-ended" && data.ticketId) {
+            const live = useLiveStore.getState();
+            live.clearCallInvite(data.ticketId);
+            live.noteCallEnded({
+              ticketId: data.ticketId,
+              reason: data.reason || "hangup",
+              fromName: data.fromName || "The other side",
+            });
             return;
           }
         } catch {

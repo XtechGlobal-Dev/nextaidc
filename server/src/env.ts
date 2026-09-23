@@ -37,6 +37,11 @@ const schema = z.object({
   // /c/* to this API, so the SMS shows the brand domain instead of the api host.
   // Blank → falls back to PUBLIC_API_URL (the raw API host).
   SHARE_LINK_BASE_URL: z.string().optional().default(""),
+  // LiveKit powers in-ticket voice/video calls. Env is only the fallback — the
+  // admin sets these under Settings → Integrations (services/settings.ts).
+  LIVEKIT_URL: z.string().optional().default(""),
+  LIVEKIT_API_KEY: z.string().optional().default(""),
+  LIVEKIT_API_SECRET: z.string().optional().default(""),
 
   /* ----------------------- White-label domains ------------------------ *
    *  The apex(es) whose wildcard DNS points at this deployment. A brand's

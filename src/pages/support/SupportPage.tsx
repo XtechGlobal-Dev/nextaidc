@@ -15,11 +15,14 @@ import {
   Lock,
   MoreVertical,
   Paperclip,
+  Phone,
   Plus,
   RefreshCw,
   RotateCcw,
   Search,
   Star,
+  Users,
+  Video,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -51,6 +54,8 @@ import {
 import { ChatComposer } from "@/components/tickets/ChatComposer";
 import { TicketThread } from "@/components/tickets/TicketThread";
 import { TicketRatingDialog } from "@/components/tickets/TicketRatingDialog";
+import { useCallStore } from "@/stores/useCallStore";
+import type { CallMode } from "@/lib/livekit";
 import { StarRating } from "@/components/tickets/StarRating";
 import { MailEmptyIllustration } from "@/components/tickets/TicketIllustrations";
 import {
@@ -65,6 +70,8 @@ import {
 } from "@/components/tickets/ticketUi";
 import { useOutbox } from "@/components/tickets/useOutbox";
 import { api, ApiError } from "@/lib/api";
+import { useAuthStore } from "@/stores/useAuthStore";
+import { expectedLaneInfo, expectedRequesterLane, sameLaneInfo } from "@/types/ticket";
 import { useLiveTick, useTypingIndicator } from "@/hooks/useLiveData";
 import { useActiveTicketThread } from "@/hooks/useActiveTicketThread";
 import { formatBytes } from "@/lib/ticketFiles";
@@ -100,12 +107,15 @@ function matchesFilter(t: Ticket, f: ListFilter): boolean {
   return t.status === f;
 }
 
-/** One labelled row in the details card. */
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+/** One labelled, read-only field in the details card — the same shape as the handlers' editable ones,
+ *  so the two views of a request line up. */
+function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-h-10 items-center justify-between gap-3 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="min-w-0 text-right font-medium">{children}</span>
+    <div className="space-y-2">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <div className="flex h-9 items-center rounded-lg border border-border bg-card px-3 text-sm font-medium">
+        {children}
+      </div>
     </div>
   );
 }
@@ -116,7 +126,12 @@ export default function SupportPage() {
   // The open conversation counts as seen: its notifications are read, not toasted.
   useActiveTicketThread(selectedId);
 
-  const [lane, setLane] = useState<TicketLaneInfo | null>(null);
+  const role = useAuthStore((s) => s.user?.role);
+  // Seeded from the role so the first paint already says "Platform Support" for a brand
+  // admin instead of flashing the customer wording; /lane's answer is still the truth.
+  const [lane, setLane] = useState<TicketLaneInfo | null>(() =>
+    expectedLaneInfo(expectedRequesterLane(role)),
+  );
   /** Set when the API says this account raises no requests at all (staff, or the
    *  platform owner — there is no tier above them to ask). */
   const [notForYou, setNotForYou] = useState<string | null>(null);
@@ -143,6 +158,18 @@ export default function SupportPage() {
     setSearchParams(next, { replace: true });
   }, [wantsNew, lane, searchParams, setSearchParams]);
   const [rating, setRating] = useState(false);
+  const startCall = useCallStore((s) => s.start);
+  function placeCall(mode: CallMode) {
+    if (!thread) return;
+    startCall({
+      ticketId: thread.ticket.id,
+      subject: thread.ticket.subject,
+      otherName: lane?.copy?.handlerName ?? "the team",
+      mode,
+      perspective: "requester",
+      incoming: false,
+    });
+  }
   const [togglingStatus, setTogglingStatus] = useState(false);
   const [allAttachments, setAllAttachments] = useState(false);
   /** The message the composer is quoting, if any. */
@@ -158,7 +185,7 @@ export default function SupportPage() {
   useEffect(() => {
     api.tickets
       .lane()
-      .then(setLane)
+      .then((info) => setLane((prev) => (sameLaneInfo(prev, info) ? prev : info)))
       .catch((e) => {
         setNotForYou(
           e instanceof ApiError && e.status === 403
@@ -316,6 +343,24 @@ export default function SupportPage() {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, thread]);
 
+  // Answering a ring: the incoming-call toast opens the ticket with ?answer=<mode>.
+  // Waits for THIS ticket's thread — a previously open one must not answer in its place.
+  useEffect(() => {
+    const answer = searchParams.get("answer");
+    if (!answer || !thread || thread.ticket.id !== selectedId) return;
+    startCall({
+      ticketId: thread.ticket.id,
+      subject: thread.ticket.subject,
+      otherName: lane?.copy?.handlerName ?? "the team",
+      mode: answer === "video" ? "video" : "audio",
+      perspective: "requester",
+      incoming: true,
+    });
+    const next = new URLSearchParams(searchParams);
+    next.delete("answer");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, thread, selectedId, startCall, lane]);
+
   async function toggleClosed() {
     // One click, one request: the button is disabled while this runs, and a
     // second call that slips in before React re-renders is dropped here.
@@ -419,228 +464,371 @@ export default function SupportPage() {
   }
 
   const copy = lane?.copy;
+  // A brand admin came from their inbox; a customer from their list.
+  const backLabel = lane?.lane === "brand" ? "Back to Support Tickets" : "All requests";
+  const conversation = thread ? [...thread.messages, ...outbox.messages] : [];
 
   return (
     <div>
-      <PageHeader
-        title={lane?.lane === "brand" ? "Platform request" : (copy?.requesterPage ?? "Support")}
-        subtitle={
-          openCount > 0
-            ? `${openCount} open request${openCount === 1 ? "" : "s"} with ${copy?.handlerName ?? "the team"}`
-            : `Raise a request and chat with ${copy?.handlerName ?? "the team"}`
-        }
-        actions={
-          <Button onClick={() => setComposing(true)} disabled={!lane}>
-            <Plus className="size-4" /> New request
-          </Button>
-        }
-      />
+      {/* Title and "New request" only while you're on the list. Inside a conversation
+          they're dead space above the chat — the back arrow is the way out. Same rule
+          as the handlers' inbox. */}
+      {!selectedId && (
+        <PageHeader
+          title={lane?.lane === "brand" ? "Platform request" : (copy?.requesterPage ?? "Support")}
+          subtitle={
+            openCount > 0
+              ? `${openCount} open request${openCount === 1 ? "" : "s"} with ${copy?.handlerName ?? "the team"}`
+              : `Raise a request and chat with ${copy?.handlerName ?? "the team"}`
+          }
+          actions={
+            <Button onClick={() => setComposing(true)} disabled={!lane}>
+              <Plus className="size-4" /> New request
+            </Button>
+          }
+        />
+      )}
 
       {selectedId ? (
-        /* ------------------------------ Thread ----------------------------- */
-        !thread && !loadingThread ? (
-          <Card className="flex min-h-[24rem] flex-col items-center justify-center gap-2 p-8 text-center">
-            <LifeBuoy className="size-9 text-muted-foreground/60" />
-            <p className="text-sm font-medium">Couldn't open that request</p>
-            <p className="max-w-sm text-xs text-muted-foreground">
-              It may have been removed, or merged into another of your requests.
-            </p>
-            <Button variant="outline" size="sm" className="mt-2" onClick={() => select(null)}>
-              <ArrowLeft className="size-4" /> All requests
-            </Button>
-          </Card>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <Card className="flex shrink-0 flex-wrap items-center gap-3 px-4 py-3.5 sm:flex-nowrap">
-              <button
-                type="button"
-                onClick={() => select(null)}
-                className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border text-foreground transition-colors hover:bg-muted"
-                aria-label={lane?.lane === "brand" ? "Back to Support Tickets" : "All requests"}
-                title={lane?.lane === "brand" ? "Back to Support Tickets" : "All requests"}
-              >
-                <ArrowLeft className="size-5" />
-              </button>
-              <div className="min-w-0 flex-1">
-                <h2 className="truncate text-xl font-semibold tracking-tight">
-                  {headerTicket?.subject ?? "Loading…"}
-                </h2>
-                {headerTicket && (
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
-                    <Badge variant="outline" className="rounded-full font-mono text-[11px]">
-                      #{headerTicket.number}
-                    </Badge>
+        /* ------------------------------ Thread -----------------------------
+           The same shape as the handlers' inbox (conversation left, facts right, one
+           header bar): a brand admin moves between their inbox and their own request
+           without the screen changing shape under them. */
+        <div
+          className={cn(
+            "grid gap-4 lg:items-start",
+            (thread || loadingThread) && "lg:grid-cols-[minmax(0,1fr)_19rem]",
+          )}
+        >
+          <Card className="flex h-[calc(100dvh-12rem)] min-h-[28rem] flex-col overflow-hidden">
+            {!thread && !loadingThread ? (
+              <div className="flex flex-1 flex-col items-center justify-center px-8 py-12 text-center">
+                <MailEmptyIllustration className="mb-6" />
+                <p className="text-lg font-semibold">Couldn't open that request</p>
+                <p className="mt-1.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                  It may have been removed, or merged into another of your requests.
+                </p>
+                <Button variant="outline" className="mt-4" onClick={() => select(null)}>
+                  <ArrowLeft className="size-4" /> {backLabel}
+                </Button>
+              </div>
+            ) : (
+              <>
+                <header className="border-b border-border px-4 py-3">
+                  <div className="flex items-start gap-3">
                     <button
                       type="button"
-                      onClick={() => void copyReference(headerTicket.reference)}
-                      className="font-mono text-xs hover:text-foreground"
-                      title="Copy reference"
+                      onClick={() => select(null)}
+                      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label={backLabel}
+                      title={backLabel}
                     >
-                      {headerTicket.reference}
+                      <ArrowLeft className="size-4" />
                     </button>
-                    <TicketStatusBadge status={headerTicket.status} />
-                    <TicketPriorityBadge priority={headerTicket.priority} />
-                    <span>{headerTicket.department?.name ?? "General"}</span>
-                    {/* A brand admin's escalation: which of THEIR customers'
-                        tickets it was raised from, with a way back to it. */}
-                    {headerTicket.escalatedFrom && (
-                      <Link
-                        to={`/dashboard/admin/tickets?ticket=${headerTicket.escalatedFrom.id}`}
-                        className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium hover:text-foreground"
-                        title="Raised from one of your customers' tickets — open it in your inbox"
-                      >
-                        <ArrowUpRight className="size-3" /> From #{headerTicket.escalatedFrom.number}{" "}
-                        · {headerTicket.escalatedFrom.requesterName}
-                      </Link>
-                    )}
-                    <span title={new Date(headerTicket.createdAt).toLocaleString()}>
-                      Opened {formatDate(headerTicket.createdAt)}
-                    </span>
-                  </div>
-                )}
-              </div>
-              {thread && (
-                <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="size-11 rounded-xl"
-                        aria-label="More actions"
-                      >
-                        <MoreVertical className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="min-w-[15rem] rounded-xl p-1.5">
-                      <MenuOption
-                        icon={<Copy className="size-4" />}
-                        label="Copy reference"
-                        hint={thread.ticket.reference}
-                        onSelect={() => void copyReference(thread.ticket.reference)}
-                      />
-                      {thread.ticket.rateable && (
-                        <MenuOption
-                          icon={<Star className="size-4" />}
-                          tone="bg-warning-tint text-warning"
-                          label={
-                            thread.ticket.rating === null
-                              ? "Rate this request"
-                              : "Change your rating"
-                          }
-                          hint={
-                            thread.ticket.rating === null
-                              ? "Tell the team how it went"
-                              : `You gave ${thread.ticket.rating} of 5`
-                          }
-                          onSelect={() => setRating(true)}
-                        />
+                    {headerTicket && <TicketAvatar name={headerTicket.requester.name} size="lg" />}
+                    <div className="min-w-0 flex-1">
+                      <h2 className="truncate text-base font-semibold">
+                        {headerTicket?.subject ?? "Loading…"}
+                      </h2>
+                      {headerTicket && (
+                        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <Badge variant="outline" className="font-mono text-[11px]">
+                            #{headerTicket.number}
+                          </Badge>
+                          <button
+                            type="button"
+                            onClick={() => void copyReference(headerTicket.reference)}
+                            className="font-mono hover:text-foreground"
+                            title="Copy reference"
+                          >
+                            {headerTicket.reference}
+                          </button>
+                          <TicketStatusBadge status={headerTicket.status} />
+                          <TicketPriorityBadge priority={headerTicket.priority} />
+                          <span>{headerTicket.department?.name ?? "General"}</span>
+                          {/* A brand admin's escalation: which of THEIR customers'
+                              tickets it was raised from, with a way back to it. */}
+                          {headerTicket.escalatedFrom && (
+                            <Link
+                              to={`/dashboard/admin/tickets?ticket=${headerTicket.escalatedFrom.id}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium hover:text-foreground"
+                              title="Raised from one of your customers' tickets — open it in your inbox"
+                            >
+                              <ArrowUpRight className="size-3" /> From #{headerTicket.escalatedFrom.number}{" "}
+                              · {headerTicket.escalatedFrom.requesterName}
+                            </Link>
+                          )}
+                          <span title={new Date(headerTicket.createdAt).toLocaleString()}>
+                            Opened {formatDate(headerTicket.createdAt)}
+                          </span>
+                        </div>
                       )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <Button
-                    variant={thread.ticket.status === "closed" ? "primary" : "outline"}
-                    size="lg"
-                    onClick={() => void toggleClosed()}
-                    disabled={togglingStatus}
-                    aria-busy={togglingStatus}
-                    className="h-11 min-w-[9rem] gap-2 rounded-xl"
-                  >
-                    {togglingStatus ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : thread.ticket.status === "closed" ? (
-                      <RotateCcw className="size-4" />
-                    ) : (
-                      <CheckCircle2 className="size-4" />
-                    )}
-                    {togglingStatus
-                      ? thread.ticket.status === "closed"
-                        ? "Reopening…"
-                        : "Closing…"
-                      : thread.ticket.status === "closed"
-                        ? "Reopen request"
-                        : "Close request"}
-                  </Button>
-                </div>
-              )}
-            </Card>
-
-            <div className="grid min-h-0 gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
-              {/* Details column. Below the chat on a phone — the conversation is
-                  what they came for; the facts are a scroll away. */}
-              <aside className="order-2 space-y-4 lg:order-1">
-                <Card className="p-5">
-                  <h3 className="text-base font-semibold">Request details</h3>
-                  {!thread ? (
-                    <div className="mt-3 space-y-3">
-                      {[0, 1, 2, 3, 4].map((n) => (
-                        <Skeleton key={n} className="h-6 rounded-md" />
-                      ))}
                     </div>
-                  ) : (
-                    <div className="mt-2 divide-y divide-border/60">
-                      <DetailRow label="Status">
-                        <span className="inline-flex h-8 items-center rounded-full border border-border bg-card px-3">
-                          <TicketStatusDot status={thread.ticket.status} />
+                    {thread && (
+                      <div className="flex shrink-0 items-center gap-1">
+                        {thread.ticket.status !== "closed" && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label="Start a voice call"
+                              title="Voice call"
+                              onClick={() => placeCall("audio")}
+                            >
+                              <Phone className="size-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label="Start a video call"
+                              title="Video call"
+                              onClick={() => placeCall("video")}
+                            >
+                              <Video className="size-4" />
+                            </Button>
+                          </>
+                        )}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label="More actions"
+                            >
+                              <MoreVertical className="size-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-[15rem] rounded-xl p-1.5">
+                            <MenuOption
+                              icon={<Copy className="size-4" />}
+                              label="Copy reference"
+                              hint={thread.ticket.reference}
+                              onSelect={() => void copyReference(thread.ticket.reference)}
+                            />
+                            {thread.ticket.rateable && (
+                              <MenuOption
+                                icon={<Star className="size-4" />}
+                                tone="bg-warning-tint text-warning"
+                                label={
+                                  thread.ticket.rating === null
+                                    ? "Rate this request"
+                                    : "Change your rating"
+                                }
+                                hint={
+                                  thread.ticket.rating === null
+                                    ? "Tell the team how it went"
+                                    : `You gave ${thread.ticket.rating} of 5`
+                                }
+                                onSelect={() => setRating(true)}
+                              />
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <Button
+                          variant={thread.ticket.status === "closed" ? "primary" : "outline"}
+                          size="sm"
+                          onClick={() => void toggleClosed()}
+                          disabled={togglingStatus}
+                          aria-busy={togglingStatus}
+                          className="gap-1.5"
+                        >
+                          {togglingStatus ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : thread.ticket.status === "closed" ? (
+                            <RotateCcw className="size-3.5" />
+                          ) : (
+                            <CheckCircle2 className="size-3.5" />
+                          )}
+                          {togglingStatus
+                            ? thread.ticket.status === "closed"
+                              ? "Reopening…"
+                              : "Closing…"
+                            : thread.ticket.status === "closed"
+                              ? "Reopen request"
+                              : "Close request"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </header>
+
+                {/* The call window sits over this whole column (bar, messages, composer)
+                    while a call is on for this ticket — the chat box becomes the call (see CallWindow). */}
+                <div data-call-anchor={selectedId} className="flex min-h-0 flex-1 flex-col">
+                  <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+                    <p className="text-sm font-medium">
+                      Conversation
+                      {thread && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          {conversation.length}
+                          {conversation.length === 1 ? " message" : " messages"}
                         </span>
-                      </DetailRow>
-                      <DetailRow label="Priority">
-                        <TicketPriorityBadge priority={thread.ticket.priority} className="text-sm" />
-                      </DetailRow>
-                      <DetailRow label="Department">
+                      )}
+                    </p>
+                  </div>
+
+                  <TicketThread
+                    className="min-h-0 flex-1"
+                    messages={conversation}
+                    perspective="requester"
+                    loading={loadingThread}
+                    // The second tick appears once the team has opened the thread.
+                    otherReadAt={thread?.ticket.staffReadAt}
+                    typingLabel={typingLabel}
+                    meId={thread?.ticket.requester.id}
+                    onReply={(m) => {
+                      setEditing(null);
+                      setReplyTo(m);
+                    }}
+                    onEdit={(m) => {
+                      setReplyTo(null);
+                      setEditing(m);
+                    }}
+                    onDelete={deleteMessage}
+                    onReact={reactToMessage}
+                    onRetry={outbox.retry}
+                    onDiscard={outbox.discard}
+                  />
+
+                  <ChatComposer
+                    onSend={sendReply}
+                    optimistic
+                    upload={(file, onProgress, signal) => api.tickets.upload(file, onProgress, signal)}
+                    disabled={thread?.ticket.status === "closed"}
+                    disabledReason="This request is closed. Reopen it to keep chatting."
+                    placeholder={`Reply to ${copy?.handlerName ?? "the team"}…`}
+                    replyTo={replyTo}
+                    onCancelReply={() => setReplyTo(null)}
+                    editing={editing}
+                    onCancelEdit={() => setEditing(null)}
+                    onSaveEdit={async (m, body) => {
+                      await editMessage(m, body);
+                      setEditing(null);
+                    }}
+                    onTyping={() => {
+                      if (thread) void api.tickets.typing(thread.ticket.id).catch(() => {});
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </Card>
+
+          {/* --------------------------- Request details ---------------------- */}
+          {(thread || loadingThread) && (
+            <div className="space-y-4">
+              <Card className="overflow-hidden">
+                <div className="border-b border-border px-4 py-3">
+                  <h3 className="text-sm font-semibold">Request details</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Status, priority and who's on it.
+                  </p>
+                </div>
+
+                {!thread ? (
+                  <div className="space-y-4 p-4">
+                    {[0, 1, 2, 3].map((i) => (
+                      <div key={i} className="space-y-1.5">
+                        <Skeleton className="h-3 w-16" />
+                        <Skeleton className="h-9 rounded-lg" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-4 p-4">
+                      <DetailField label="Status">
+                        <TicketStatusDot status={thread.ticket.status} />
+                      </DetailField>
+                      <DetailField label="Priority">
+                        <TicketPriorityBadge priority={thread.ticket.priority} />
+                      </DetailField>
+                      <DetailField label="Department">
                         {thread.ticket.department?.name ?? "General"}
-                      </DetailRow>
-                      <DetailRow label="Handled by">{copy?.handlerName ?? "The team"}</DetailRow>
-                      <DetailRow label="Opened">
-                        <span title={new Date(thread.ticket.createdAt).toLocaleString()}>
-                          {formatDate(thread.ticket.createdAt)}
-                        </span>
-                      </DetailRow>
+                      </DetailField>
+                      <DetailField label="Handled by">{copy?.handlerName ?? "The team"}</DetailField>
                       {thread.ticket.closedAt && (
-                        <DetailRow label="Closed">
+                        <DetailField label="Closed">
                           <span title={new Date(thread.ticket.closedAt).toLocaleString()}>
                             {formatDate(thread.ticket.closedAt)}
                           </span>
-                        </DetailRow>
+                        </DetailField>
                       )}
                     </div>
-                  )}
-                </Card>
-
-                {thread && (
-                  <Card className="p-5">
-                    <h3 className="text-base font-semibold">Your details</h3>
-                    <div className="mt-3 flex items-center gap-3">
-                      <TicketAvatar name={thread.ticket.requester.name} size="md" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {thread.ticket.requester.name}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {thread.ticket.requester.email}
-                        </p>
-                      </div>
-                    </div>
                     {/* Say it's picked up, never by WHOM — the server masks the assignee to the team label, so this line needs no name. */}
-                    {thread.ticket.assignedTo && (
-                      <p className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                        Someone from{" "}
-                        <span className="font-medium text-foreground">
-                          {copy?.handlerName ?? "the team"}
-                        </span>{" "}
-                        is looking after this.
-                      </p>
-                    )}
-                  </Card>
+                    <p className="flex items-start gap-2 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                      <Users className="mt-0.5 size-3.5 shrink-0" />
+                      <span>
+                        {thread.ticket.assignedTo ? (
+                          <>
+                            Someone from{" "}
+                            <span className="font-medium text-foreground">
+                              {copy?.handlerName ?? "the team"}
+                            </span>{" "}
+                            is looking after this.
+                          </>
+                        ) : (
+                          <>
+                            With{" "}
+                            <span className="font-medium text-foreground">
+                              {copy?.handlerName ?? "the team"}
+                            </span>{" "}
+                            — nobody has taken it yet.
+                          </>
+                        )}
+                      </span>
+                    </p>
+                  </>
                 )}
+              </Card>
 
-                {thread && attachments.length > 0 && (
-                  <Card className="p-5">
-                    <h3 className="flex items-center gap-2 text-base font-semibold">
+              {/* ---------------------------- You ---------------------------- */}
+              {thread && (
+                <Card className="overflow-hidden">
+                  <div className="border-b border-border px-4 py-3">
+                    <h3 className="text-sm font-semibold">Your details</h3>
+                  </div>
+                  <div className="flex items-center gap-3 px-4 py-3.5">
+                    <TicketAvatar name={thread.ticket.requester.name} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{thread.ticket.requester.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {thread.ticket.requester.email}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-border border-t border-border text-xs">
+                    <div className="px-4 py-2.5">
+                      <p className="text-muted-foreground">Handled by</p>
+                      <p className="mt-0.5 truncate font-medium">{copy?.handlerName ?? "The team"}</p>
+                    </div>
+                    <div className="px-4 py-2.5">
+                      <p className="text-muted-foreground">Opened</p>
+                      <p
+                        className="mt-0.5 font-medium"
+                        title={new Date(thread.ticket.createdAt).toLocaleString()}
+                      >
+                        {formatDate(thread.ticket.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* -------------------------- Attachments --------------------- */}
+              {thread && attachments.length > 0 && (
+                <Card className="overflow-hidden">
+                  <div className="border-b border-border px-4 py-3">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold">
                       <Paperclip className="size-4 text-muted-foreground" />
                       Attachments ({attachments.length})
                     </h3>
-                    <ul className="mt-3 space-y-2">
+                  </div>
+                  <div className="p-4">
+                    <ul className="space-y-2">
                       {(allAttachments
                         ? attachments
                         : attachments.slice(0, ATTACHMENTS_PREVIEW)
@@ -690,57 +878,12 @@ export default function SupportPage() {
                         )}
                       </button>
                     )}
-                  </Card>
-                )}
-              </aside>
-
-              <Card className="order-1 flex h-[70dvh] min-h-[24rem] flex-col overflow-hidden lg:order-2">
-                <TicketThread
-                  className="min-h-0 flex-1"
-                  messages={thread ? [...thread.messages, ...outbox.messages] : []}
-                  perspective="requester"
-                  loading={loadingThread}
-                  // The second tick appears once the team has opened the thread.
-                  otherReadAt={thread?.ticket.staffReadAt}
-                  typingLabel={typingLabel}
-                  meId={thread?.ticket.requester.id}
-                  onReply={(m) => {
-                    setEditing(null);
-                    setReplyTo(m);
-                  }}
-                  onEdit={(m) => {
-                    setReplyTo(null);
-                    setEditing(m);
-                  }}
-                  onDelete={deleteMessage}
-                  onReact={reactToMessage}
-                  onRetry={outbox.retry}
-                  onDiscard={outbox.discard}
-                />
-
-                <ChatComposer
-                  onSend={sendReply}
-                  optimistic
-                  upload={(file, onProgress, signal) => api.tickets.upload(file, onProgress, signal)}
-                  disabled={thread?.ticket.status === "closed"}
-                  disabledReason="This request is closed. Reopen it to keep chatting."
-                  placeholder={`Reply to ${copy?.handlerName ?? "the team"}…`}
-                  replyTo={replyTo}
-                  onCancelReply={() => setReplyTo(null)}
-                  editing={editing}
-                  onCancelEdit={() => setEditing(null)}
-                  onSaveEdit={async (m, body) => {
-                    await editMessage(m, body);
-                    setEditing(null);
-                  }}
-                  onTyping={() => {
-                    if (thread) void api.tickets.typing(thread.ticket.id).catch(() => {});
-                  }}
-                />
-              </Card>
+                  </div>
+                </Card>
+              )}
             </div>
-          </div>
-        )
+          )}
+        </div>
       ) : (
         /* ------------------------------- List ------------------------------ */
         <Card className="flex min-h-[28rem] flex-col overflow-hidden">
@@ -1074,6 +1217,7 @@ export default function SupportPage() {
           onRate={rateTicket}
         />
       )}
+
 
       {lane && (
         <NewRequestDialog

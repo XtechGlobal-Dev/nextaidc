@@ -23,6 +23,7 @@ import {
   MessageSquareText,
   MoreVertical,
   Paperclip,
+  Phone,
   Plus,
   RefreshCw,
   Search,
@@ -30,6 +31,7 @@ import {
   Trash2,
   UserRound,
   Users,
+  Video,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -58,6 +60,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChatComposer } from "@/components/tickets/ChatComposer";
 import { TicketThread } from "@/components/tickets/TicketThread";
+import { useCallStore } from "@/stores/useCallStore";
+import type { CallMode } from "@/lib/livekit";
 import { StarRating } from "@/components/tickets/StarRating";
 import {
   InboxEmptyIllustration,
@@ -94,6 +98,7 @@ import { SavedRepliesDialog } from "@/pages/admin/tickets/SavedRepliesDialog";
 import { api, ApiError, type AdminTicketListParams } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { isAdminRole, isSuperAdminRole } from "@/lib/roles";
+import { expectedHandlerLane, expectedLaneInfo, sameLaneInfo } from "@/types/ticket";
 import { adminHref } from "@/lib/onboardingRoute";
 import { useLiveTick, useTypingIndicator } from "@/hooks/useLiveData";
 import { useActiveTicketThread } from "@/hooks/useActiveTicketThread";
@@ -170,6 +175,12 @@ function isStaffFilter(value: string): boolean {
   return value !== ASSIGNED_ANY && value !== ASSIGNED_ME && value !== ASSIGNED_NONE;
 }
 
+/** The Support page for one of the brand's own requests, with the way back to this inbox. A ring
+ *  being answered (`?answer=<mode>`) rides along, or the call would be lost in the hop. */
+function ownRequestHref(id: string, answer: string | null): string {
+  return `/dashboard/support?ticket=${id}&from=inbox${answer ? `&answer=${encodeURIComponent(answer)}` : ""}`;
+}
+
 export default function AdminTicketsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("ticket");
@@ -180,6 +191,11 @@ export default function AdminTicketsPage() {
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
+  // Same for the thread loader: a ring being answered (?answer=) must survive its hop to the Support page.
+  const searchParamsRef = useRef(searchParams);
+  useEffect(() => {
+    searchParamsRef.current = searchParams;
+  }, [searchParams]);
 
   const role = useAuthStore((s) => s.user?.role);
   const meId = useAuthStore((s) => s.user?.id ?? null);
@@ -188,11 +204,15 @@ export default function AdminTicketsPage() {
   const isAdmin = isAdminRole(role);
   const liveTick = useLiveTick();
 
-  const [lane, setLane] = useState<TicketLaneInfo | null>(null);
+  const ownBrandId = useAuthStore((s) => s.user?.brandId ?? null);
+  // Seeded from the role so the first paint is already the right inbox (the super admin's
+  // "Brand Requests", not a flash of "Support Tickets"); /lane's answer is still the truth.
+  const [lane, setLane] = useState<TicketLaneInfo | null>(() =>
+    expectedLaneInfo(expectedHandlerLane(role, ownBrandId)),
+  );
   const [notForYou, setNotForYou] = useState<string | null>(null);
 
   // Admins pass everything in their lane; STAFF use `tickets.*` (brand) or `brand_tickets.*` (platform), see handlerLane.
-  // Nothing is editable until /lane answers — read-only for a beat beats a flash of the wrong buttons.
   const section = lane?.lane === "brand" ? "brand_tickets" : "tickets";
   const canEdit = isAdmin || (!!lane && hasPermission(`${section}.edit`));
   const canCreate = isAdmin || (!!lane && hasPermission(`${section}.create`));
@@ -203,6 +223,10 @@ export default function AdminTicketsPage() {
   /** A brand admin's inbox holds two kinds of conversation: their customers' tickets and their own
    *  requests to the platform. A badge tells them apart; staff only ever see the first kind. */
   const mixedInbox = lane?.lane === "support" && isAdmin;
+  /** One of the brand's OWN requests to the platform, sitting in a mixed inbox. Only that
+   *  inbox holds them: on the platform's inbox every row is lane "brand" and all of them are
+   *  the platform's to handle, so the ticket's lane alone must never decide this. */
+  const ownPlatformRequest = (t: { lane: string }) => mixedInbox && t.lane === "brand";
   const navigate = useNavigate();
 
   const [status, setStatus] = useState<StatusFilter>(DEFAULT_STATUS);
@@ -243,6 +267,7 @@ export default function AdminTicketsPage() {
   const [showDepartments, setShowDepartments] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
+  const startCall = useCallStore((s) => s.start);
   const [showEscalate, setShowEscalate] = useState(false);
   const [showSavedReplies, setShowSavedReplies] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Ticket | null>(null);
@@ -260,7 +285,7 @@ export default function AdminTicketsPage() {
   useEffect(() => {
     api.admin.tickets
       .lane()
-      .then(setLane)
+      .then((info) => setLane((prev) => (sameLaneInfo(prev, info) ? prev : info)))
       .catch((e) => {
         setNotForYou(
           e instanceof ApiError && e.status === 403
@@ -413,7 +438,7 @@ export default function AdminTicketsPage() {
       // A brand admin's own request to the platform is listed here but lives in the platform's database:
       // its conversation is read as the requester, on the Support page, with the way back to this inbox.
       if (e instanceof ApiError && e.status === 404 && lane?.lane === "support") {
-        navigate(`/dashboard/support?ticket=${id}&from=inbox`, { replace: true });
+        navigate(ownRequestHref(id, searchParamsRef.current.get("answer")), { replace: true });
         return;
       }
       toast.error(e instanceof ApiError ? e.message : "Couldn't open that request");
@@ -447,11 +472,45 @@ export default function AdminTicketsPage() {
     setAllAttachments(false);
   }, [selectedId]);
 
+  /** Who is on the other end of a call from this inbox. */
+  const callOtherName =
+    thread?.ticket.requester.name || lane?.copy?.requesterName || "the requester";
+
+  function placeCall(mode: CallMode) {
+    if (!thread) return;
+    startCall({
+      ticketId: thread.ticket.id,
+      subject: thread.ticket.subject,
+      otherName: callOtherName,
+      mode,
+      perspective: "staff",
+      incoming: false,
+    });
+  }
+
+  // Answering a ring: the incoming-call toast opens the ticket with ?answer=<mode>.
+  // Waits for THIS ticket's thread — a previously open one must not answer in its place.
+  useEffect(() => {
+    const answer = searchParams.get("answer");
+    if (!answer || !thread || thread.ticket.id !== selectedId) return;
+    startCall({
+      ticketId: thread.ticket.id,
+      subject: thread.ticket.subject,
+      otherName: callOtherName,
+      mode: answer === "video" ? "video" : "audio",
+      perspective: "staff",
+      incoming: true,
+    });
+    const next = new URLSearchParams(searchParams);
+    next.delete("answer");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, thread, selectedId, startCall, callOtherName]);
+
   function select(id: string | null) {
     // The brand's own platform requests share this list but not this inbox's tools (assignees, queues,
     // notes are the platform's): their conversation opens as the requester.
-    if (id && tickets.some((t) => t.id === id && t.lane === "brand")) {
-      navigate(`/dashboard/support?ticket=${id}&from=inbox`);
+    if (id && tickets.some((t) => t.id === id && ownPlatformRequest(t))) {
+      navigate(ownRequestHref(id, searchParams.get("answer")));
       return;
     }
     const next = new URLSearchParams(searchParams);
@@ -956,6 +1015,30 @@ export default function AdminTicketsPage() {
                     </div>
                     {headerTicket && (
                       <div className="flex shrink-0 items-center gap-1">
+                        {canEdit && thread && thread.ticket.status !== "closed" && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label="Start a voice call"
+                              title="Voice call"
+                              onClick={() => placeCall("audio")}
+                            >
+                              <Phone className="size-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
+                              aria-label="Start a video call"
+                              title="Video call"
+                              onClick={() => placeCall("video")}
+                            >
+                              <Video className="size-4" />
+                            </Button>
+                          </>
+                        )}
                         {canEdit && thread && (
                           <Button
                             variant="outline"
@@ -1031,107 +1114,111 @@ export default function AdminTicketsPage() {
                   </div>
                 </header>
 
-                <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
-                  <p className="text-sm font-medium">
-                    Conversation
-                    {thread && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        {visibleMessages.length}
-                        {messageFilter !== "all" && ` of ${allMessages.length}`}
-                        {visibleMessages.length === 1 && messageFilter === "all"
-                          ? " message"
-                          : " messages"}
-                      </span>
-                    )}
-                  </p>
-                  <Select
-                    value={messageFilter}
-                    onValueChange={(v) => setMessageFilter(v as MessageFilter)}
-                  >
-                    <SelectTrigger className="h-8 w-[10.5rem] text-xs" aria-label="Show messages">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MESSAGE_FILTERS.map((f) => (
-                        <SelectItem key={f.key} value={f.key}>
-                          {f.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {/* The call window sits over this whole column (bar, messages, composer)
+                    while a call is on for this ticket — the chat box becomes the call (see CallWindow). */}
+                <div data-call-anchor={selectedId} className="flex min-h-0 flex-1 flex-col">
+                  <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
+                    <p className="text-sm font-medium">
+                      Conversation
+                      {thread && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          {visibleMessages.length}
+                          {messageFilter !== "all" && ` of ${allMessages.length}`}
+                          {visibleMessages.length === 1 && messageFilter === "all"
+                            ? " message"
+                            : " messages"}
+                        </span>
+                      )}
+                    </p>
+                    <Select
+                      value={messageFilter}
+                      onValueChange={(v) => setMessageFilter(v as MessageFilter)}
+                    >
+                      <SelectTrigger className="h-8 w-[10.5rem] text-xs" aria-label="Show messages">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MESSAGE_FILTERS.map((f) => (
+                          <SelectItem key={f.key} value={f.key}>
+                            {f.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                <TicketThread
-                  className="min-h-0 flex-1"
-                  messages={visibleMessages}
-                  emptyHint={
-                    messageFilter === "notes"
-                      ? "No internal notes on this request yet."
-                      : messageFilter === "replies"
-                        ? "No replies yet."
-                        : undefined
-                  }
-                  perspective="staff"
-                  loading={loadingThread}
-                  // The second tick appears once the requester has opened it.
-                  otherReadAt={thread?.ticket.requesterReadAt}
-                  typingLabel={typingLabel}
-                  meId={meId}
-                  // Pulling a requester's message (a card number, a screenshot
-                  // they regret) is moderation, so it rides on `*.delete`.
-                  canModerate={canDelete}
-                  // Quoting and editing are both "the box is about that message",
-                  // so starting one ends the other.
-                  onReply={
-                    canEdit
-                      ? (m) => {
-                          setEditing(null);
-                          setReplyTo(m);
-                        }
-                      : undefined
-                  }
-                  onEdit={
-                    canEdit
-                      ? (m) => {
-                          setReplyTo(null);
-                          setEditing(m);
-                        }
-                      : undefined
-                  }
-                  onDelete={canEdit ? deleteMessage : undefined}
-                  onReact={canEdit ? reactToMessage : undefined}
-                  onRetry={outbox.retry}
-                  onDiscard={outbox.discard}
-                />
-
-                <ChatComposer
-                  onSend={sendReply}
-                  optimistic
-                  upload={(file, onProgress, signal) =>
-                    api.admin.tickets.upload(file, onProgress, signal)
-                  }
-                  disabled={!canEdit}
-                  disabledReason="Your role can view requests but not reply to them."
-                  placeholder={`Reply to the ${copy?.requesterName ?? "requester"}…`}
-                  internal={{ value: internalNote, onChange: setInternalNote }}
-                  replyTo={replyTo}
-                  onCancelReply={() => setReplyTo(null)}
-                  savedReplies={composerReplies}
-                  onManageSavedReplies={() => setShowSavedReplies(true)}
-                  editing={editing}
-                  onCancelEdit={() => setEditing(null)}
-                  onSaveEdit={async (m, body) => {
-                    await editMessage(m, body);
-                    setEditing(null);
-                  }}
-                  onTyping={() => {
-                    // An internal note isn't a conversation with the requester,
-                    // so it must not tell them someone is typing to them.
-                    if (thread && !internalNote) {
-                      void api.admin.tickets.typing(thread.ticket.id).catch(() => {});
+                  <TicketThread
+                    className="min-h-0 flex-1"
+                    messages={visibleMessages}
+                    emptyHint={
+                      messageFilter === "notes"
+                        ? "No internal notes on this request yet."
+                        : messageFilter === "replies"
+                          ? "No replies yet."
+                          : undefined
                     }
-                  }}
-                />
+                    perspective="staff"
+                    loading={loadingThread}
+                    // The second tick appears once the requester has opened it.
+                    otherReadAt={thread?.ticket.requesterReadAt}
+                    typingLabel={typingLabel}
+                    meId={meId}
+                    // Pulling a requester's message (a card number, a screenshot
+                    // they regret) is moderation, so it rides on `*.delete`.
+                    canModerate={canDelete}
+                    // Quoting and editing are both "the box is about that message",
+                    // so starting one ends the other.
+                    onReply={
+                      canEdit
+                        ? (m) => {
+                            setEditing(null);
+                            setReplyTo(m);
+                          }
+                        : undefined
+                    }
+                    onEdit={
+                      canEdit
+                        ? (m) => {
+                            setReplyTo(null);
+                            setEditing(m);
+                          }
+                        : undefined
+                    }
+                    onDelete={canEdit ? deleteMessage : undefined}
+                    onReact={canEdit ? reactToMessage : undefined}
+                    onRetry={outbox.retry}
+                    onDiscard={outbox.discard}
+                  />
+
+                  <ChatComposer
+                    onSend={sendReply}
+                    optimistic
+                    upload={(file, onProgress, signal) =>
+                      api.admin.tickets.upload(file, onProgress, signal)
+                    }
+                    disabled={!canEdit}
+                    disabledReason="Your role can view requests but not reply to them."
+                    placeholder={`Reply to the ${copy?.requesterName ?? "requester"}…`}
+                    internal={{ value: internalNote, onChange: setInternalNote }}
+                    replyTo={replyTo}
+                    onCancelReply={() => setReplyTo(null)}
+                    savedReplies={composerReplies}
+                    onManageSavedReplies={() => setShowSavedReplies(true)}
+                    editing={editing}
+                    onCancelEdit={() => setEditing(null)}
+                    onSaveEdit={async (m, body) => {
+                      await editMessage(m, body);
+                      setEditing(null);
+                    }}
+                    onTyping={() => {
+                      // An internal note isn't a conversation with the requester,
+                      // so it must not tell them someone is typing to them.
+                      if (thread && !internalNote) {
+                        void api.admin.tickets.typing(thread.ticket.id).catch(() => {});
+                      }
+                    }}
+                  />
+                </div>
               </>
             )}
           </Card>
@@ -1758,7 +1845,7 @@ export default function AdminTicketsPage() {
                                   {t.requester.name}
                                 </p>
                               </div>
-                            ) : t.lane === "brand" ? (
+                            ) : ownPlatformRequest(t) ? (
                               // The brand's own request: the other side is the platform, and only that
                               // — never the person answering there.
                               <div className="min-w-0">
@@ -1997,7 +2084,7 @@ export default function AdminTicketsPage() {
                         onClick={() => select(t.id)}
                         className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted/60"
                       >
-                        <TicketAvatar name={t.lane === "brand" ? "Platform" : t.requester.name} className="mt-0.5" />
+                        <TicketAvatar name={ownPlatformRequest(t) ? "Platform" : t.requester.name} className="mt-0.5" />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
                             <p
@@ -2015,7 +2102,7 @@ export default function AdminTicketsPage() {
                           </div>
                           <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                             {showBrandColumn && t.brand ? `${t.brand.name} · ` : ""}
-                            {t.lane === "brand" ? "Platform" : t.requester.name} • {t.lastMessage || "No messages"}
+                            {ownPlatformRequest(t) ? "Platform" : t.requester.name} • {t.lastMessage || "No messages"}
                           </p>
                           <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             {mixedInbox && <TicketLaneBadge lane={t.lane} />}

@@ -30,6 +30,7 @@ import voicesRouter from "./voices.routes.js";
 import industriesRouter from "./industries.routes.js";
 import eventsRouter from "./events.routes.js";
 import unsubscribeRouter from "./unsubscribe.routes.js";
+import livekitWebhookRouter from "./livekitWebhook.routes.js";
 import { getEffective } from "../services/settings.js";
 import { emptyBranding, getBranding } from "../services/branding.js";
 import { getSeoScripts } from "../services/seo.js";
@@ -109,6 +110,8 @@ apiRouter.use("/google", googleRouter);
 apiRouter.use("/whatsapp", whatsappRouter);
 apiRouter.use("/chat", chatRouter);
 apiRouter.use("/billing", billingRouter);
+// LiveKit's call lifecycle callbacks. No session — the signed payload is the auth.
+apiRouter.use("/webhooks/livekit", livekitWebhookRouter);
 // Super-admin only: white-label brands (tenants). Its own prefix, not /admin,
 // so the boundary is visible in the URL as well as in the middleware.
 apiRouter.use("/super", brandsRouter);
