@@ -21,6 +21,7 @@ import {
   Briefcase,
   Volume2,
   CalendarDays,
+  Video,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -57,6 +58,7 @@ import { WhatsAppSettings } from "./WhatsAppSettings";
 // identical green keys. Colour is a design-token CSS var; the tile tints it softly.
 const INTEGRATION_META: Record<string, { icon: LucideIcon; color: string }> = {
   vapi: { icon: Phone, color: "var(--color-step-2)" },
+  livekit: { icon: Video, color: "var(--color-step-1)" },
   deepgram: { icon: AudioLines, color: "var(--color-step-5)" },
   elevenlabs: { icon: Volume2, color: "var(--color-step-6)" },
   openai: { icon: Sparkles, color: "var(--color-step-3)" },

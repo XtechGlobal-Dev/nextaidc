@@ -527,10 +527,13 @@ describe("brand-scoped admin sections are closed to the super admin", () => {
   });
 
   // A tenant's own customer base — the brand admin runs it; the platform owner doesn't browse it.
+  // The reseller programme (and its commission ledger) is the brand's too.
   const BRAND_SECTIONS = [
     "/api/admin/overview",
     "/api/admin/customers",
     "/api/admin/subscriptions",
+    "/api/admin/resellers",
+    "/api/admin/commissions",
   ];
 
   it("refuses them to the super admin", async () => {
@@ -622,7 +625,7 @@ describe("platform-only admin sections", () => {
   });
 
   // Audit log is platform-only — one a tenant admin can read is a weak audit log. Resellers moved
-  // out: a brand runs its own programme, with tenantScope inside the handlers as the wall.
+  // brand-scoped: the super admin is refused them outright (tested with the other brand sections above).
   const PLATFORM_APIS = ["/api/admin/audit", "/api/admin/voice-categories"];
 
   it("refuses them to a brand admin", async () => {

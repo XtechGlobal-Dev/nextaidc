@@ -79,11 +79,13 @@ export const BRAND_SCOPED_SECTIONS = new Set([
   // Brand markup and its wallet — the platform owner manages these from the brand's page.
   "pricing",
   "wallet",
+  // A brand recruits and pays its own resellers; the platform owner has no programme of their own.
+  "resellers",
 ]);
 
 /** Refused to everyone but the SUPER_ADMIN — an audit log a tenant admin can read is a weak audit log, and
  *  the voice library is one platform-wide catalog attached to the platform's plans, not a brand's to curate.
- *  Resellers moved out: each brand runs its own programme, tenant-scoped on the routes. */
+ *  Resellers are brand-scoped above: each brand runs its own programme. */
 export const PLATFORM_ONLY_SECTIONS = new Set(["audit", "voice_bank"]);
 
 /** Worked by the platform's own team (no brand). Brand admins are refused outright; staff need no

@@ -51,6 +51,7 @@ import {
   voiceGenderResolved,
 } from "../services/voices.js";
 import { isAdminRole } from "../lib/roles.js";
+import { draftDiffersFromSaved } from "../lib/agentDraft.js";
 
 const router = express.Router();
 
@@ -615,21 +616,6 @@ function toE164(raw: string): string {
   return `+${digits}`;
 }
 
-/** The entitlement gate shared by every call-placing route. Placing a real
- *  outbound call spends money, so a blocked account is refused outright rather
- *  than capped. Mirrors /test-token. */
-async function refuseIfBlocked(
-  req: express.Request,
-  res: express.Response,
-): Promise<boolean> {
-  if (isAdminRole(req.user!.role)) return false;
-  const ent = await getEntitlement(req.user!.sub);
-  if (!ent.blocked) return false;
-  const { code, message } = entitlementError(ent);
-  res.status(403).json({ success: false, code, message });
-  return true;
-}
-
 /** Ring the customer on a real phone with their own agent.
  *
  *  Two things are resolved independently and must not be confused:
@@ -647,8 +633,6 @@ router.post(
   requireAuth,
   requireCustomerAccount,
   asyncHandler(async (req, res) => {
-    if (await refuseIfBlocked(req, res)) return;
-
     const { toNumber, agentConfig: draft } = z
       .object({ toNumber: z.string(), agentConfig: z.any().optional() })
       .parse(req.body);
@@ -657,7 +641,20 @@ router.post(
     if (!/^\+\d{7,15}$/.test(to))
       throw badRequest("Enter the number to call in full international format, e.g. +61412345678.");
 
-    const from = await resolveOutboundCallerId(req.user!.sub);
+    // Everything the call needs that doesn't depend on anything else, at once.
+    // Run in sequence these were four round-trips of dead air before dialling.
+    const [ent, from, conversion, maxDurationSeconds] = await Promise.all([
+      isAdminRole(req.user!.role) ? Promise.resolve(null) : getEntitlement(req.user!.sub),
+      resolveOutboundCallerId(req.user!.sub),
+      getConversion(req.user!.sub),
+      getCallDurationCap(req.user!.sub),
+    ]);
+
+    if (ent?.blocked) {
+      const { code, message } = entitlementError(ent);
+      res.status(403).json({ success: false, code, message });
+      return;
+    }
     if (!from)
       throw badRequest(
         "Test calls aren't available yet — no outbound number is set up. Ask your administrator to set an outbound caller ID, or activate your own number.",
@@ -665,21 +662,17 @@ router.post(
     if (toE164(from.number) === to)
       throw badRequest("That's the number the call is placed from — enter the phone you want us to ring.");
 
-    const conversion = await getConversion(req.user!.sub);
-    const config = (
-      draft?.identity && draft?.advanced && draft?.knowledge && draft?.rules
-        ? draft
-        : conversion.agentConfig
-    ) as unknown as AgentConfig;
+    // Resolving the caller ID's Vapi id is pure I/O that depends on nothing below,
+    // so start it now and collect it just before dialling.
+    const phoneNumberIdPromise = ensureVapiPhoneNumberId(from.number);
+    // Never leave it unhandled while the assistant work runs, or a Vapi hiccup
+    // becomes an unhandled rejection instead of this route's error.
+    phoneNumberIdPromise.catch(() => {});
 
-    // Same cap a real call gets — an outbound call bills the same minutes.
-    const maxDurationSeconds = await getCallDurationCap(req.user!.sub);
-
-    // The live assistant is the attribution anchor. Create it on first use so a
-    // customer who hasn't provisioned yet can still test, gated the same way
-    // /assistant is (an unentitled account gets no live agent at all).
     let assistantId = conversion.vapiAssistantId;
     if (!assistantId) {
+      // First call on this account only: there is no live agent to dial with yet.
+      // Gated exactly as /assistant is — an unentitled account gets none.
       if (!(await canProvisionForUser(req.user!.sub, req.user!.role)))
         throw badRequest("Your AI assistant goes live once you choose a plan.");
       assistantId = await upsertAssistant(
@@ -693,18 +686,43 @@ router.post(
       });
     }
 
-    // What the customer hears on THIS call: the live payload rebuilt from the
-    // draft. `name`, `server` and `metadata` are dropped — they belong to the
-    // saved assistant and overriding them would detach the webhook or the owner stamp.
-    const live = await buildLiveAssistantPayload(config, {
-      ownerId: req.user!.sub,
-      maxDurationSeconds,
-    });
-    const { name: _name, server: _server, metadata: _metadata, ...assistantOverrides } = live;
+    // THE fast path. The saved assistant already runs this exact payload — every
+    // change that affects it (agent save, booking, transfer, profile, plan) pushes
+    // a fresh one and `vapiSyncPendingAt` flags any push that failed. So unless the
+    // caller is testing an UNSAVED draft, rebuilding it would re-summarise the
+    // prompt through an LLM and re-read booking/transfer/SMS config for a result
+    // byte-identical to what Vapi already holds — seconds of silence for nothing.
+    const draftDiffers = draftDiffersFromSaved(draft, conversion.agentConfig);
+    const assistantIsCurrent = !conversion.vapiSyncPendingAt;
+    const needsOverrides = draftDiffers || !assistantIsCurrent;
 
-    const phoneNumberId = await ensureVapiPhoneNumberId(from.number);
+    // The cap is the one thing the saved assistant CAN'T be trusted on: it is
+    // stamped at provisioning time and minutes are spent after that. So it is sent
+    // on every call, even on the fast path — a partial override costs nothing.
+    const capOverride =
+      typeof maxDurationSeconds === "number" && maxDurationSeconds > 0
+        ? { maxDurationSeconds }
+        : undefined;
+
+    let assistantOverrides: Record<string, unknown> | undefined = capOverride;
+    if (needsOverrides) {
+      const config = (draftDiffers ? draft : conversion.agentConfig) as unknown as AgentConfig;
+      const live = await buildLiveAssistantPayload(config, {
+        ownerId: req.user!.sub,
+        maxDurationSeconds,
+      });
+      // `name`, `server` and `metadata` belong to the saved assistant — overriding
+      // them would detach the webhook or the owner stamp.
+      const { name: _name, server: _server, metadata: _metadata, ...rest } = live;
+      assistantOverrides = rest;
+    }
+
+    const businessName = (
+      (draftDiffers ? draft : conversion.agentConfig) as { identity?: { businessName?: string } }
+    )?.identity?.businessName?.trim();
+
     const call = await createOutboundCall({
-      phoneNumberId,
+      phoneNumberId: await phoneNumberIdPromise,
       toNumber: to,
       assistantId,
       assistantOverrides,
@@ -716,7 +734,7 @@ router.post(
         testCall: "true",
         callerIdSource: from.source,
       },
-      name: `Test call — ${config.identity?.businessName?.trim() || req.user!.email}`,
+      name: `Test call — ${businessName || req.user!.email}`,
     });
 
     res.json({
@@ -726,6 +744,60 @@ router.post(
       fromSource: from.source,
       to,
       maxDurationSeconds: maxDurationSeconds ?? null,
+      /** False when the saved assistant was dialled as-is (the fast path). */
+      usedDraft: needsOverrides,
+    });
+  }),
+);
+
+/** Everything the dialog can settle BEFORE the caller presses the button.
+ *
+ *  Called when the tester opens: it resolves the caller ID, warms the Vapi
+ *  phone-number lookup, and — when an unsaved draft is being tested — pre-builds
+ *  (and therefore caches) the compressed prompt that draft will run on. That last
+ *  one is the difference between a click that dials and a click that waits on an
+ *  LLM. Purely a warm-up: it places no call and changes nothing. */
+router.post(
+  "/test-call/preflight",
+  requireAuth,
+  requireCustomerAccount,
+  asyncHandler(async (req, res) => {
+    const draft = (req.body as { agentConfig?: unknown } | undefined)?.agentConfig;
+    const [from, conversion] = await Promise.all([
+      resolveOutboundCallerId(req.user!.sub),
+      getConversion(req.user!.sub),
+    ]);
+
+    if (!from) {
+      res.json({
+        ready: false,
+        reason:
+          "No outbound number is set up yet. Ask your administrator to set an outbound caller ID, or activate your own number.",
+        from: null,
+        fromSource: null,
+      });
+      return;
+    }
+
+    const draftDiffers = draftDiffersFromSaved(draft, conversion.agentConfig);
+
+    await Promise.all([
+      ensureVapiPhoneNumberId(from.number).catch(() => {}),
+      // Warms the prompt cache for the payload the call will build. Skipped on the
+      // fast path, where no payload is built at all.
+      draftDiffers || conversion.vapiSyncPendingAt
+        ? buildLiveAssistantPayload(
+            (draftDiffers ? draft : conversion.agentConfig) as unknown as AgentConfig,
+            { ownerId: req.user!.sub },
+          ).catch(() => undefined)
+        : Promise.resolve(undefined),
+    ]);
+
+    res.json({
+      ready: true,
+      reason: "",
+      from: from.number,
+      fromSource: from.source,
     });
   }),
 );

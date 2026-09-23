@@ -16,6 +16,8 @@ import { AssistantTesterDialog } from "@/components/assistant/AssistantTesterDia
 import { QuickSetupModal } from "@/components/quicksetup/QuickSetupModal";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { NotificationPanel } from "@/components/notifications/NotificationPanel";
+import { IncomingCallToast } from "@/components/tickets/IncomingCallToast";
+import { CallWindow } from "@/components/tickets/CallWindow";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { OnboardingTour } from "@/components/tour/OnboardingTour";
@@ -299,6 +301,8 @@ export function AppLayout() {
       {/* Notifications slide-over — one instance serves both the desktop and
           mobile bells (see NotificationPanel for why it is not inside the bell). */}
       <NotificationPanel />
+      <IncomingCallToast />
+      <CallWindow />
       {/* Customer chrome; nothing here applies to STAFF or the SUPER_ADMIN. */}
       {!platformOnly && (
         <>

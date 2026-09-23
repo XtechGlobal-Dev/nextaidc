@@ -26,7 +26,7 @@ import {
   type VapiCallHandle,
   type VapiCallState,
 } from "@/lib/vapi";
-import { api, ApiError, type CallerIdSource } from "@/lib/api";
+import { api, ApiError, type CallerIdSource, type TestCallPreflight } from "@/lib/api";
 import { env } from "@/lib/env";
 import { cn, formatDuration } from "@/lib/utils";
 import { preCallCap, tightest } from "@/lib/callCap";
@@ -44,6 +44,10 @@ export function AssistantTesterDialog() {
   const setOpen = useUiStore((s) => s.setAssistantTester);
   const config = useAgentStore((s) => s.config);
   const promptTemplate = useAgentStore((s) => s.promptTemplate);
+  /** Unsaved AI-Brain edits. The ONLY reason to send the draft with the call — the
+   *  saved assistant already runs the saved config, and rebuilding it re-summarises
+   *  the prompt through an LLM while the caller waits. */
+  const configDirty = useAgentStore((s) => s.dirty);
   const trial = useTrialStore((s) => s.trial);
   const subscriptionStatus = useAuthStore((s) => s.user?.profile?.subscriptionStatus);
   const savedMobile = useAuthStore((s) => s.user?.profile?.mobile ?? "");
@@ -63,6 +67,9 @@ export function AssistantTesterDialog() {
    *  our three states, so the caller can tell "ringing" from "answered". */
   const [phoneStage, setPhoneStage] = useState("");
   const [phoneEndedReason, setPhoneEndedReason] = useState("");
+  /** Settled while the caller is still typing their number, so pressing the button
+   *  is just the dial. Null until the warm-up answers. */
+  const [preflight, setPreflight] = useState<TestCallPreflight | null>(null);
 
   // Test calls run off the current AI Brain config, so no live assistant/number needed; only trial minutes gate them.
 
@@ -135,6 +142,24 @@ export function AssistantTesterDialog() {
         return p;
       })
       .catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode]);
+
+  // Warm the call path the moment the dialog opens: resolve the caller ID, prime
+  // the phone-number lookup and, for a dirty draft, pre-compress the prompt. All of
+  // it used to happen after the click, which is why connecting felt so slow.
+  useEffect(() => {
+    if (!open || mode !== "phone") return;
+    let active = true;
+    setPreflight(null);
+    api.agent
+      .testCallPreflight(configDirty ? config : undefined)
+      .then((p) => active && setPreflight(p))
+      .catch(() => active && setPreflight(null));
+    return () => {
+      active = false;
+    };
+    // Keyed on open/mode only: re-warming per keystroke would fire a summarization per edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode]);
 
@@ -324,6 +349,10 @@ export function AssistantTesterDialog() {
     setElapsed(0);
     setLines([]);
     setPhoneEndedReason("");
+    // Show the line it goes out on immediately — preflight already resolved it, so
+    // there is no reason to wait for the call to be accepted to say it.
+    if (preflight?.ready && preflight.from && preflight.fromSource)
+      setPhoneFrom({ number: preflight.from, source: preflight.fromSource });
     setPhoneStage("queued");
     savedRef.current = false;
     phoneCallIdRef.current = null;
@@ -332,7 +361,8 @@ export function AssistantTesterDialog() {
     // Only after the request is accepted, so a rejected number doesn't leave the
     // dialog stuck on "Connecting…" with no call behind it.
     try {
-      const started = await api.agent.testCall(dial, config);
+      // Saved config → no draft → the server dials the live assistant as-is.
+      const started = await api.agent.testCall(dial, configDirty ? config : undefined);
       phoneCallIdRef.current = started.callId;
       setPhoneFrom({ number: started.from, source: started.fromSource });
       applyCap(tightest(started.maxDurationSeconds, callCapSeconds));
@@ -375,10 +405,24 @@ export function AssistantTesterDialog() {
       }
     };
     void tick();
-    const timer = window.setInterval(tick, 2000);
+    // Ramped, not a flat 2s: the queued→ringing flip happens within a second of the
+    // POST, and a fixed 2s poll made a call that was already ringing still read
+    // "Placing the call…". Fast while that is in play, then relaxed for the rest of
+    // the call, where a 2s-stale timer costs nothing.
+    const startedAt = Date.now();
+    let timer = 0;
+    const schedule = () => {
+      const elapsedMs = Date.now() - startedAt;
+      const every = elapsedMs < 8_000 ? 400 : elapsedMs < 20_000 ? 1_000 : 2_500;
+      timer = window.setTimeout(async () => {
+        await tick();
+        if (!cancelled) schedule();
+      }, every);
+    };
+    schedule();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, [mode, state]);
 
@@ -736,8 +780,16 @@ export function AssistantTesterDialog() {
               }}
             />
             <p className="text-xs text-muted-foreground">
-              Include the country code. Your own mobile is the easiest one to test with.
+              {preflight?.ready && preflight.from
+                ? `Include the country code. We'll call you from ${preflight.from}.`
+                : "Include the country code. Your own mobile is the easiest one to test with."}
             </p>
+            {preflight && !preflight.ready && (
+              <p className="flex items-start gap-1.5 text-xs text-danger">
+                <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+                {preflight.reason}
+              </p>
+            )}
           </div>
         )}
 
@@ -771,7 +823,7 @@ export function AssistantTesterDialog() {
           ) : mode === "phone" ? (
             <Button
               onClick={() => void beginPhone()}
-              disabled={placing || !toNumber.trim()}
+              disabled={placing || !toNumber.trim() || preflight?.ready === false}
               className="h-11 w-full gap-2 text-[15px]"
             >
               {placing ? <Loader2 className="size-4 animate-spin" /> : <Phone className="size-4" />}

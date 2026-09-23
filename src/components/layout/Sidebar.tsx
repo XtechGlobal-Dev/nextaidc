@@ -175,6 +175,7 @@ const ADMIN_NAV: NavItem[] = [
   // Platform-only (like Audit): one catalog attached to the platform's plans, so the super admin curates it.
   { to: "/dashboard/admin/voice-bank", label: "Voice Library", icon: Mic, permission: "voice_bank" },
   { to: "/dashboard/admin/phone-numbers", label: "Phone Numbers", icon: Phone, permission: "phone_numbers" },
+  // Brand-scoped like Pricing/Wallet: a brand runs its own reseller programme, so the super admin never sees this.
   { to: "/dashboard/admin/resellers", label: "Resellers", icon: Handshake, permission: "resellers" },
   // One API Center entry (its sections are tabs on the page). Holds provider credentials and spend,
   // so SUPER_ADMIN only; the routes enforce the same via requireSuperAdmin.

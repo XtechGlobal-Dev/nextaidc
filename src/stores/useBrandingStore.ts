@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { api, type Branding, type PublicBrand } from "@/lib/api";
 import { applyBrandTheme } from "@/lib/brandTheme";
+import { env } from "@/lib/env";
 
 interface BrandingState {
   assets: Branding;
@@ -38,6 +39,48 @@ function applyFavicon(url: string) {
   setIconLink("apple-touch-icon", url);
 }
 
+const ICON_TYPES: Record<string, string> = {
+  svg: "image/svg+xml",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  ico: "image/x-icon",
+};
+
+/** Regenerate the web-app manifest for this host. The static /manifest.json
+ *  names the platform icon; Chrome fetches whatever the manifest points at and
+ *  logs a console error when it isn't a valid image, so a branded host must
+ *  advertise the tenant's own icon (and name/colour) instead. Served as a
+ *  data: URL, which has no base — every URL in it has to be absolute. */
+function applyManifest(brand: PublicBrand | null, iconUrl: string) {
+  if (typeof document === "undefined" || !iconUrl) return;
+  let icon: string;
+  try {
+    icon = new URL(iconUrl, window.location.origin).href;
+  } catch {
+    return;
+  }
+  const ext = icon.split(/[?#]/)[0].split(".").pop()?.toLowerCase() ?? "";
+  const type = ICON_TYPES[ext];
+  const name = brand?.name || env.appName;
+  const themeColor = brand?.theme?.primaryColor || "#2C76ED";
+  const manifest = {
+    name: brand?.tagline ? `${name} — ${brand.tagline}` : name,
+    short_name: name,
+    start_url: `${window.location.origin}/dashboard`,
+    display: "standalone",
+    background_color: "#f5f7fa",
+    theme_color: themeColor,
+    icons: [{ src: icon, sizes: "any", ...(type ? { type } : {}) }],
+  };
+  setIconLink(
+    "manifest",
+    `data:application/manifest+json,${encodeURIComponent(JSON.stringify(manifest))}`,
+  );
+}
+
 /** Put the brand's name in the tab title, so a tenant's app doesn't announce
  *  the platform. No-op on the platform's own domain. */
 function applyBrandTitle(brand: PublicBrand | null) {
@@ -60,6 +103,7 @@ export const useBrandingStore = create<BrandingState>()(
           set({ assets, brand, loaded: true });
           // Brand favicon wins over the platform one on a branded host.
           applyFavicon(brand?.faviconUrl || assets.favicon);
+          applyManifest(brand, brand?.faviconUrl || assets.favicon);
           applyBrandTheme(brand);
           applyBrandTitle(brand);
         } catch {
@@ -74,6 +118,7 @@ export const useBrandingStore = create<BrandingState>()(
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         applyFavicon(state.brand?.faviconUrl || state.assets.favicon);
+        applyManifest(state.brand, state.brand?.faviconUrl || state.assets.favicon);
         applyBrandTheme(state.brand);
         applyBrandTitle(state.brand);
       },

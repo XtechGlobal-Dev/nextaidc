@@ -725,11 +725,21 @@ export function preview(body: string, hadAttachments = false, max = 300): string
 
 /* --------------------------------- URLs ---------------------------------- */
 
-/** Where the requester reads their ticket. A customer has the Support page; a brand admin's requests to the
- *  platform sit in their own inbox next to their customers' tickets, so the link lands there and the inbox
- *  opens the conversation. */
+/** Where the requester reads their ticket: their own conversation page, straight away. A brand admin's
+ *  requests to the platform are LISTED in their inbox next to their customers' tickets, but the conversation
+ *  itself is read as the requester on the Support page — linking to the inbox first meant the inbox mounted,
+ *  asked the admin API, got a 404 and only then hopped to the Support page: two screens flashing past.
+ *  `from=inbox` keeps the way back to the inbox. */
 export function requesterTicketPath(lane: TicketLane, ticketId: string): string {
-  return lane === "brand" ? `/dashboard/admin/tickets?ticket=${ticketId}` : `/dashboard/support?ticket=${ticketId}`;
+  return lane === "brand"
+    ? `/dashboard/support?ticket=${ticketId}&from=inbox`
+    : `/dashboard/support?ticket=${ticketId}`;
+}
+
+/** Where a ring is answered: the same conversation page. Kept as its own name because a ring must
+ *  never take the inbox detour (it drops the `?answer=` the toast adds, and the caller keeps ringing). */
+export function requesterCallPath(lane: TicketLane, ticketId: string): string {
+  return requesterTicketPath(lane, ticketId);
 }
 
 /** Handler inbox path — brand admins at /dashboard/admin, the platform owner at /superadmin. */
@@ -1042,6 +1052,37 @@ export function publishTyping(
   const event = { type: "ticket-typing", ticketId: ticket.id, from, name };
   if (from === "staff") publishToUser(ticket.requesterId, event);
   else publishToAdmins(event);
+}
+
+/** Call signalling (ring, hang-up, decline) to the other side. Carries the link the
+ *  receiver should open, since a ring can arrive on any page. Best-effort like typing.
+ *  Aimed at the people who can actually take the ticket — NOT the shared admin channel,
+ *  which would ring every admin of every brand, including a brand admin ringing the
+ *  platform about their own request. */
+export async function publishCallSignal(
+  db: TenantClient,
+  ticket: TicketRow,
+  from: "staff" | "requester",
+  event: { type: string; [key: string]: unknown },
+): Promise<void> {
+  const lane = ticket.lane as TicketLane;
+  const payload = {
+    ...event,
+    ticketId: ticket.id,
+    from,
+    to: from === "staff" ? "requester" : "staff",
+    link: from === "staff" ? requesterCallPath(lane, ticket.id) : handlerTicketPath(lane, ticket.id),
+  };
+  if (from === "staff") {
+    publishToUser(ticket.requesterId, payload);
+    return;
+  }
+  try {
+    const { inApp } = await ticketStaffRecipients(db, ticket);
+    for (const u of inApp) if (u.id !== ticket.requesterId) publishToUser(u.id, payload);
+  } catch (err) {
+    console.warn("[tickets] call signal failed:", err instanceof Error ? err.message : err);
+  }
 }
 
 /* ------------------------------- Notifying -------------------------------- */

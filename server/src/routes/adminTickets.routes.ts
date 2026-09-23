@@ -5,8 +5,9 @@ import { Prisma } from "@prisma/tenant-client";
 import { prisma } from "../prisma.js";
 import { controlPlaneAsTenant, laneDb, type TenantClient } from "../services/tenantDb.js";
 import { brandIdsMatching, cachedBrand } from "../services/brands.js";
-import { asyncHandler, badRequest, forbidden, notFound } from "../lib/http.js";
+import { asyncHandler, badRequest, forbidden, notFound, notImplemented } from "../lib/http.js";
 import { requireAuth, requireAdminOrStaff } from "../middleware/auth.js";
+import { livekitConfigured, mintAccessToken, roomNameFor } from "../services/livekit.js";
 import { ticketUpload, storeTicketUpload } from "../middleware/ticketUpload.js";
 import { audit } from "../services/audit.js";
 import { isAdminRole, isSuperAdminRole } from "../lib/roles.js";
@@ -53,6 +54,7 @@ import {
   notifyRequester,
   notifyTicketHandoff,
   notifyTicketStaff,
+  publishCallSignal,
   publishThreadChanged,
   publishTyping,
   resolveDepartment,
@@ -1387,6 +1389,67 @@ router.post(
     assertCan(actor, "edit");
     const ticket = await loadTicketForHandler(dbOf(req), req.params.id, actor);
     publishTyping(ticket, "staff", laneCopy(actor.lane).handlerLabel);
+    res.status(204).end();
+  }),
+);
+
+const callTokenSchema = z.object({ mode: z.enum(["audio", "video"]).default("audio") });
+
+/** A join token for this ticket's call room. The "call started" line and the
+ *  requester's ring come from LiveKit's webhook once someone actually connects. */
+router.post(
+  "/:id/call-token",
+  asyncHandler(async (req, res) => {
+    if (!livekitConfigured()) throw notImplemented("Calls aren't set up yet.");
+    const { mode } = callTokenSchema.parse(req.body ?? {});
+    const actor = actorOf(req);
+    assertCan(actor, "edit");
+    const ticket = await loadTicketForHandler(dbOf(req), req.params.id, actor);
+    if (ticket.status === "closed") throw badRequest("Reopen the ticket to start a call.");
+    const grant = await mintAccessToken({
+      roomName: roomNameFor(actor.lane, ticket.brandId, ticket.id),
+      side: "staff",
+      userId: actor.id,
+      name: laneCopy(actor.lane).handlerLabel,
+      mode,
+    });
+    res.json({ ...grant, mode });
+  }),
+);
+
+/** The handler has joined an empty room: ring the requester (live push + bell). */
+router.post(
+  "/:id/call/ring",
+  asyncHandler(async (req, res) => {
+    const { mode } = callTokenSchema.parse(req.body ?? {});
+    const actor = actorOf(req);
+    assertCan(actor, "edit");
+    const ticket = await loadTicketForHandler(dbOf(req), req.params.id, actor);
+    const name = laneCopy(actor.lane).handlerLabel;
+    await publishCallSignal(dbOf(req), ticket, "staff", { type: "call-invite", mode, fromName: name });
+    await notifyRequester(ticket, {
+      title: `Incoming ${mode} call`,
+      message: `${name} is calling about "${ticket.subject}".`,
+    });
+    res.status(204).end();
+  }),
+);
+
+const callEndSchema = z.object({ reason: z.enum(["hangup", "declined", "missed"]).default("hangup") });
+
+/** Hang-up / decline / no-answer: tells the requester to stop ringing or leave. */
+router.post(
+  "/:id/call/end",
+  asyncHandler(async (req, res) => {
+    const { reason } = callEndSchema.parse(req.body ?? {});
+    const actor = actorOf(req);
+    assertCan(actor, "edit");
+    const ticket = await loadTicketForHandler(dbOf(req), req.params.id, actor);
+    await publishCallSignal(dbOf(req), ticket, "staff", {
+      type: "call-ended",
+      reason,
+      fromName: laneCopy(actor.lane).handlerLabel,
+    });
     res.status(204).end();
   }),
 );

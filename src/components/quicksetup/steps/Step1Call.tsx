@@ -12,7 +12,7 @@ import {
   type VapiCallState,
   type VapiCallHandle,
 } from "@/lib/vapi";
-import { api, ApiError, type CallerIdSource } from "@/lib/api";
+import { api, ApiError, type CallerIdSource, type TestCallPreflight } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useAgentStore } from "@/stores/useAgentStore";
 import { useCallsStore } from "@/stores/useCallsStore";
@@ -34,6 +34,8 @@ export default function Step1Call() {
   const [phoneFrom, setPhoneFrom] = useState<{ number: string; source: CallerIdSource } | null>(null);
   /** Vapi id of the phone call in flight; also what the logged call is matched on. */
   const phoneCallIdRef = useRef<string | null>(null);
+  /** Settled while the user is still typing, so the button press is just the dial. */
+  const [preflight, setPreflight] = useState<TestCallPreflight | null>(null);
   const callRef = useRef<VapiCallHandle | null>(null);
   const timerRef = useRef<number | null>(null);
   // Real conversation captured from the live call, persisted on end.
@@ -137,6 +139,22 @@ export default function Step1Call() {
   useEffect(() => {
     if (savedMobile) setToNumber((n) => n || savedMobile);
   }, [savedMobile]);
+
+  // Warm the call path while the user reads the screen: caller ID, phone-number
+  // lookup and, for an unsaved draft, the compressed prompt. Onboarding always has
+  // a draft in the store, so without this the very first call pays for all of it.
+  useEffect(() => {
+    if (mode !== "phone") return;
+    let active = true;
+    const store = useAgentStore.getState();
+    api.agent
+      .testCallPreflight(store.dirty ? store.config : undefined)
+      .then((p) => active && setPreflight(p))
+      .catch(() => active && setPreflight(null));
+    return () => {
+      active = false;
+    };
+  }, [mode]);
 
   // Clean up the call handle on unmount.
   useEffect(() => {
@@ -257,8 +275,14 @@ export default function Step1Call() {
     phoneCallIdRef.current = null;
     finalizedRef.current = false;
     startedAtRef.current = Date.now();
+    // Preflight already resolved the line, so say it now rather than after the POST.
+    if (preflight?.ready && preflight.from && preflight.fromSource)
+      setPhoneFrom({ number: preflight.from, source: preflight.fromSource });
     try {
-      const started = await api.agent.testCall(dial, useAgentStore.getState().config);
+      // Only an unsaved draft is worth sending — otherwise the server dials the live
+      // assistant as-is instead of rebuilding an identical payload.
+      const store = useAgentStore.getState();
+      const started = await api.agent.testCall(dial, store.dirty ? store.config : undefined);
       phoneCallIdRef.current = started.callId;
       setPhoneFrom({ number: started.from, source: started.fromSource });
       setPhoneStage(started.status || "queued");
@@ -295,10 +319,22 @@ export default function Step1Call() {
       }
     };
     void tick();
-    const timer = window.setInterval(tick, 2000);
+    // Ramped — see the same poll in AssistantTesterDialog. A flat 2s left the screen
+    // saying "Placing the call…" while the phone was already ringing.
+    const startedAt = Date.now();
+    let timer = 0;
+    const schedule = () => {
+      const elapsedMs = Date.now() - startedAt;
+      const every = elapsedMs < 8_000 ? 400 : elapsedMs < 20_000 ? 1_000 : 2_500;
+      timer = window.setTimeout(async () => {
+        await tick();
+        if (!cancelled) schedule();
+      }, every);
+    };
+    schedule();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, [mode, state]);
 
@@ -467,13 +503,20 @@ export default function Step1Call() {
               if (e.key === "Enter") void handlePhoneCall();
             }}
           />
-          <p className="text-xs text-muted-foreground">Include the country code.</p>
+          <p className="text-xs text-muted-foreground">
+            {preflight?.ready && preflight.from
+              ? `Include the country code. We'll call you from ${preflight.from}.`
+              : "Include the country code."}
+          </p>
+          {preflight && !preflight.ready && (
+            <p className="text-xs text-danger">{preflight.reason}</p>
+          )}
         </div>
 
         <Button
           size="lg"
           className="w-full max-w-sm gap-2"
-          disabled={placing || !toNumber.trim()}
+          disabled={placing || !toNumber.trim() || preflight?.ready === false}
           onClick={() => void handlePhoneCall()}
         >
           {placing ? <Loader2 className="size-4 animate-spin" /> : <Phone className="size-4" />}

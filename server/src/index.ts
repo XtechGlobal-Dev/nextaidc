@@ -61,10 +61,11 @@ app.use(morgan("dev"));
 // Resolve the brand from Host before routing so anonymous visitors get the brand's look and sends use its sender.
 app.use(brandContext);
 
-// Stripe + WhatsApp webhooks need the raw body for signature verification; parse JSON everywhere else.
+// Stripe, WhatsApp and LiveKit webhooks need the raw body for signature verification; parse JSON everywhere else.
 app.use((req, res, next) => {
   if (req.originalUrl === "/api/billing/webhook") return next();
   if (req.path === "/api/whatsapp/webhook") return next();
+  if (req.path === "/api/webhooks/livekit") return next();
   express.json({ limit: "2mb" })(req, res, next);
 });
 

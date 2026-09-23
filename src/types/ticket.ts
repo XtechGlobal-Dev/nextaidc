@@ -36,6 +36,58 @@ export interface TicketLaneInfo {
   copy: TicketLaneCopy;
 }
 
+/** The API's wording, mirrored ONLY so the first paint reads right before /lane answers
+ *  (a super admin otherwise sees "Support Tickets" flash before "Brand Requests"). The API's
+ *  answer replaces it; keep in step with COPY in server/src/lib/ticketLanes.ts. */
+const LANE_COPY: Record<TicketLane, TicketLaneCopy> = {
+  support: {
+    inbox: "Support Tickets",
+    requesterPage: "Support",
+    thing: "support request",
+    handlerName: "the support team",
+    handlerLabel: "Support",
+    requesterName: "customer",
+  },
+  brand: {
+    inbox: "Brand Requests",
+    requesterPage: "Platform Support",
+    thing: "platform request",
+    handlerName: "the platform team",
+    handlerLabel: "Platform",
+    requesterName: "brand",
+  },
+};
+
+type RoleLike = string | null | undefined;
+
+/** Lane this account handles, from role + tenant. Mirrors handlerLane on the server: the
+ *  super admin and brand-less staff work the platform's inbox, a brand's admin and staff
+ *  their customers'. Null for accounts that handle nothing. */
+export function expectedHandlerLane(role: RoleLike, brandId: RoleLike): TicketLane | null {
+  if (role === "SUPER_ADMIN") return "brand";
+  if (role === "ADMIN") return "support";
+  if (role === "STAFF") return brandId ? "support" : "brand";
+  return null;
+}
+
+/** Lane this account raises requests in. Mirrors requesterLane on the server: null for
+ *  staff (they ask their own admin) and the super admin (nobody above). */
+export function expectedRequesterLane(role: RoleLike): TicketLane | null {
+  if (role === "USER" || role === "RESELLER") return "support";
+  if (role === "ADMIN") return "brand";
+  return null;
+}
+
+/** A local stand-in for the /lane answer, for the first render. */
+export function expectedLaneInfo(lane: TicketLane | null): TicketLaneInfo | null {
+  return lane ? { lane, copy: LANE_COPY[lane] } : null;
+}
+
+/** Keep the seeded object when the API agrees, so effects keyed on `lane` don't fire twice. */
+export function sameLaneInfo(a: TicketLaneInfo | null, b: TicketLaneInfo): boolean {
+  return !!a && a.lane === b.lane && JSON.stringify(a.copy) === JSON.stringify(b.copy);
+}
+
 export interface TicketAttachment {
   id: string;
   name: string;

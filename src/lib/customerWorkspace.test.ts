@@ -116,8 +116,9 @@ describe("onboardingRedirectPath", () => {
 
 describe("canUseSection", () => {
   it("refuses the super admin the sections that belong to a brand", () => {
-    // In a white-label setup one brand's customer list (table or conversation) is that brand's business.
-    for (const section of ["overview", "customers", "subscriptions", "tickets"]) {
+    // In a white-label setup one brand's customer list (table or conversation) is that brand's business,
+    // and so is the reseller programme it recruits and pays.
+    for (const section of ["overview", "customers", "subscriptions", "tickets", "resellers"]) {
       expect({ section, allowed: canUseSection("SUPER_ADMIN", section) }).toEqual({
         section,
         allowed: false,
@@ -126,7 +127,7 @@ describe("canUseSection", () => {
   });
 
   it("keeps the platform sections open to the super admin", () => {
-    for (const section of ["plans", "coupons", "phone_numbers", "resellers", "emails", "audit", "voice_bank"]) {
+    for (const section of ["plans", "coupons", "phone_numbers", "emails", "audit", "voice_bank"]) {
       expect({ section, allowed: canUseSection("SUPER_ADMIN", section) }).toEqual({
         section,
         allowed: true,
@@ -188,11 +189,12 @@ describe("canUseSection", () => {
     expect(canUseSection("STAFF", "brand_tickets")).toBe(false);
   });
 
-  it("opens Resellers to brand admins, not just the platform owner", () => {
-    // Brands run their own resellers; the server scopes the queries to the caller's tenant.
+  it("opens Resellers to brand admins and refuses it to the platform owner", () => {
+    // Brands run their own resellers; the platform owner has no programme, so the nav and API refuse them.
     expect(PLATFORM_ONLY_SECTIONS.has("resellers")).toBe(false);
+    expect(BRAND_SCOPED_SECTIONS.has("resellers")).toBe(true);
     expect(canUseSection("ADMIN", "resellers")).toBe(true);
-    expect(canUseSection("SUPER_ADMIN", "resellers")).toBe(true);
+    expect(canUseSection("SUPER_ADMIN", "resellers")).toBe(false);
     // STAFF clear the scope rule, but `resellers.view` isn't grantable so the nav stays hidden for them.
     expect(canUseSection("STAFF", "resellers")).toBe(true);
   });
