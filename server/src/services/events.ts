@@ -68,21 +68,25 @@ function announcePresence(userId: string, online: boolean): void {
   publishToAdmins({ type: "presence", userId, online });
 }
 
-/** Write one event to every client subscribed to `channel`. Best-effort. */
-export function publish(channel: string, event: LiveEvent): void {
+/** Write one event to every client subscribed to `channel`. Best-effort. Returns how many streams
+ *  it went to — zero means nobody on that channel has the app open right now. */
+export function publish(channel: string, event: LiveEvent): number {
   const payload = `data: ${JSON.stringify(event)}\n\n`;
+  let reached = 0;
   for (const c of clients.values()) {
     if (!c.channels.has(channel)) continue;
     try {
       c.res.write(payload);
+      reached += 1;
     } catch {
       // A dead socket will be cleaned up by its own 'close' handler; ignore here.
     }
   }
+  return reached;
 }
 
-export function publishToUser(userId: string, event: LiveEvent): void {
-  publish(`user:${userId}`, event);
+export function publishToUser(userId: string, event: LiveEvent): number {
+  return publish(`user:${userId}`, event);
 }
 
 export function publishToAdmins(event: LiveEvent): void {

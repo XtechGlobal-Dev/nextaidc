@@ -6,9 +6,18 @@ export const NotificationTypeSchema = z.enum([
   "billing",
   "agent",
   "ticket",
+  // A ring for an in-ticket call: the bell shows a camera or a handset instead of the ticket mark.
+  "ticket_video_call",
+  "ticket_voice_call",
   "system",
 ]);
 export type NotificationType = z.infer<typeof NotificationTypeSchema>;
+
+/** Everything that opens a support conversation — the ticket itself and the calls placed inside it. */
+export const TICKET_NOTIFICATION_TYPES: readonly NotificationType[] = ["ticket", "ticket_video_call", "ticket_voice_call"];
+export function isTicketNotification(type: string): boolean {
+  return (TICKET_NOTIFICATION_TYPES as readonly string[]).includes(type);
+}
 
 // Validation runs pre-serialization, where `createdAt` is still a Date; this transform keeps the schema
 // describing the WIRE shape (ISO string) while accepting the in-memory value.

@@ -16,13 +16,18 @@ export interface ActiveCall {
   key: number;
 }
 
+
 /** `full` is the centred pop-up, `max` fills the screen, `pip` is the small draggable tile. */
 export type CallView = "full" | "max" | "pip";
 
 interface CallState {
   call: ActiveCall | null;
+  /** True from start until the call finishes (the window may linger a moment after). A ring for
+   *  a ticket this window is live on is ignored — answering it would only kick this session. */
+  live: boolean;
   view: CallView;
   start: (call: Omit<ActiveCall, "key">) => void;
+  markEnded: () => void;
   end: () => void;
   setView: (view: CallView) => void;
 }
@@ -31,8 +36,10 @@ let nextKey = 1;
 
 export const useCallStore = create<CallState>((set) => ({
   call: null,
+  live: false,
   view: "full",
-  start: (call) => set({ call: { ...call, key: nextKey++ }, view: "full" }),
-  end: () => set({ call: null, view: "full" }),
+  start: (call) => set({ call: { ...call, key: nextKey++ }, live: true, view: "full" }),
+  markEnded: () => set({ live: false }),
+  end: () => set({ call: null, live: false, view: "full" }),
   setView: (view) => set({ view }),
 }));

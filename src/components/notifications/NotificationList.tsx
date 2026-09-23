@@ -9,8 +9,10 @@ import {
   ChevronRight,
   CreditCard,
   LifeBuoy,
+  Phone,
   PhoneIncoming,
   PhoneMissed,
+  Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { adminHref } from "@/lib/onboardingRoute";
@@ -49,6 +51,9 @@ const TYPE_META: Record<
   // Support tickets on either lane — a customer asking their brand, or a brand
   // asking the platform. One look for both: which inbox it opens is in the link.
   ticket: { icon: LifeBuoy, badge: "bg-step-2/12 text-step-2" },
+  // A ring inside a ticket: the bell says at a glance whether it was a camera or a handset.
+  ticket_video_call: { icon: Video, badge: "bg-step-2/12 text-step-2" },
+  ticket_voice_call: { icon: Phone, badge: "bg-step-2/12 text-step-2" },
   system: { icon: Bell, badge: "bg-primary-tint text-primary" },
 };
 

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { api, type ApiNotification, type NotificationType } from "@/lib/api";
+import { isTicketNotification } from "@shared/contracts/notifications";
 import { sessionMark, sessionChanged } from "@/lib/sessionEpoch";
 import { showBrowserAlert } from "@/lib/browserNotifications";
 import { useCallsStore } from "@/stores/useCallsStore";
@@ -38,7 +39,7 @@ export function unreadTicketCounts(
 ): UnreadTicketCounts {
   const counts: UnreadTicketCounts = { requester: 0, supportInbox: 0, brandInbox: 0 };
   for (const n of notifications) {
-    if (n.read || n.type !== "ticket") continue;
+    if (n.read || !isTicketNotification(n.type)) continue;
     if (n.link?.startsWith(BRAND_INBOX_PATH)) counts.brandInbox += 1;
     else if (n.link?.startsWith(SUPPORT_INBOX_PATH)) counts.supportInbox += 1;
     else if (n.link?.startsWith(REQUESTER_TICKETS_PATH)) counts.requester += 1;

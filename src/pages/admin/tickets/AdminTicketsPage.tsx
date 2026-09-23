@@ -23,7 +23,6 @@ import {
   MessageSquareText,
   MoreVertical,
   Paperclip,
-  Phone,
   Plus,
   RefreshCw,
   Search,
@@ -31,7 +30,6 @@ import {
   Trash2,
   UserRound,
   Users,
-  Video,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -60,6 +58,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChatComposer } from "@/components/tickets/ChatComposer";
 import { TicketThread } from "@/components/tickets/TicketThread";
+import { TicketCallControls } from "@/components/tickets/TicketCallControls";
 import { useCallStore } from "@/stores/useCallStore";
 import type { CallMode } from "@/lib/livekit";
 import { StarRating } from "@/components/tickets/StarRating";
@@ -1015,29 +1014,15 @@ export default function AdminTicketsPage() {
                     </div>
                     {headerTicket && (
                       <div className="flex shrink-0 items-center gap-1">
-                        {canEdit && thread && thread.ticket.status !== "closed" && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
-                              aria-label="Start a voice call"
-                              title="Voice call"
-                              onClick={() => placeCall("audio")}
-                            >
-                              <Phone className="size-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
-                              aria-label="Start a video call"
-                              title="Video call"
-                              onClick={() => placeCall("video")}
-                            >
-                              <Video className="size-4" />
-                            </Button>
-                          </>
+                        {thread && (
+                          <TicketCallControls
+                            ticketId={thread.ticket.id}
+                            subject={thread.ticket.subject}
+                            otherName={callOtherName}
+                            perspective="staff"
+                            canCall={canEdit && thread.ticket.status !== "closed"}
+                            onPlace={placeCall}
+                          />
                         )}
                         {canEdit && thread && (
                           <Button
@@ -1488,79 +1473,105 @@ export default function AdminTicketsPage() {
               )}
 
               {/* --------------------------- Requester ---------------------- */}
-              {thread && (
-                <Card className="overflow-hidden">
-                  <div className="border-b border-border px-4 py-3">
-                    <h3 className="text-sm font-semibold">
-                      {lane?.lane === "brand" ? "Brand" : "Customer"}
-                    </h3>
-                  </div>
-                  <div className="flex items-center gap-3 px-4 py-3.5">
-                    <TicketAvatar name={thread.ticket.requester.name} size="md" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{thread.ticket.requester.name}</p>
-                      <button
-                        type="button"
-                        onClick={() => void copyText(thread.ticket.requester.email, "Email copied")}
-                        className="block max-w-full truncate text-xs text-muted-foreground hover:text-foreground"
-                        title="Copy email"
-                      >
-                        {thread.ticket.requester.email}
-                      </button>
-                    </div>
-                    {/* On the platform's inbox the tenant is the useful hop —
-                        open the brand, not the person. */}
-                    {lane?.lane === "brand" && thread.ticket.brand && (
-                      <Button variant="outline" size="icon" className="size-9 shrink-0" asChild>
-                        <Link
-                          to={`/superadmin/brands/${thread.ticket.brand.id}`}
-                          aria-label={`Open ${thread.ticket.brand.name}`}
-                          title={`Open ${thread.ticket.brand.name}`}
-                        >
-                          <Building2 className="size-4" />
-                        </Link>
-                      </Button>
-                    )}
-                    {lane?.lane === "support" && (
-                      <Button variant="outline" size="icon" className="size-9 shrink-0" asChild>
-                        <Link
-                          to={adminHref(
-                            `/dashboard/admin/customers/${thread.ticket.requester.id}`,
-                            role,
+              {thread &&
+                (() => {
+                  // On the platform's inbox the ticket IS the brand talking to the
+                  // platform — show the brand's own profile here, not the person who
+                  // happened to type the message. Fall back to the person only if the
+                  // brand record is somehow gone (e.g. a deleted tenant).
+                  const isBrandLane = lane?.lane === "brand";
+                  const brand = thread.ticket.brand;
+                  const showBrandProfile = isBrandLane && !!brand;
+
+                  return (
+                    <Card className="overflow-hidden">
+                      <div className="border-b border-border px-4 py-3">
+                        <h3 className="text-sm font-semibold">
+                          {isBrandLane ? "Brand" : "Customer"}
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-3 px-4 py-3.5">
+                        <TicketAvatar
+                          name={showBrandProfile ? brand.name : thread.ticket.requester.name}
+                          size="md"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            {showBrandProfile ? brand.name : thread.ticket.requester.name}
+                          </p>
+                          {showBrandProfile ? (
+                            <p className="truncate text-xs text-muted-foreground">
+                              @{brand.slug}
+                            </p>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void copyText(thread.ticket.requester.email, "Email copied")
+                              }
+                              className="block max-w-full truncate text-xs text-muted-foreground hover:text-foreground"
+                              title="Copy email"
+                            >
+                              {thread.ticket.requester.email}
+                            </button>
                           )}
-                          aria-label="Open customer"
-                          title="Open customer"
-                        >
-                          <UserRound className="size-4" />
-                        </Link>
-                      </Button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 divide-x divide-border border-t border-border text-xs">
-                    <div className="px-4 py-2.5">
-                      <p className="text-muted-foreground">
-                        {lane?.lane === "brand" ? "Brand" : "Raised by"}
-                      </p>
-                      <p className="mt-0.5 truncate font-medium">
-                        {lane?.lane === "brand"
-                          ? (thread.ticket.brand?.name ?? "Platform")
-                          : thread.ticket.source === "admin"
-                            ? "Your team"
-                            : "Themselves"}
-                      </p>
-                    </div>
-                    <div className="px-4 py-2.5">
-                      <p className="text-muted-foreground">Opened</p>
-                      <p
-                        className="mt-0.5 font-medium"
-                        title={new Date(thread.ticket.createdAt).toLocaleString()}
-                      >
-                        {formatDate(thread.ticket.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                </Card>
-              )}
+                        </div>
+                        {/* On the platform's inbox the tenant is the useful hop —
+                            open the brand, not the person. */}
+                        {isBrandLane && brand && (
+                          <Button variant="outline" size="icon" className="size-9 shrink-0" asChild>
+                            <Link
+                              to={`/superadmin/brands/${brand.id}`}
+                              aria-label={`Open ${brand.name}`}
+                              title={`Open ${brand.name}`}
+                            >
+                              <Building2 className="size-4" />
+                            </Link>
+                          </Button>
+                        )}
+                        {lane?.lane === "support" && (
+                          <Button variant="outline" size="icon" className="size-9 shrink-0" asChild>
+                            <Link
+                              to={adminHref(
+                                `/dashboard/admin/customers/${thread.ticket.requester.id}`,
+                                role,
+                              )}
+                              aria-label="Open customer"
+                              title="Open customer"
+                            >
+                              <UserRound className="size-4" />
+                            </Link>
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 divide-x divide-border border-t border-border text-xs">
+                        <div className="px-4 py-2.5">
+                          <p className="text-muted-foreground">
+                            {showBrandProfile ? "Submitted by" : isBrandLane ? "Brand" : "Raised by"}
+                          </p>
+                          <p className="mt-0.5 truncate font-medium">
+                            {showBrandProfile
+                              ? thread.ticket.requester.name
+                              : isBrandLane
+                                ? (brand?.name ?? "Platform")
+                                : thread.ticket.source === "admin"
+                                  ? "Your team"
+                                  : "Themselves"}
+                          </p>
+                        </div>
+                        <div className="px-4 py-2.5">
+                          <p className="text-muted-foreground">Opened</p>
+                          <p
+                            className="mt-0.5 font-medium"
+                            title={new Date(thread.ticket.createdAt).toLocaleString()}
+                          >
+                            {formatDate(thread.ticket.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })()}
 
               {/* -------------------------- Attachments --------------------- */}
               {thread && threadAttachments.length > 0 && (

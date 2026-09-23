@@ -21,6 +21,7 @@ import { startRingback } from "@/lib/callTones";
 import {
   callErrorMessage,
   connectToCall,
+  disconnectMessage,
   type CallEndReason,
   type CallHandle,
   type TicketCallState,
@@ -37,6 +38,10 @@ import { useLiveStore } from "@/stores/useLiveStore";
 
 /** How long the caller waits before giving up. */
 const NO_ANSWER_MS = 45_000;
+/** How long the other side may be gone before the call counts as over. LiveKit drops their
+ *  session the moment the same account joins from another tab or browser, and the newcomer
+ *  is in within a second or two; a real hang-up says so itself (call-ended) and ends this at once. */
+const REJOIN_GRACE_MS = 8_000;
 /** How long a finished call stays on screen before closing itself. */
 const AUTO_CLOSE_MS = 2500;
 const PIP_WIDTH = 288;
@@ -63,16 +68,21 @@ function LiveCall() {
   const [muted, setMuted] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [remoteCount, setRemoteCount] = useState(0);
+  const [rejoining, setRejoining] = useState(false);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  /** Something worth knowing mid-call (the camera would not start, say) — the call goes on. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [pos, setPos] = useState(() => defaultPipPosition());
 
   const handleRef = useRef<CallHandle | null>(null);
   const stopToneRef = useRef<(() => void) | null>(null);
   const noAnswerRef = useRef<number>(0);
+  const goneRef = useRef<number>(0);
   const remoteEverRef = useRef(false);
   const finishedRef = useRef(false);
+  const cancelledRef = useRef(false);
   const openedAtRef = useRef(Date.now());
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -88,12 +98,28 @@ function LiveCall() {
     window.clearTimeout(noAnswerRef.current);
   }
 
+  /** Rings the other side. Best-effort; `reached` says whether anyone has the app open. */
+  function ring() {
+    void sideApi
+      .callRing(ticketId, mode)
+      .then((r) => {
+        // Nobody has the app open: the ring landed nowhere, only the bell got it. Say so
+        // instead of ringing into silence for 45 seconds.
+        if (!cancelledRef.current && !finishedRef.current && r.reached === 0) {
+          setNotice(`${otherName} isn't online right now — they've been sent a notification.`);
+        }
+      })
+      .catch(() => {});
+  }
+
   /** Ends the call on this side. `tell` also informs the other side. */
   function finish(message: string, tell?: CallEndReason, error = false) {
     if (finishedRef.current) return;
     finishedRef.current = true;
     console.info("[call] finished:", message, tell ? `(told other side: ${tell})` : "");
+    useCallStore.getState().markEnded();
     stopRinging();
+    window.clearTimeout(goneRef.current);
     if (tell) void sideApi.callEnd(ticketId, tell).catch(() => {});
     const handle = handleRef.current;
     handleRef.current = null;
@@ -121,11 +147,18 @@ function LiveCall() {
       try {
         const grant = await sideApi.callToken(ticketId, mode);
         if (cancelled) return;
+        // Placing the call: ring the other side NOW, before this browser has its camera and
+        // microphone — a permission prompt or a device that will not start must never stop the
+        // other side from ringing. If this side then fails to connect, the catch below tells them.
+        if (!incoming) ring();
         const handle = await connectToCall(grant, {
           onState: (s) => {
             if (cancelled || finishedRef.current) return;
-            if (s === "ended") finish("Connection lost");
-            else setState(s);
+            setState(s);
+          },
+          onDisconnected: (reason) => {
+            if (cancelled || finishedRef.current) return;
+            finish(disconnectMessage(reason));
           },
           onRemoteTrack: attachRemote,
           onRemoteTrackRemoved: (track) => {
@@ -136,41 +169,55 @@ function LiveCall() {
             if (cancelled) return;
             setRemoteCount(count);
             if (count > 0) {
+              window.clearTimeout(goneRef.current);
+              setRejoining(false);
               // The clock starts when the other side is actually there, not while ringing.
               if (!remoteEverRef.current) setSeconds(0);
               remoteEverRef.current = true;
               stopRinging();
             } else if (remoteEverRef.current) {
-              finish(`${otherName} left the call`);
+              // Gone for good, or just swapping windows? Give them REJOIN_GRACE_MS to come back.
+              setRejoining(true);
+              window.clearTimeout(goneRef.current);
+              goneRef.current = window.setTimeout(
+                () => finish(`${otherName} left the call`),
+                REJOIN_GRACE_MS,
+              );
             }
           },
           onAudioBlocked: setAudioBlocked,
+          onCameraFailed: (err) => {
+            if (cancelled) return;
+            setNotice(callErrorMessage(err));
+          },
         });
         if (cancelled) {
           void handle.leave();
           return;
         }
         handleRef.current = handle;
-        if (mode === "video") {
+        if (mode === "video" && handle.room.localParticipant.isCameraEnabled) {
           setCameraOn(true);
           attachLocalCamera(handle, localVideoRef.current);
         }
-        // Alone in the room and placing the call: ring the other side and wait.
+        // Placing the call and still alone: ring back and wait for an answer.
         if (!incoming && handle.room.remoteParticipants.size === 0) {
-          void sideApi.callRing(ticketId, mode).catch(() => {});
           stopToneRef.current = startRingback();
           noAnswerRef.current = window.setTimeout(() => finish("No answer", "missed"), NO_ANSWER_MS);
         }
       } catch (e) {
         if (cancelled) return;
-        finish(callErrorMessage(e), undefined, true);
+        // Placing the call and it failed here: the other side is already ringing — stop it.
+        finish(callErrorMessage(e), incoming ? undefined : "hangup", true);
       }
     }, 0);
 
     return () => {
       cancelled = true;
+      cancelledRef.current = true;
       window.clearTimeout(kickoff);
       stopRinging();
+      window.clearTimeout(goneRef.current);
       const handle = handleRef.current;
       handleRef.current = null;
       void handle?.leave();
@@ -334,7 +381,7 @@ function LiveCall() {
       if (next) attachLocalCamera(handle, localVideoRef.current);
     } catch (e) {
       setCameraOn(!next);
-      setEndMessage(callErrorMessage(e));
+      setNotice(callErrorMessage(e));
     }
   }
 
@@ -348,16 +395,18 @@ function LiveCall() {
   // The pop-up over its own conversation: fills that box like full screen fills the screen.
   const anchored = view === "full" && anchor !== null;
   const fill = max || anchored;
-  const ringing = state === "active" && remoteCount === 0;
+  const ringing = state === "active" && remoteCount === 0 && !rejoining;
   const status =
     state === "connecting"
       ? "Connecting…"
       : state === "active"
-        ? ringing
-          ? incoming
-            ? "Joining…"
-            : `Calling ${otherName}…`
-          : "Connected"
+        ? rejoining
+          ? "Reconnecting…"
+          : ringing
+            ? incoming
+              ? "Joining…"
+              : `Calling ${otherName}…`
+            : "Connected"
         : (endMessage ?? "Call ended");
   const title = mode === "video" ? "Video call" : "Voice call";
 
@@ -512,6 +561,11 @@ function LiveCall() {
           >
             <Volume2 className="size-4" /> Tap to hear the call
           </Button>
+        )}
+        {notice && state === "active" && (
+          <p className={cn("text-center text-xs text-muted-foreground", pip ? "px-2 pt-2" : "px-4 pt-3")}>
+            {notice}
+          </p>
         )}
 
         {/* Controls. */}

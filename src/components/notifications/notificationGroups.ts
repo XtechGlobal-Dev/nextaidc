@@ -18,7 +18,8 @@ const FILTER_TYPES: Record<Exclude<NotificationFilter, "all">, readonly Notifica
   missed: ["missed_call"],
   handled: ["new_lead"],
   // One chip for both support lanes; a person only ever holds one side of one conversation.
-  tickets: ["ticket"],
+  // The calls placed inside a ticket belong to it too.
+  tickets: ["ticket", "ticket_video_call", "ticket_voice_call"],
   billing: ["billing"],
   // "System" covers platform notices and the AI-agent lifecycle (welcome,
   // provisioned, live) — neither is something the customer did themselves.

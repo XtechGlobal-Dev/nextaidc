@@ -20,6 +20,14 @@ interface LiveState {
   /** The other side hung up, declined, or gave up — the open call dialog reacts to it. */
   callEnded: CallEnded | null;
   noteCallEnded: (ended: Omit<CallEnded, "at">) => void;
+  /** Any call signal for a ticket (ring, pick-up, hang-up): an open thread re-reads who is on the call. */
+  callSignal: { ticketId: string; at: number } | null;
+  noteCallSignal: (ticketId: string) => void;
+  /** The last call this account was rung for that may still be going on — the navbar offers Join
+   *  from any page until it is known to be over. Set by the ring, cleared by the hang-up. */
+  joinable: CallInvite | null;
+  noteJoinable: (invite: Omit<CallInvite, "at">) => void;
+  clearJoinable: (ticketId?: string) => void;
 }
 
 export interface CallInvite {
@@ -30,6 +38,8 @@ export interface CallInvite {
   to: "staff" | "requester";
   /** Where to open the ticket (brand-relative path with ?ticket=…). */
   link: string;
+  /** What the ticket is about, for the ring dialog. */
+  subject?: string;
   at: number;
 }
 
@@ -53,4 +63,10 @@ export const useLiveStore = create<LiveState>((set) => ({
     set((s) => (ticketId && s.callInvite?.ticketId !== ticketId ? {} : { callInvite: null })),
   callEnded: null,
   noteCallEnded: (ended) => set({ callEnded: { ...ended, at: Date.now() } }),
+  callSignal: null,
+  noteCallSignal: (ticketId) => set({ callSignal: { ticketId, at: Date.now() } }),
+  joinable: null,
+  noteJoinable: (invite) => set({ joinable: { ...invite, at: Date.now() } }),
+  clearJoinable: (ticketId) =>
+    set((s) => (ticketId && s.joinable?.ticketId !== ticketId ? {} : { joinable: null })),
 }));

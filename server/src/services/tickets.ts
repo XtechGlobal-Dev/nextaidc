@@ -18,6 +18,7 @@ import { sendTemplate } from "./email.js";
 import { deleteObject } from "./storage.js";
 import { cachedBrand } from "./brands.js";
 import { notifyIn } from "./notifications.js";
+import type { NotificationType } from "../../../shared/contracts/notifications.js";
 import {
   allTenants,
   controlPlaneAsTenant,
@@ -1054,7 +1055,10 @@ export function publishTyping(
   else publishToAdmins(event);
 }
 
-/** Call signalling (ring, hang-up, decline) to the other side. Carries the link the
+/** Returns how many open app windows the signal reached: zero means the other side is not
+ *  online right now — the caller is told so instead of ringing into silence.
+ *
+ *  Call signalling (ring, hang-up, decline) to the other side. Carries the link the
  *  receiver should open, since a ring can arrive on any page. Best-effort like typing.
  *  Aimed at the people who can actually take the ticket — NOT the shared admin channel,
  *  which would ring every admin of every brand, including a brand admin ringing the
@@ -1064,16 +1068,41 @@ export async function publishCallSignal(
   ticket: TicketRow,
   from: "staff" | "requester",
   event: { type: string; [key: string]: unknown },
-): Promise<void> {
+): Promise<number> {
   const lane = ticket.lane as TicketLane;
   const payload = {
     ...event,
     ticketId: ticket.id,
+    // The ring dialog names what the call is about; a ring can land on any page.
+    subject: ticket.subject,
     from,
     to: from === "staff" ? "requester" : "staff",
     link: from === "staff" ? requesterCallPath(lane, ticket.id) : handlerTicketPath(lane, ticket.id),
   };
   if (from === "staff") {
+    return publishToUser(ticket.requesterId, payload);
+  }
+  try {
+    const { inApp } = await ticketStaffRecipients(db, ticket);
+    let reached = 0;
+    for (const u of inApp) if (u.id !== ticket.requesterId) reached += publishToUser(u.id, payload);
+    return reached;
+  } catch (err) {
+    console.warn("[tickets] call signal failed:", err instanceof Error ? err.message : err);
+    return 0;
+  }
+}
+
+/** One rung window picked up: every OTHER window on that side stops ringing — the same person's
+ *  other tabs and browsers, and on the staff side the colleagues rung alongside. Left ringing, a second
+ *  pick-up would join the room under the same identity and LiveKit would kick the first out of the call. */
+export async function publishCallAnswered(
+  db: TenantClient,
+  ticket: TicketRow,
+  side: "staff" | "requester",
+): Promise<void> {
+  const payload = { type: "call-answered", ticketId: ticket.id, to: side };
+  if (side === "requester") {
     publishToUser(ticket.requesterId, payload);
     return;
   }
@@ -1081,7 +1110,7 @@ export async function publishCallSignal(
     const { inApp } = await ticketStaffRecipients(db, ticket);
     for (const u of inApp) if (u.id !== ticket.requesterId) publishToUser(u.id, payload);
   } catch (err) {
-    console.warn("[tickets] call signal failed:", err instanceof Error ? err.message : err);
+    console.warn("[tickets] call answered signal failed:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -1141,12 +1170,17 @@ function ticketVars(ticket: TicketRow, extra: Record<string, string> = {}) {
 }
 
 /** Notifies the handler side: bell for everyone who can open it, email (when `templateKey`) for the owner. `excludeUserId` keeps the actor off both lists. */
+/** The bell types a ticket raises: the ticket mark, or a camera / handset for a ring. */
+export type TicketNotificationType = Extract<NotificationType, "ticket" | "ticket_video_call" | "ticket_voice_call">;
+
 export async function notifyTicketStaff(
   db: TenantClient,
   ticket: TicketRow,
   n: {
     title: string;
     message: string;
+    /** What the bell shows: the ticket mark by default, a camera or handset for a ring. */
+    type?: TicketNotificationType;
     /** Omit for in-app only (low-signal events, e.g. a requester closing). */
     templateKey?: string;
     templateVars?: Record<string, string>;
@@ -1163,7 +1197,7 @@ export async function notifyTicketStaff(
     await notifyIn(
       db,
       inApp.map((r) => r.id),
-      { type: "ticket", title: n.title, message: n.message, link },
+      { type: n.type ?? "ticket", title: n.title, message: n.message, link },
     );
     publishToAdmins({ type: "ticket", ticketId: ticket.id });
 
@@ -1202,6 +1236,8 @@ export async function notifyRequester(
     message: string;
     /** Overrides where the bell sends them — e.g. straight into the rating card. */
     link?: string;
+    /** What the bell shows: the ticket mark by default, a camera or handset for a ring. */
+    type?: TicketNotificationType;
     templateKey?: string;
     templateVars?: Record<string, string>;
     /** Set false to mail only. For what the requester just did themselves there is
@@ -1213,7 +1249,7 @@ export async function notifyRequester(
     if (opts.inApp !== false) {
       const home = await planeOf(ticket.brandId);
       await notifyIn(home, [ticket.requesterId], {
-        type: "ticket",
+        type: opts.type ?? "ticket",
         title: opts.title,
         message: opts.message,
         link: opts.link ?? requesterTicketPath(ticket.lane as TicketLane, ticket.id),

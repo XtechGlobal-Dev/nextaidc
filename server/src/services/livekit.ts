@@ -1,4 +1,4 @@
-import { AccessToken, WebhookReceiver } from "livekit-server-sdk";
+import { AccessToken, RoomServiceClient, WebhookReceiver } from "livekit-server-sdk";
 import type { TicketLane } from "../lib/ticketLanes.js";
 import { getEffective, integrationConfiguredFor } from "./settings.js";
 
@@ -83,6 +83,38 @@ export function modeFromMetadata(metadata: string | undefined): CallMode {
   } catch {
     return "audio";
   }
+}
+
+/** Who is in a ticket's call room right now, straight from LiveKit — the one source that survives a
+ *  crashed browser. Cached briefly: every open thread asks while a call is on. */
+export interface CallParticipant {
+  side: CallSide;
+  userId: string;
+  name: string;
+  mode: CallMode;
+}
+
+const PARTICIPANTS_TTL_MS = 2_000;
+const participantsCache = new Map<string, { at: number; value: CallParticipant[] }>();
+
+export async function listCallParticipants(roomName: string): Promise<CallParticipant[]> {
+  const hit = participantsCache.get(roomName);
+  if (hit && Date.now() - hit.at < PARTICIPANTS_TTL_MS) return hit.value;
+  const { url, apiKey, apiSecret } = credentials();
+  let value: CallParticipant[] = [];
+  try {
+    const svc = new RoomServiceClient(url.replace(/^ws/, "http"), apiKey, apiSecret);
+    const rows = await svc.listParticipants(roomName);
+    value = rows.flatMap((p) => {
+      const id = parseParticipantIdentity(p.identity);
+      return id ? [{ ...id, name: p.name, mode: modeFromMetadata(p.metadata) }] : [];
+    });
+  } catch {
+    // A room that does not exist (no call) answers with an error, as does a LiveKit outage:
+    // both read as "nobody on a call", which is the safe answer for a header pill.
+  }
+  participantsCache.set(roomName, { at: Date.now(), value });
+  return value;
 }
 
 let receiver: { key: string; instance: WebhookReceiver } | null = null;

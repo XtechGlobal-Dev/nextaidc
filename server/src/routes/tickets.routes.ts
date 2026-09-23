@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { asyncHandler, badRequest, forbidden, notImplemented } from "../lib/http.js";
 import { requireAuth } from "../middleware/auth.js";
-import { livekitConfigured, mintAccessToken, roomNameFor } from "../services/livekit.js";
+import { listCallParticipants, livekitConfigured, mintAccessToken, roomNameFor } from "../services/livekit.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 import { ticketUpload, storeTicketUpload } from "../middleware/ticketUpload.js";
 import {
@@ -39,6 +39,7 @@ import {
   notifyRequester,
   notifyTicketStaff,
   preview,
+  publishCallAnswered,
   publishCallSignal,
   publishThreadChanged,
   publishTyping,
@@ -531,6 +532,23 @@ router.post(
   }),
 );
 
+/** Who is on this request's call right now — the thread header shows a live pill (and Join for
+ *  anyone not yet on it) instead of the call buttons while the room has people in it. */
+router.get(
+  "/:id/call",
+  asyncHandler(async (req, res) => {
+    const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, requesterOf(req));
+    const participants = livekitConfigured()
+      ? await listCallParticipants(roomNameFor(ticket.lane as TicketLane, ticket.brandId, ticket.id))
+      : [];
+    res.json({
+      live: participants.length > 0,
+      mode: participants.some((p) => p.mode === "video") ? "video" : "audio",
+      participants: participants.map((p) => ({ side: p.side, userId: p.userId, name: p.name })),
+    });
+  }),
+);
+
 /** The caller has joined an empty room: ring the team. Live push for whoever is
  *  online, a bell for everyone else. */
 router.post(
@@ -539,20 +557,32 @@ router.post(
     const { mode } = callTokenSchema.parse(req.body ?? {});
     const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, requesterOf(req));
     const name = ticket.requester.fullName || ticket.requester.email;
-    await publishCallSignal(req.ticketDb!, ticket, "requester", {
+    const reached = await publishCallSignal(req.ticketDb!, ticket, "requester", {
       type: "call-invite",
       mode,
       fromName: name,
     });
+    console.info(`[call] ${name} rings the team about ${ticket.id} (${mode}) — reached ${reached} open window(s)`);
     await notifyTicketStaff(req.ticketDb!, ticket, {
-      title: `Incoming ${mode} call`,
+      title: `Incoming ${mode === "video" ? "video" : "voice"} call`,
       message: `${name} is calling about "${ticket.subject}".`,
+      type: mode === "video" ? "ticket_video_call" : "ticket_voice_call",
     });
-    res.status(204).end();
+    res.json({ reached });
   }),
 );
 
 const callEndSchema = z.object({ reason: z.enum(["hangup", "declined", "missed"]).default("hangup") });
+
+/** This window picked up the ring: the requester's other windows stop ringing (see publishCallAnswered). */
+router.post(
+  "/:id/call/answered",
+  asyncHandler(async (req, res) => {
+    const ticket = await loadTicketForRequester(req.ticketDb!, req.params.id, requesterOf(req));
+    await publishCallAnswered(req.ticketDb!, ticket, "requester");
+    res.status(204).end();
+  }),
+);
 
 /** Hang-up / decline / no-answer: tells the other side to stop ringing or leave. */
 router.post(

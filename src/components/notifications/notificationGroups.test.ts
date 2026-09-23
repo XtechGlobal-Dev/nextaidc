@@ -93,7 +93,10 @@ describe("filters", () => {
   const billing = { id: "3", type: "billing" as const };
   const agent = { id: "4", type: "agent" as const };
   const system = { id: "5", type: "system" as const };
-  const all = [missed, handled, billing, agent, system];
+  const ticket = { id: "6", type: "ticket" as const };
+  const videoRing = { id: "7", type: "ticket_video_call" as const };
+  const voiceRing = { id: "8", type: "ticket_voice_call" as const };
+  const all = [missed, handled, billing, agent, system, ticket, videoRing, voiceRing];
 
   it("All matches everything", () => {
     expect(all.every((n) => matchesFilter(n, "all"))).toBe(true);
@@ -109,5 +112,10 @@ describe("filters", () => {
   it("System also covers AI-agent lifecycle notices", () => {
     expect(filterNotifications(all, "system").map((n) => n.id)).toEqual(["4", "5"]);
     expect(filterNotifications(all, "billing").map((n) => n.id)).toEqual(["3"]);
+  });
+
+  it("Tickets covers the conversation and the calls rung inside it, not phone calls", () => {
+    expect(filterNotifications(all, "tickets").map((n) => n.id)).toEqual(["6", "7", "8"]);
+    expect(filterNotifications(all, "calls").map((n) => n.id)).toEqual(["1", "2"]);
   });
 });

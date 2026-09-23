@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { env } from "@/lib/env";
 import { getToken } from "@/lib/api";
 import { useAuthStore } from "@/stores/useAuthStore";
+import { useCallStore } from "@/stores/useCallStore";
 import { useLiveStore } from "@/stores/useLiveStore";
 import { useTrialStore } from "@/stores/useTrialStore";
 import { useProfileStore } from "@/stores/useProfileStore";
@@ -71,6 +72,7 @@ export function useLiveData() {
             to?: string;
             link?: string;
             reason?: string;
+            subject?: string;
           };
           if (data?.type === "ticket-typing" && data.ticketId) {
             useLiveStore.getState().noteTyping(data.ticketId, data.name || "Someone");
@@ -79,18 +81,41 @@ export function useLiveData() {
           // A ring must be instant, and the call-started line it comes with still
           // needs the normal refresh — so note it, then fall through.
           if (data?.type === "call-invite" && data.ticketId && data.link) {
-            useLiveStore.getState().noteCallInvite({
+            const rung = {
               ticketId: data.ticketId,
-              mode: data.mode === "video" ? "video" : "audio",
+              mode: data.mode === "video" ? ("video" as const) : ("audio" as const),
               fromName: data.fromName || "Someone",
-              to: data.to === "staff" ? "staff" : "requester",
+              to: data.to === "staff" ? ("staff" as const) : ("requester" as const),
               link: data.link,
-            });
+              subject: typeof data.subject === "string" ? data.subject : undefined,
+            };
+            console.info("[call] ring received for ticket", data.ticketId, "from", rung.fromName, `(${rung.mode})`);
+            useLiveStore.getState().noteCallSignal(data.ticketId);
+            useLiveStore.getState().noteJoinable(rung);
+            // Already live on this ticket's call in this window (both sides dialled at once, or a
+            // ring that arrived late): nothing to answer — answering would only kick this session.
+            const mine = useCallStore.getState();
+            if (mine.live && mine.call?.ticketId === data.ticketId) {
+              console.info("[call] ring ignored: this window is already on that call");
+              return;
+            }
+            useLiveStore.getState().noteCallInvite(rung);
+            console.info("[call] ring dialog requested");
+            return;
+          }
+          // Picked up in another window of this account, or by a colleague rung alongside: stop ringing here.
+          if (data?.type === "call-answered" && data.ticketId) {
+            console.info("[call] ring cleared: picked up in another window");
+            useLiveStore.getState().clearCallInvite(data.ticketId);
+            useLiveStore.getState().noteCallSignal(data.ticketId);
             return;
           }
           if (data?.type === "call-ended" && data.ticketId) {
+            console.info("[call] ring cleared: call ended", data.reason);
             const live = useLiveStore.getState();
             live.clearCallInvite(data.ticketId);
+            live.clearJoinable(data.ticketId);
+            live.noteCallSignal(data.ticketId);
             live.noteCallEnded({
               ticketId: data.ticketId,
               reason: data.reason || "hangup",

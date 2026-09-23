@@ -75,6 +75,14 @@ describe("unreadTicketCounts", () => {
     expect(counts).toEqual({ requester: 0, supportInbox: 0, brandInbox: 0 });
   });
 
+  it("counts a ring inside a ticket like the ticket itself", () => {
+    const counts = unreadTicketCounts([
+      note({ id: "1", type: "ticket_video_call", title: "Incoming video call", link: SUPPORT_INBOX("t1") }),
+      note({ id: "2", type: "ticket_voice_call", title: "Incoming audio call", link: REQUESTER("t2") }),
+    ]);
+    expect(counts).toEqual({ requester: 1, supportInbox: 1, brandInbox: 0 });
+  });
+
   it("counts nothing for a ticket notification with no link to follow", () => {
     // Every ticket row the server writes carries one, so this is defensive —
     // but a bell that rings and then goes nowhere is worse than no bell.
