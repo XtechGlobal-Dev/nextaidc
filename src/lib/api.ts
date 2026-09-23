@@ -34,7 +34,7 @@ import type {
   WorkingHours,
 } from "@/types";
 import { activeBrandSlug, brandPath } from "@/lib/brandRoute";
-import type { CallEndReason, CallGrant, CallMode } from "@/lib/livekit";
+import type { CallEndReason, CallGrant, CallMode, CallRingResult, CallStatus } from "@/lib/livekit";
 import type {
   AdminTicketDepartment,
   AttachmentDescriptor,
@@ -1228,14 +1228,19 @@ export const api = {
       post<TicketMessage>(`/api/tickets/${id}/messages/${messageId}/reactions`, { emoji }),
     /** Fire-and-forget "…is typing" nudge for the handler's inbox. */
     typing: (id: string) => post<void>(`/api/tickets/${id}/typing`, {}),
+    /** Who is on this request's call right now (the thread header's live pill / Join). */
+    callStatus: (id: string) => get<CallStatus>(`/api/tickets/${id}/call`),
     /** A LiveKit join token for this request's call room. */
     callToken: (id: string, mode: CallMode) =>
       post<CallGrant>(`/api/tickets/${id}/call-token`, { mode }),
-    /** Ring the team once the caller is alone in the room. */
-    callRing: (id: string, mode: CallMode) => post<void>(`/api/tickets/${id}/call/ring`, { mode }),
+    /** Ring the team once the caller is alone in the room. `reached` = open app windows the ring landed in. */
+    callRing: (id: string, mode: CallMode) =>
+      post<CallRingResult>(`/api/tickets/${id}/call/ring`, { mode }),
     /** Tell the team the call is over (or was declined / never answered). */
     callEnd: (id: string, reason: CallEndReason) =>
       post<void>(`/api/tickets/${id}/call/end`, { reason }),
+    /** This window picked up the ring — the requester's other windows stop ringing. */
+    callAnswered: (id: string) => post<void>(`/api/tickets/${id}/call/answered`, {}),
     setStatus: (id: string, status: "open" | "closed") =>
       post<Ticket>(`/api/tickets/${id}/status`, { status }),
     /** "Did this help?" — only accepted once the request is resolved or closed. */
@@ -1943,12 +1948,15 @@ export const api = {
       react: (id: string, messageId: string, emoji: string) =>
         post<TicketMessage>(`/api/admin/tickets/${id}/messages/${messageId}/reactions`, { emoji }),
       typing: (id: string) => post<void>(`/api/admin/tickets/${id}/typing`, {}),
+      callStatus: (id: string) => get<CallStatus>(`/api/admin/tickets/${id}/call`),
       callToken: (id: string, mode: CallMode) =>
         post<CallGrant>(`/api/admin/tickets/${id}/call-token`, { mode }),
       callRing: (id: string, mode: CallMode) =>
-        post<void>(`/api/admin/tickets/${id}/call/ring`, { mode }),
+        post<CallRingResult>(`/api/admin/tickets/${id}/call/ring`, { mode }),
       callEnd: (id: string, reason: CallEndReason) =>
         post<void>(`/api/admin/tickets/${id}/call/end`, { reason }),
+      /** This window picked up the ring — every other rung window on the staff side stops ringing. */
+      callAnswered: (id: string) => post<void>(`/api/admin/tickets/${id}/call/answered`, {}),
       /** Escalate to the platform (brand admins only): opens a NEW linked ticket on the platform lane in the
        *  admin's name; the customer's thread stays here. `departmentId` is one of the PLATFORM's queues. */
       escalate: (id: string, data: { departmentId: string; note?: string }) =>

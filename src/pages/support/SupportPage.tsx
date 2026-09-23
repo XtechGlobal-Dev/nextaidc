@@ -15,14 +15,12 @@ import {
   Lock,
   MoreVertical,
   Paperclip,
-  Phone,
   Plus,
   RefreshCw,
   RotateCcw,
   Search,
   Star,
   Users,
-  Video,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -54,6 +52,7 @@ import {
 import { ChatComposer } from "@/components/tickets/ChatComposer";
 import { TicketThread } from "@/components/tickets/TicketThread";
 import { TicketRatingDialog } from "@/components/tickets/TicketRatingDialog";
+import { TicketCallControls } from "@/components/tickets/TicketCallControls";
 import { useCallStore } from "@/stores/useCallStore";
 import type { CallMode } from "@/lib/livekit";
 import { StarRating } from "@/components/tickets/StarRating";
@@ -566,30 +565,14 @@ export default function SupportPage() {
                     </div>
                     {thread && (
                       <div className="flex shrink-0 items-center gap-1">
-                        {thread.ticket.status !== "closed" && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
-                              aria-label="Start a voice call"
-                              title="Voice call"
-                              onClick={() => placeCall("audio")}
-                            >
-                              <Phone className="size-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-muted-foreground hover:bg-muted hover:text-foreground"
-                              aria-label="Start a video call"
-                              title="Video call"
-                              onClick={() => placeCall("video")}
-                            >
-                              <Video className="size-4" />
-                            </Button>
-                          </>
-                        )}
+                        <TicketCallControls
+                          ticketId={thread.ticket.id}
+                          subject={thread.ticket.subject}
+                          otherName={lane?.copy?.handlerName ?? "the team"}
+                          perspective="requester"
+                          canCall={thread.ticket.status !== "closed"}
+                          onPlace={placeCall}
+                        />
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button

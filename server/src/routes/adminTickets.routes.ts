@@ -7,7 +7,7 @@ import { controlPlaneAsTenant, laneDb, type TenantClient } from "../services/ten
 import { brandIdsMatching, cachedBrand } from "../services/brands.js";
 import { asyncHandler, badRequest, forbidden, notFound, notImplemented } from "../lib/http.js";
 import { requireAuth, requireAdminOrStaff } from "../middleware/auth.js";
-import { livekitConfigured, mintAccessToken, roomNameFor } from "../services/livekit.js";
+import { listCallParticipants, livekitConfigured, mintAccessToken, roomNameFor } from "../services/livekit.js";
 import { ticketUpload, storeTicketUpload } from "../middleware/ticketUpload.js";
 import { audit } from "../services/audit.js";
 import { isAdminRole, isSuperAdminRole } from "../lib/roles.js";
@@ -54,6 +54,7 @@ import {
   notifyRequester,
   notifyTicketHandoff,
   notifyTicketStaff,
+  publishCallAnswered,
   publishCallSignal,
   publishThreadChanged,
   publishTyping,
@@ -1417,6 +1418,24 @@ router.post(
   }),
 );
 
+/** Who is on this ticket's call right now — the thread header shows a live pill (and Join for
+ *  anyone not yet on it) instead of the call buttons while the room has people in it. */
+router.get(
+  "/:id/call",
+  asyncHandler(async (req, res) => {
+    const actor = actorOf(req);
+    const ticket = await loadTicketForHandler(dbOf(req), req.params.id, actor);
+    const participants = livekitConfigured()
+      ? await listCallParticipants(roomNameFor(actor.lane, ticket.brandId, ticket.id))
+      : [];
+    res.json({
+      live: participants.length > 0,
+      mode: participants.some((p) => p.mode === "video") ? "video" : "audio",
+      participants: participants.map((p) => ({ side: p.side, userId: p.userId, name: p.name })),
+    });
+  }),
+);
+
 /** The handler has joined an empty room: ring the requester (live push + bell). */
 router.post(
   "/:id/call/ring",
@@ -1426,16 +1445,30 @@ router.post(
     assertCan(actor, "edit");
     const ticket = await loadTicketForHandler(dbOf(req), req.params.id, actor);
     const name = laneCopy(actor.lane).handlerLabel;
-    await publishCallSignal(dbOf(req), ticket, "staff", { type: "call-invite", mode, fromName: name });
+    const reached = await publishCallSignal(dbOf(req), ticket, "staff", { type: "call-invite", mode, fromName: name });
+    console.info(`[call] ${actor.id} rings the requester of ${ticket.id} (${mode}) — reached ${reached} open window(s)`);
     await notifyRequester(ticket, {
-      title: `Incoming ${mode} call`,
+      title: `Incoming ${mode === "video" ? "video" : "voice"} call`,
       message: `${name} is calling about "${ticket.subject}".`,
+      type: mode === "video" ? "ticket_video_call" : "ticket_voice_call",
     });
-    res.status(204).end();
+    res.json({ reached });
   }),
 );
 
 const callEndSchema = z.object({ reason: z.enum(["hangup", "declined", "missed"]).default("hangup") });
+
+/** This window picked up the ring: every other rung window on the staff side stops ringing (see publishCallAnswered). */
+router.post(
+  "/:id/call/answered",
+  asyncHandler(async (req, res) => {
+    const actor = actorOf(req);
+    assertCan(actor, "edit");
+    const ticket = await loadTicketForHandler(dbOf(req), req.params.id, actor);
+    await publishCallAnswered(dbOf(req), ticket, "staff");
+    res.status(204).end();
+  }),
+);
 
 /** Hang-up / decline / no-answer: tells the requester to stop ringing or leave. */
 router.post(

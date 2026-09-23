@@ -4,6 +4,7 @@ import { ChevronDown, LogOut, Search, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { QuickControls } from "@/components/layout/QuickControls";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { NavbarJoinCall } from "@/components/tickets/NavbarJoinCall";
 import { TrialDaysIndicator } from "@/components/trial/TrialIndicators";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ImpersonationEmojiTrigger } from "@/components/admin/ImpersonationEmojiTrigger";
@@ -121,6 +122,9 @@ export function AppHeader() {
             {shortcutHint}
           </kbd>
         </button>
+
+        {/* A call this account was rung for and is not on in this window: Join from any page. */}
+        <NavbarJoinCall />
 
         {/* Right — controls + user chip */}
         <div className="flex shrink-0 items-center gap-2">
