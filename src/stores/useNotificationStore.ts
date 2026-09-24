@@ -4,6 +4,7 @@ import { api, type ApiNotification, type NotificationType } from "@/lib/api";
 import { isTicketNotification } from "@shared/contracts/notifications";
 import { sessionMark, sessionChanged } from "@/lib/sessionEpoch";
 import { showBrowserAlert } from "@/lib/browserNotifications";
+import { playSound } from "@/lib/sound";
 import { useCallsStore } from "@/stores/useCallsStore";
 
 // Call notifications (handled + missed) are the only ones that deep-link here —
@@ -149,6 +150,7 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
         const fresh = incoming.filter(
           (n) => !n.read && !seen.has(n.id) && !seenInThread.has(n.id),
         );
+        if (fresh.length > 0) playSound("/mp3-ringtons/notifications.mp3", 0.4);
         for (const n of fresh.slice(0, MAX_TOASTS_PER_POLL)) {
           // A system alert first: it reaches a background tab, which a toast cannot. Exactly one
           // alert per notification — the toast is the fallback when browser alerts are off,
