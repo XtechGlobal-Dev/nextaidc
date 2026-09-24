@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ticketInitials } from "@/components/tickets/ticketUi";
 import { api } from "@/lib/api";
-import { startRingback } from "@/lib/callTones";
+import { playCallEnd, startRingback } from "@/lib/callTones";
 import {
   callErrorMessage,
   connectToCall,
@@ -119,6 +119,7 @@ function LiveCall() {
     console.info("[call] finished:", message, tell ? `(told other side: ${tell})` : "");
     useCallStore.getState().markEnded();
     stopRinging();
+    playCallEnd();
     window.clearTimeout(goneRef.current);
     if (tell) void sideApi.callEnd(ticketId, tell).catch(() => {});
     const handle = handleRef.current;

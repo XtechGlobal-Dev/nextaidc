@@ -4,6 +4,11 @@ import { Phone, PhoneOff, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ticketInitials } from "@/components/tickets/ticketUi";
 import { api } from "@/lib/api";
+import {
+  clearCallNotification,
+  showCallNotification,
+  subscribeCallNotificationAction,
+} from "@/lib/callNotifications";
 import { startRingtone } from "@/lib/callTones";
 import { adminHref } from "@/lib/onboardingRoute";
 import { useAuthStore } from "@/stores/useAuthStore";
@@ -40,6 +45,27 @@ export function IncomingCallToast() {
   useEffect(() => {
     if (invite && live) console.info("[call] ring dialog shown for ticket", invite.ticketId);
   }, [invite, live]);
+
+  // Mirrors the ring into the OS notification tray — reaches a minimised window or a background
+  // tab, with the same Accept/Reject the on-screen dialog offers. No-op where system alerts
+  // aren't permitted; the in-app dialog above is the ring either way.
+  useEffect(() => {
+    if (!live || !invite) return;
+    void showCallNotification(invite);
+    return () => {
+      void clearCallNotification(invite.ticketId);
+    };
+  }, [live, invite]);
+
+  useEffect(() => {
+    if (!live || !invite) return;
+    return subscribeCallNotificationAction((ticketId, action) => {
+      if (invite.ticketId !== ticketId) return;
+      if (action === "accept") accept();
+      else if (action === "reject") reject();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, invite]);
 
   if (!invite || !live) return null;
 

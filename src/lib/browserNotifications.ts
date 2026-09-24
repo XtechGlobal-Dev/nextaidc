@@ -191,7 +191,7 @@ export function setAlertClickHandler(handler: ClickHandler | null): void {
 }
 
 /** The tab's current icon — the brand's favicon under a white label, so the alert wears the brand. */
-function alertIcon(): string | undefined {
+export function alertIcon(): string | undefined {
   try {
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     return link?.href || undefined;
