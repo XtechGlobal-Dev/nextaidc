@@ -26,10 +26,17 @@ interface CallState {
    *  a ticket this window is live on is ignored — answering it would only kick this session. */
   live: boolean;
   view: CallView;
+  /** Which ticket's conversation is on the page right now (CallChatSlot says). The call's Chat
+   *  panel can only show a thread that a page is holding. */
+  chatSlot: string | null;
+  /** The call window's open Chat panel — the page portals its thread and composer in here. */
+  chatHost: HTMLElement | null;
   start: (call: Omit<ActiveCall, "key">) => void;
   markEnded: () => void;
   end: () => void;
   setView: (view: CallView) => void;
+  setChatSlot: (ticketId: string | null) => void;
+  setChatHost: (el: HTMLElement | null) => void;
 }
 
 let nextKey = 1;
@@ -38,8 +45,12 @@ export const useCallStore = create<CallState>((set) => ({
   call: null,
   live: false,
   view: "full",
+  chatSlot: null,
+  chatHost: null,
   start: (call) => set({ call: { ...call, key: nextKey++ }, live: true, view: "full" }),
   markEnded: () => set({ live: false }),
-  end: () => set({ call: null, live: false, view: "full" }),
+  end: () => set({ call: null, live: false, view: "full", chatHost: null }),
   setView: (view) => set({ view }),
+  setChatSlot: (ticketId) => set({ chatSlot: ticketId }),
+  setChatHost: (el) => set({ chatHost: el }),
 }));

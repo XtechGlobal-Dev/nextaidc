@@ -488,7 +488,7 @@ export function ChatComposer({
             title="Insert a saved reply"
           >
             <MessageSquareText className="size-[18px]" />
-            <span className="hidden sm:inline">Saved reply</span>
+            <span className="hidden @md:inline">Saved reply</span>
             <ChevronDown className="size-3.5 opacity-60" />
           </button>
         </DropdownMenuTrigger>
@@ -529,7 +529,7 @@ export function ChatComposer({
       size={sendLabel || !stacked ? "md" : "icon"}
       onClick={() => void submit()}
       disabled={!canSend}
-      className={cn("shrink-0 gap-2", !stacked && "h-12 rounded-xl px-4 sm:px-5")}
+      className={cn("shrink-0 gap-2", !stacked && "h-12 rounded-xl px-4 @md:px-5")}
       aria-label={editing ? "Save changes" : (sendLabel ?? "Send message")}
       title={
         editing
@@ -546,13 +546,15 @@ export function ChatComposer({
       ) : (
         <Send className="size-4" />
       )}
-      {sendLabel ?? (!stacked && <span className="hidden sm:inline">{editing ? "Save" : "Send"}</span>)}
+      {sendLabel ?? (!stacked && <span className="hidden @md:inline">{editing ? "Save" : "Send"}</span>)}
     </Button>
   );
 
   return (
     <div
-      className={cn("relative border-t border-border bg-background", className)}
+      // A container: the labels below hide by the box's own width, since the same composer sits in
+      // a full-width thread and in the call window's narrow Chat panel.
+      className={cn("@container relative border-t border-border bg-background", className)}
       onDragEnter={(e) => {
         if (disabled) return;
         e.preventDefault();
@@ -799,7 +801,7 @@ export function ChatComposer({
 
           <div className="mt-1.5 flex items-center justify-between gap-3 px-1">
             <p className="text-[11px] text-muted-foreground">
-              <span className="hidden sm:inline">
+              <span className="hidden @md:inline">
                 {editing
                   ? "Enter to save · Esc to cancel"
                   : submitOnEnter
