@@ -50,6 +50,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChatComposer } from "@/components/tickets/ChatComposer";
+import { CallChatSlot } from "@/components/tickets/CallChatSlot";
 import { TicketThread } from "@/components/tickets/TicketThread";
 import { TicketRatingDialog } from "@/components/tickets/TicketRatingDialog";
 import { TicketCallControls } from "@/components/tickets/TicketCallControls";
@@ -653,48 +654,51 @@ export default function SupportPage() {
                     </p>
                   </div>
 
-                  <TicketThread
-                    className="min-h-0 flex-1"
-                    messages={conversation}
-                    perspective="requester"
-                    loading={loadingThread}
-                    // The second tick appears once the team has opened the thread.
-                    otherReadAt={thread?.ticket.staffReadAt}
-                    typingLabel={typingLabel}
-                    meId={thread?.ticket.requester.id}
-                    onReply={(m) => {
-                      setEditing(null);
-                      setReplyTo(m);
-                    }}
-                    onEdit={(m) => {
-                      setReplyTo(null);
-                      setEditing(m);
-                    }}
-                    onDelete={deleteMessage}
-                    onReact={reactToMessage}
-                    onRetry={outbox.retry}
-                    onDiscard={outbox.discard}
-                  />
+                  {/* Both move into the call window's Chat panel while it is open. */}
+                  <CallChatSlot ticketId={selectedId}>
+                    <TicketThread
+                      className="min-h-0 flex-1"
+                      messages={conversation}
+                      perspective="requester"
+                      loading={loadingThread}
+                      // The second tick appears once the team has opened the thread.
+                      otherReadAt={thread?.ticket.staffReadAt}
+                      typingLabel={typingLabel}
+                      meId={thread?.ticket.requester.id}
+                      onReply={(m) => {
+                        setEditing(null);
+                        setReplyTo(m);
+                      }}
+                      onEdit={(m) => {
+                        setReplyTo(null);
+                        setEditing(m);
+                      }}
+                      onDelete={deleteMessage}
+                      onReact={reactToMessage}
+                      onRetry={outbox.retry}
+                      onDiscard={outbox.discard}
+                    />
 
-                  <ChatComposer
-                    onSend={sendReply}
-                    optimistic
-                    upload={(file, onProgress, signal) => api.tickets.upload(file, onProgress, signal)}
-                    disabled={thread?.ticket.status === "closed"}
-                    disabledReason="This request is closed. Reopen it to keep chatting."
-                    placeholder={`Reply to ${copy?.handlerName ?? "the team"}…`}
-                    replyTo={replyTo}
-                    onCancelReply={() => setReplyTo(null)}
-                    editing={editing}
-                    onCancelEdit={() => setEditing(null)}
-                    onSaveEdit={async (m, body) => {
-                      await editMessage(m, body);
-                      setEditing(null);
-                    }}
-                    onTyping={() => {
-                      if (thread) void api.tickets.typing(thread.ticket.id).catch(() => {});
-                    }}
-                  />
+                    <ChatComposer
+                      onSend={sendReply}
+                      optimistic
+                      upload={(file, onProgress, signal) => api.tickets.upload(file, onProgress, signal)}
+                      disabled={thread?.ticket.status === "closed"}
+                      disabledReason="This request is closed. Reopen it to keep chatting."
+                      placeholder={`Reply to ${copy?.handlerName ?? "the team"}…`}
+                      replyTo={replyTo}
+                      onCancelReply={() => setReplyTo(null)}
+                      editing={editing}
+                      onCancelEdit={() => setEditing(null)}
+                      onSaveEdit={async (m, body) => {
+                        await editMessage(m, body);
+                        setEditing(null);
+                      }}
+                      onTyping={() => {
+                        if (thread) void api.tickets.typing(thread.ticket.id).catch(() => {});
+                      }}
+                    />
+                  </CallChatSlot>
                 </div>
               </>
             )}

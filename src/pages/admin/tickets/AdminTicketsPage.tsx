@@ -57,6 +57,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChatComposer } from "@/components/tickets/ChatComposer";
+import { CallChatSlot } from "@/components/tickets/CallChatSlot";
 import { TicketThread } from "@/components/tickets/TicketThread";
 import { TicketCallControls } from "@/components/tickets/TicketCallControls";
 import { useCallStore } from "@/stores/useCallStore";
@@ -1132,77 +1133,80 @@ export default function AdminTicketsPage() {
                     </Select>
                   </div>
 
-                  <TicketThread
-                    className="min-h-0 flex-1"
-                    messages={visibleMessages}
-                    emptyHint={
-                      messageFilter === "notes"
-                        ? "No internal notes on this request yet."
-                        : messageFilter === "replies"
-                          ? "No replies yet."
-                          : undefined
-                    }
-                    perspective="staff"
-                    loading={loadingThread}
-                    // The second tick appears once the requester has opened it.
-                    otherReadAt={thread?.ticket.requesterReadAt}
-                    typingLabel={typingLabel}
-                    meId={meId}
-                    // Pulling a requester's message (a card number, a screenshot
-                    // they regret) is moderation, so it rides on `*.delete`.
-                    canModerate={canDelete}
-                    // Quoting and editing are both "the box is about that message",
-                    // so starting one ends the other.
-                    onReply={
-                      canEdit
-                        ? (m) => {
-                            setEditing(null);
-                            setReplyTo(m);
-                          }
-                        : undefined
-                    }
-                    onEdit={
-                      canEdit
-                        ? (m) => {
-                            setReplyTo(null);
-                            setEditing(m);
-                          }
-                        : undefined
-                    }
-                    onDelete={canEdit ? deleteMessage : undefined}
-                    onReact={canEdit ? reactToMessage : undefined}
-                    onRetry={outbox.retry}
-                    onDiscard={outbox.discard}
-                  />
-
-                  <ChatComposer
-                    onSend={sendReply}
-                    optimistic
-                    upload={(file, onProgress, signal) =>
-                      api.admin.tickets.upload(file, onProgress, signal)
-                    }
-                    disabled={!canEdit}
-                    disabledReason="Your role can view requests but not reply to them."
-                    placeholder={`Reply to the ${copy?.requesterName ?? "requester"}…`}
-                    internal={{ value: internalNote, onChange: setInternalNote }}
-                    replyTo={replyTo}
-                    onCancelReply={() => setReplyTo(null)}
-                    savedReplies={composerReplies}
-                    onManageSavedReplies={() => setShowSavedReplies(true)}
-                    editing={editing}
-                    onCancelEdit={() => setEditing(null)}
-                    onSaveEdit={async (m, body) => {
-                      await editMessage(m, body);
-                      setEditing(null);
-                    }}
-                    onTyping={() => {
-                      // An internal note isn't a conversation with the requester,
-                      // so it must not tell them someone is typing to them.
-                      if (thread && !internalNote) {
-                        void api.admin.tickets.typing(thread.ticket.id).catch(() => {});
+                  {/* Both move into the call window's Chat panel while it is open. */}
+                  <CallChatSlot ticketId={selectedId}>
+                    <TicketThread
+                      className="min-h-0 flex-1"
+                      messages={visibleMessages}
+                      emptyHint={
+                        messageFilter === "notes"
+                          ? "No internal notes on this request yet."
+                          : messageFilter === "replies"
+                            ? "No replies yet."
+                            : undefined
                       }
-                    }}
-                  />
+                      perspective="staff"
+                      loading={loadingThread}
+                      // The second tick appears once the requester has opened it.
+                      otherReadAt={thread?.ticket.requesterReadAt}
+                      typingLabel={typingLabel}
+                      meId={meId}
+                      // Pulling a requester's message (a card number, a screenshot
+                      // they regret) is moderation, so it rides on `*.delete`.
+                      canModerate={canDelete}
+                      // Quoting and editing are both "the box is about that message",
+                      // so starting one ends the other.
+                      onReply={
+                        canEdit
+                          ? (m) => {
+                              setEditing(null);
+                              setReplyTo(m);
+                            }
+                          : undefined
+                      }
+                      onEdit={
+                        canEdit
+                          ? (m) => {
+                              setReplyTo(null);
+                              setEditing(m);
+                            }
+                          : undefined
+                      }
+                      onDelete={canEdit ? deleteMessage : undefined}
+                      onReact={canEdit ? reactToMessage : undefined}
+                      onRetry={outbox.retry}
+                      onDiscard={outbox.discard}
+                    />
+
+                    <ChatComposer
+                      onSend={sendReply}
+                      optimistic
+                      upload={(file, onProgress, signal) =>
+                        api.admin.tickets.upload(file, onProgress, signal)
+                      }
+                      disabled={!canEdit}
+                      disabledReason="Your role can view requests but not reply to them."
+                      placeholder={`Reply to the ${copy?.requesterName ?? "requester"}…`}
+                      internal={{ value: internalNote, onChange: setInternalNote }}
+                      replyTo={replyTo}
+                      onCancelReply={() => setReplyTo(null)}
+                      savedReplies={composerReplies}
+                      onManageSavedReplies={() => setShowSavedReplies(true)}
+                      editing={editing}
+                      onCancelEdit={() => setEditing(null)}
+                      onSaveEdit={async (m, body) => {
+                        await editMessage(m, body);
+                        setEditing(null);
+                      }}
+                      onTyping={() => {
+                        // An internal note isn't a conversation with the requester,
+                        // so it must not tell them someone is typing to them.
+                        if (thread && !internalNote) {
+                          void api.admin.tickets.typing(thread.ticket.id).catch(() => {});
+                        }
+                      }}
+                    />
+                  </CallChatSlot>
                 </div>
               </>
             )}

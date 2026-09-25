@@ -2,6 +2,8 @@ import {
   DisconnectReason,
   Room,
   RoomEvent,
+  Track,
+  type Participant,
   type RemoteParticipant,
   type RemoteTrack,
 } from "livekit-client";
@@ -15,6 +17,23 @@ export type CallEndReason = "hangup" | "declined" | "missed";
 
 /** Named like VapiCallState so the two call surfaces read the same. */
 export type TicketCallState = "idle" | "connecting" | "active" | "ended";
+
+/** How the stage is laid out. The content layouts only apply while a screen is being shared. */
+export type CallLayout = "speaker" | "side" | "content" | "content-people";
+
+/** Small messages the two sides pass each other over the room's data channel. */
+export type CallSignal =
+  | { t: "hold"; on: boolean }
+  | { t: "layout"; value: CallLayout }
+  /** Pointer control over a shared screen: the viewer asks, the sharer answers or offers, either side ends it. */
+  | { t: "control"; action: "request" | "grant" | "deny" | "revoke" | "release" }
+  /** Where the viewer's pointer is over the shared content, as fractions of its width and height. */
+  | { t: "pointer"; x: number; y: number; down?: boolean; hide?: boolean };
+
+/** What the browser's picker captured — a tab ("browser"), a window, or a whole monitor. */
+export type ShareSurface = "browser" | "window" | "monitor" | undefined;
+
+const SIGNAL_TOPIC = "call";
 
 export interface CallGrant {
   token: string;
@@ -36,6 +55,17 @@ export interface CallStatus {
   participants: { side: "staff" | "requester"; userId: string; name: string }[];
 }
 
+/** One person in the room, for the People panel. */
+export interface RosterEntry {
+  identity: string;
+  name: string;
+  local: boolean;
+  mic: boolean;
+  camera: boolean;
+  screen: boolean;
+  speaking: boolean;
+}
+
 export interface CallCallbacks {
   onState: (state: TicketCallState) => void;
   /** The room dropped us. Not called for a failed connect — that throws instead — nor for our own leave(). */
@@ -49,6 +79,12 @@ export interface CallCallbacks {
   onRemoteCount: (count: number) => void;
   /** The browser refused to play audio without a gesture — offer a button that calls startAudio(). */
   onAudioBlocked: (blocked: boolean) => void;
+  /** Everyone in the room and what they have on, whenever any of it changes. */
+  onRoster: (roster: RosterEntry[]) => void;
+  /** The other side sent a signal (hold, layout). */
+  onSignal: (signal: CallSignal) => void;
+  /** Our screen share stopped from outside the call window — the browser's own "Stop sharing" bar. */
+  onScreenShareEnded: () => void;
 }
 
 export interface CallHandle {
@@ -57,6 +93,20 @@ export interface CallHandle {
   setMuted: (muted: boolean) => Promise<void>;
   setCamera: (on: boolean) => Promise<void>;
   startAudio: () => Promise<void>;
+  /** Silences the other side here and tells them. Muting our own mic and camera is the caller's job. */
+  setHold: (on: boolean) => Promise<void>;
+  /** Opens the browser's picker. Resolves once the share is published; rejects if the picker is cancelled. */
+  startScreenShare: () => Promise<{ hasAudio: boolean; surface: ShareSurface }>;
+  stopScreenShare: () => Promise<void>;
+  /** Only works when the picker gave us system/tab audio (hasAudio). */
+  setScreenShareAudio: (on: boolean) => Promise<void>;
+  /** Trade sharpness for frame rate, for video content. */
+  setScreenShareOptimized: (motion: boolean) => Promise<void>;
+  listDevices: (kind: MediaDeviceKind) => Promise<MediaDeviceInfo[]>;
+  switchDevice: (kind: MediaDeviceKind, deviceId: string) => Promise<void>;
+  activeDevice: (kind: MediaDeviceKind) => string | undefined;
+  /** Reliable by default; `lossy` for a stream of pointer positions where the newest is all that matters. */
+  send: (signal: CallSignal, opts?: { lossy?: boolean }) => Promise<void>;
 }
 
 export async function connectToCall(grant: CallGrant, cb: CallCallbacks): Promise<CallHandle> {
@@ -66,12 +116,57 @@ export async function connectToCall(grant: CallGrant, cb: CallCallbacks): Promis
     console.info("[call] disconnected from room", reason);
     cb.onDisconnected(reason);
   };
+  const roster = () => {
+    const entry = (p: Participant, local: boolean): RosterEntry => ({
+      identity: p.identity,
+      name: p.name || p.identity,
+      local,
+      mic: p.isMicrophoneEnabled,
+      camera: p.isCameraEnabled,
+      screen: p.isScreenShareEnabled,
+      speaking: p.isSpeaking,
+    });
+    cb.onRoster([
+      entry(room.localParticipant, true),
+      ...Array.from(room.remoteParticipants.values()).map((p) => entry(p, false)),
+    ]);
+  };
 
   room
-    .on(RoomEvent.TrackSubscribed, (track, _pub, participant) => cb.onRemoteTrack(track, participant))
-    .on(RoomEvent.TrackUnsubscribed, (track) => cb.onRemoteTrackRemoved(track))
-    .on(RoomEvent.ParticipantConnected, remoteCount)
-    .on(RoomEvent.ParticipantDisconnected, remoteCount)
+    .on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+      cb.onRemoteTrack(track, participant);
+      roster();
+    })
+    .on(RoomEvent.TrackUnsubscribed, (track) => {
+      cb.onRemoteTrackRemoved(track);
+      roster();
+    })
+    .on(RoomEvent.ParticipantConnected, () => {
+      remoteCount();
+      roster();
+    })
+    .on(RoomEvent.ParticipantDisconnected, () => {
+      remoteCount();
+      roster();
+    })
+    .on(RoomEvent.TrackMuted, roster)
+    .on(RoomEvent.TrackUnmuted, roster)
+    .on(RoomEvent.TrackPublished, roster)
+    .on(RoomEvent.TrackUnpublished, roster)
+    .on(RoomEvent.LocalTrackPublished, roster)
+    .on(RoomEvent.LocalTrackUnpublished, (pub) => {
+      if (pub.source === Track.Source.ScreenShare) cb.onScreenShareEnded();
+      roster();
+    })
+    .on(RoomEvent.ActiveSpeakersChanged, roster)
+    .on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
+      if (topic !== SIGNAL_TOPIC) return;
+      try {
+        cb.onSignal(JSON.parse(new TextDecoder().decode(payload)) as CallSignal);
+      } catch {
+        // Not ours to read.
+      }
+    })
     .on(RoomEvent.AudioPlaybackStatusChanged, () => cb.onAudioBlocked(!room.canPlaybackAudio))
     .on(RoomEvent.Disconnected, onDisconnected);
 
@@ -96,7 +191,15 @@ export async function connectToCall(grant: CallGrant, cb: CallCallbacks): Promis
   }
   cb.onState("active");
   remoteCount();
+  roster();
   cb.onAudioBlocked(!room.canPlaybackAudio);
+
+  const send = async (signal: CallSignal, opts?: { lossy?: boolean }) => {
+    await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(signal)), {
+      reliable: !opts?.lossy,
+      topic: SIGNAL_TOPIC,
+    });
+  };
 
   return {
     room,
@@ -111,6 +214,52 @@ export async function connectToCall(grant: CallGrant, cb: CallCallbacks): Promis
       await room.localParticipant.setCameraEnabled(on);
     },
     startAudio: () => room.startAudio(),
+    setHold: async (on) => {
+      room.remoteParticipants.forEach((p) => p.setVolume(on ? 0 : 1));
+      await send({ t: "hold", on });
+    },
+    startScreenShare: async () => {
+      const pub = await room.localParticipant.setScreenShareEnabled(true, {
+        audio: true,
+        systemAudio: "include",
+        selfBrowserSurface: "include",
+        contentHint: "detail",
+      });
+      const settings = pub?.track?.mediaStreamTrack.getSettings() as
+        | (MediaTrackSettings & { displaySurface?: string })
+        | undefined;
+      const surface = settings?.displaySurface;
+      return {
+        hasAudio: !!room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio),
+        surface: surface === "browser" || surface === "window" || surface === "monitor" ? surface : undefined,
+      };
+    },
+    stopScreenShare: async () => {
+      await room.localParticipant.setScreenShareEnabled(false);
+    },
+    setScreenShareAudio: async (on) => {
+      const track = room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
+      if (!track) return;
+      if (on) await track.unmute();
+      else await track.mute();
+    },
+    setScreenShareOptimized: async (motion) => {
+      const stream = room.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track
+        ?.mediaStreamTrack;
+      if (!stream) return;
+      stream.contentHint = motion ? "motion" : "detail";
+      try {
+        await stream.applyConstraints({ frameRate: motion ? 30 : 15 });
+      } catch {
+        // The hint alone still steers the encoder; a browser that refuses the frame rate is fine.
+      }
+    },
+    listDevices: (kind) => Room.getLocalDevices(kind),
+    switchDevice: async (kind, deviceId) => {
+      await room.switchActiveDevice(kind, deviceId);
+    },
+    activeDevice: (kind) => room.getActiveDevice(kind),
+    send,
   };
 }
 
@@ -120,6 +269,11 @@ export function disconnectMessage(reason: DisconnectReason | undefined): string 
   return reason === DisconnectReason.DUPLICATE_IDENTITY
     ? "This call was picked up in another window."
     : "Connection lost";
+}
+
+/** The person closed the browser's share picker without choosing anything — not an error to show. */
+export function isPickerCancelled(err: unknown): boolean {
+  return err instanceof Error && err.name === "NotAllowedError";
 }
 
 /** What to tell someone when the call couldn't start. Device errors are the common case. */
