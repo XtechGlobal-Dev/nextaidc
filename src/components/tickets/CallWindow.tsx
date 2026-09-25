@@ -78,12 +78,15 @@ import { useLiveStore } from "@/stores/useLiveStore";
 
 /** How long the caller waits before giving up. */
 const NO_ANSWER_MS = 45_000;
-/** How long the other side may be gone before the call counts as over. LiveKit drops their
- *  session the moment the same account joins from another tab or browser, and the newcomer
- *  is in within a second or two; a real hang-up says so itself (call-ended) and ends this at once. */
-const REJOIN_GRACE_MS = 8_000;
+/** How long the other side may be gone before the call counts as over. A refreshed tab comes
+ *  back by itself within seconds (useCallStore.resume); a closed tab never does, and there is no
+ *  telling the two apart at the moment they go — so this waits, visibly, and gives up late.
+ *  A real hang-up says so itself (call-ended) and ends this at once. */
+const REJOIN_WAIT_MS = 60_000;
+/** Coming back after a refresh and finding nobody: they hung up meanwhile. */
+const REJOIN_EMPTY_MS = 15_000;
 /** How long a finished call stays on screen before closing itself. */
-const AUTO_CLOSE_MS = 2500;
+const AUTO_CLOSE_MS = 5_000;
 const PIP_WIDTH = 288;
 const PIP_HEIGHT = 250;
 const PIP_MARGIN = 16;
@@ -100,6 +103,10 @@ type Panel = "chat" | "people" | null;
 
 export function CallWindow() {
   const call = useCallStore((s) => s.call);
+  // A refreshed tab picks its call back up.
+  useEffect(() => {
+    useCallStore.getState().resume();
+  }, []);
   if (!call) return null;
   // Keyed so a new call (even on the same ticket) starts from a clean slate.
   return <LiveCall key={call.key} />;
@@ -112,7 +119,7 @@ function LiveCall() {
   const endCall = useCallStore((s) => s.end);
   const chatSlot = useCallStore((s) => s.chatSlot);
   const setChatHost = useCallStore((s) => s.setChatHost);
-  const { ticketId, subject, otherName, mode, perspective, incoming } = call;
+  const { ticketId, subject, otherName, mode, perspective, incoming, rejoin } = call;
 
   const [state, setState] = useState<TicketCallState>("connecting");
   const [endMessage, setEndMessage] = useState<string | null>(null);
@@ -121,6 +128,8 @@ function LiveCall() {
   const [cameraOn, setCameraOn] = useState(false);
   const [remoteCount, setRemoteCount] = useState(0);
   const [rejoining, setRejoining] = useState(false);
+  /** Seconds left before a vanished other side counts as gone. */
+  const [waitLeft, setWaitLeft] = useState(0);
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
   /** Something worth knowing mid-call (the camera would not start, say) — the call goes on. */
@@ -340,13 +349,13 @@ function LiveCall() {
               remoteEverRef.current = true;
               stopRinging();
             } else if (remoteEverRef.current) {
-              // Gone for good, or just swapping windows? Give them REJOIN_GRACE_MS to come back.
+              // Gone for good, or refreshing / swapping windows? Wait REJOIN_WAIT_MS for them.
               setRejoining(true);
               setHeldBy(false);
               window.clearTimeout(goneRef.current);
               goneRef.current = window.setTimeout(
                 () => finish(`${otherName} left the call`),
-                REJOIN_GRACE_MS,
+                REJOIN_WAIT_MS,
               );
             }
           },
@@ -385,6 +394,10 @@ function LiveCall() {
         if (!incoming && handle.room.remoteParticipants.size === 0) {
           stopToneRef.current = startRingback();
           noAnswerRef.current = window.setTimeout(() => finish("No answer", "missed"), NO_ANSWER_MS);
+        }
+        // Back after a refresh and nobody is here: they hung up while this tab was reloading.
+        if (rejoin && handle.room.remoteParticipants.size === 0) {
+          noAnswerRef.current = window.setTimeout(() => finish("The call has ended"), REJOIN_EMPTY_MS);
         }
       } catch (e) {
         if (cancelled) return;
@@ -426,6 +439,16 @@ function LiveCall() {
     const id = window.setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => window.clearInterval(id);
   }, [state]);
+
+  // The countdown shown while the other side is gone.
+  useEffect(() => {
+    if (!rejoining) return;
+    const deadline = Date.now() + REJOIN_WAIT_MS;
+    const tick = () => setWaitLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [rejoining]);
 
   // On hold by the other side: a soft chime until they come back.
   useEffect(() => {
@@ -778,11 +801,13 @@ function LiveCall() {
       ? "Connecting…"
       : active
         ? rejoining
-          ? "Reconnecting…"
+          ? `Waiting for ${otherName} to reconnect… ${formatDuration(waitLeft)}`
           : ringing
-            ? incoming
-              ? "Joining…"
-              : `Calling ${otherName}…`
+            ? rejoin
+              ? "Rejoining…"
+              : incoming
+                ? "Joining…"
+                : `Calling ${otherName}…`
             : held || heldBy
               ? "On hold"
               : "Connected"
