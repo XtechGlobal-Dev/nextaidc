@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
-  ArrowRight,
-  BookOpen,
-  Briefcase,
   Building2,
   Check,
-  ChevronRight,
   Clock,
   Globe,
   Globe2,
-  Image as ImageIcon,
+  Inbox,
   LifeBuoy,
   Loader2,
   Mail,
@@ -20,11 +16,11 @@ import {
   Phone,
   Save,
   Sparkles,
-  Sun,
   Upload,
   UserCog,
   Users,
   Wallet,
+  Wand2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -43,16 +39,41 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, ApiError, type BrandFontOption, type BrandThemeCatalog, type SubscriptionPlan } from "@/lib/api";
-import { readableInk } from "@/lib/brandTheme";
+import {
+  api,
+  ApiError,
+  type BrandAddon,
+  type BrandCreateResult,
+  type BrandFontOption,
+  type BrandInput,
+  type BrandPlan,
+  type BrandRequest,
+  type BrandThemeCatalog,
+  type SubscriptionPlan,
+} from "@/lib/api";
 import { formatMoney } from "@/lib/currency";
 import { COUNTRIES } from "@/data/countries";
 import { listTimeZones } from "@/lib/timezone";
-import { cn } from "@/lib/utils";
+import { cn, timeAgo } from "@/lib/utils";
 import { BLANK_SETUP, setupPayload, type SetupDraft } from "./brandSetupDraft";
+import {
+  BrandMark,
+  CatalogSkeleton,
+  ColoursChoice,
+  LOGO_ACCEPT,
+  LogosChoice,
+  TypographyPicker,
+  useCatalogFonts,
+  useObjectUrl,
+} from "@/components/brand/BrandLookPickers";
+import { BrandBillingFields, billingDraftProblem } from "./BrandBillingFields";
+import { BrandPlanPicker } from "@/components/brand/BrandPlanPicker";
 
 // Create one white-label brand in a single form (a brand without address, look and admin isn't usable).
 // Editing lives in AdminBrandDetailPage, where the pieces move independently.
+// With ?request=<id> it's "Complete setup" for a brand request: pre-filled from what the applicant
+// sent, the applicant is the admin (with the password they chose), and the super admin picks the
+// settings and permissions.
 
 // Same subdomain rules as the server, so the field self-corrects instead of failing on save.
 function slugify(raw: string): string {
@@ -117,8 +138,17 @@ type AssetSlot = "logoLight" | "logoDark" | "favicon";
 
 export default function AdminBrandCreatePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestId = searchParams.get("request");
+  /** The brand request being completed; null for a plain "New brand". */
+  const [request, setRequest] = useState<BrandRequest | null>(null);
+  /** Tell the applicant their brand is live (request mode only). */
+  const [notifyApplicant, setNotifyApplicant] = useState(true);
 
   const [catalog, setCatalog] = useState<BrandThemeCatalog | null>(null);
+  /** The brand plan catalog (what brands pay the platform) and its add-ons. */
+  const [brandPlans, setBrandPlans] = useState<BrandPlan[] | null>(null);
+  const [brandAddons, setBrandAddons] = useState<BrandAddon[]>([]);
   const [draft, setDraft] = useState<Draft>(BLANK);
   // Active platform plans, for the "plans this brand sells" pick.
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
@@ -137,6 +167,18 @@ export default function AdminBrandCreatePage() {
     logoDark: null,
     favicon: null,
   });
+  /** Marks already uploaded — a brand request's logos. They carry over to the brand unless a new file
+   *  replaces one or it's removed. */
+  const [existingAssets, setExistingAssets] = useState<Record<AssetSlot, string>>({
+    logoLight: "",
+    logoDark: "",
+    favicon: "",
+  });
+  /** Pick a mark (it replaces any uploaded one) or, with null, remove both. */
+  const pickAsset = (slot: AssetSlot, file: File | null) => {
+    setFiles((f) => ({ ...f, [slot]: file }));
+    if (!file) setExistingAssets((a) => ({ ...a, [slot]: "" }));
+  };
 
   const [slugState, setSlugState] = useState<SlugState>({
     checking: false,
@@ -149,7 +191,6 @@ export default function AdminBrandCreatePage() {
   const [hostSuffix, setHostSuffix] = useState("");
   /** The operator has typed their own subdomain, so stop deriving it from the name. */
   const slugTouched = useRef(false);
-  const [showAllPalettes, setShowAllPalettes] = useState(false);
 
   const patch = useCallback((p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p })), []);
 
@@ -168,11 +209,76 @@ export default function AdminBrandCreatePage() {
 
   useEffect(() => {
     let active = true;
+    Promise.all([api.super.brandPlans.list(), api.super.brandAddons.list()])
+      .then(([plans, addons]) => {
+        if (!active) return;
+        setBrandPlans(plans);
+        setBrandAddons(addons);
+        // A new brand starts on the default plan (else the first on offer); Custom stays one click away.
+        // Completing a request keeps the plan the applicant chose instead.
+        const start = plans.find((p) => p.active && p.isDefault) ?? plans.find((p) => p.active);
+        if (!requestId && start) setDraft((d) => ({ ...d, brandPlanId: start.id }));
+      })
+      .catch(() => active && setBrandPlans([]));
+    return () => {
+      active = false;
+    };
+  }, [requestId]);
+
+  // Complete setup: start from what the applicant sent. Everything stays editable.
+  useEffect(() => {
+    if (!requestId) return;
+    let active = true;
+    api.super.brandRequests
+      .get(requestId)
+      .then((r) => {
+        if (!active) return;
+        if (r.status === "approved" || r.status === "declined") {
+          toast.info(`${r.brandName} has already been ${r.status === "approved" ? "set up" : "declined"}.`);
+          navigate("/dashboard/admin/brands?tab=requests", { replace: true });
+          return;
+        }
+        setRequest(r);
+        slugTouched.current = true;
+        setDraft((d) => ({
+          ...d,
+          name: r.brandName,
+          slug: r.slug,
+          tagline: r.tagline.slice(0, DESCRIPTION_MAX),
+          supportEmail: r.email,
+          supportPhone: r.phone,
+          // Their own domain goes straight into Custom Domain; still editable here.
+          customDomain: r.customDomain,
+          defaultCountry: r.country,
+          defaultTimezone: r.timezone,
+          // The look they picked, when they picked one; otherwise the draft's defaults stand.
+          ...(r.themePreset
+            ? { themePreset: r.themePreset, primaryColor: r.primaryColor, accentColor: r.accentColor }
+            : {}),
+          ...(r.fontFamily ? { fontFamily: r.fontFamily } : {}),
+          brandPlanId: r.brandPlanId || null,
+        }));
+        setExistingAssets({ logoLight: r.logoLightUrl, logoDark: r.logoDarkUrl, favicon: r.faviconUrl });
+      })
+      .catch((e) => {
+        if (!active) return;
+        toast.error(e instanceof ApiError ? e.message : "Failed to load the brand request");
+        navigate("/dashboard/admin/brands?tab=requests", { replace: true });
+      });
+    return () => {
+      active = false;
+    };
+  }, [requestId, navigate]);
+
+  useEffect(() => {
+    let active = true;
     (async () => {
       try {
         const cat = await api.super.brands.catalog();
         if (!active) return;
         setCatalog(cat);
+        // Completing a request keeps the applicant's look — this may land after it was filled in.
+        if (requestId) return;
         const preset = cat.presets.find((p) => p.id === cat.defaults.preset);
         setDraft((d) => ({
           ...d,
@@ -188,7 +294,7 @@ export default function AdminBrandCreatePage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [requestId]);
 
   // One probe against a throwaway label, purely to learn what the platform's
   // wildcard host is — the field shows its suffix before anything is typed.
@@ -234,21 +340,7 @@ export default function AdminBrandCreatePage() {
     return () => clearTimeout(timer);
   }, [draft.slug]);
 
-  // Load every catalog face so the typeface picker shows each option set in the
-  // face it actually is. One stylesheet, removed when the page closes.
-  useEffect(() => {
-    if (!catalog) return;
-    const families = catalog.fonts
-      .map((f) => f.googleFamily)
-      .filter(Boolean)
-      .map((name) => `family=${name.replace(/ /g, "+")}:wght@400;600`);
-    if (!families.length) return;
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = `https://fonts.googleapis.com/css2?${families.join("&")}&display=swap`;
-    document.head.appendChild(link);
-    return () => link.remove();
-  }, [catalog]);
+  useCatalogFonts(catalog);
 
   /* ------------------------------ derived ----------------------------- */
 
@@ -264,9 +356,11 @@ export default function AdminBrandCreatePage() {
     );
   }, [catalog, draft.fontFamily]);
 
-  const logoPreview = useObjectUrl(files.logoLight);
+  const logoPreview = useObjectUrl(files.logoLight) || existingAssets.logoLight;
 
   const adminReady =
+    // A request's admin is the applicant — nothing to type.
+    !!request ||
     !withAdmin ||
     (admin.email.trim().length > 3 &&
       admin.fullName.trim().length > 1 &&
@@ -278,14 +372,24 @@ export default function AdminBrandCreatePage() {
   // Subdomain is the permanent address and always required; a custom domain only needs to be well-formed if typed.
   const addressReady = !!draft.slug && slugState.available !== false && !domainInvalid;
 
-  const canSave = draft.name.trim().length >= 2 && addressReady && adminReady;
+  // Every brand pays the platform a monthly fee — its plan's, or one set by hand — so the wizard won't
+  // launch one without it.
+  const billingProblem = billingDraftProblem(draft, { feeRequired: true });
+  const chosenPlan = brandPlans?.find((p) => p.id === draft.brandPlanId) ?? null;
+
+  const canSave =
+    draft.name.trim().length >= 2 &&
+    addressReady &&
+    adminReady &&
+    !billingProblem &&
+    (!requestId || !!request);
 
   /* -------------------------------- save ------------------------------ */
 
   async function save() {
     setSaving(true);
     try {
-      const res = await api.super.brands.create({
+      const brandInput: BrandInput = {
         name: draft.name,
         slug: draft.slug,
         // Optional — only real once the client publishes DNS. Both addresses lock once set.
@@ -300,8 +404,18 @@ export default function AdminBrandCreatePage() {
         fontFamily: draft.fontFamily,
         darkModeDefault: draft.darkModeDefault,
         ...setupPayload(draft),
-        ...(withAdmin ? { admin } : {}),
-      });
+        // A request's logos carry over, unless replaced (the new file uploads below) or removed.
+        ...(request
+          ? {
+              logoLightUrl: files.logoLight ? "" : existingAssets.logoLight,
+              logoDarkUrl: files.logoDark ? "" : existingAssets.logoDark,
+              faviconUrl: files.favicon ? "" : existingAssets.favicon,
+            }
+          : {}),
+      };
+      const res: BrandCreateResult = request
+        ? await api.super.brandRequests.approve(request.id, { ...brandInput, notifyApplicant })
+        : await api.super.brands.create({ ...brandInput, ...(withAdmin ? { admin } : {}) });
 
       // The marks need a brand to hang off, so they go up now — a failed upload
       // is reported but never unwinds a brand that was created successfully.
@@ -321,10 +435,11 @@ export default function AdminBrandCreatePage() {
       }
 
       if (res.adminError) toast.warning(res.adminError);
+      if (res.billingError) toast.warning(res.billingError);
       toast.success(
         res.admin
-          ? `${res.brand.name} created — ${res.admin.email} can sign in at ${res.loginUrl}`
-          : `${res.brand.name} created`,
+          ? `${res.brand.name} ${request ? "is set up" : "created"} — ${res.admin.email} can sign in at ${res.loginUrl}`
+          : `${res.brand.name} ${request ? "is set up" : "created"}`,
       );
       // A claimed domain is the one thing still waiting on somebody, so land the
       // operator on the records they now have to send the client.
@@ -340,22 +455,27 @@ export default function AdminBrandCreatePage() {
 
   /* ------------------------------- render ----------------------------- */
 
-  const presets = catalog?.presets ?? [];
-  const headline = presets.slice(0, 4);
-  const extras = presets.slice(4);
-  const visibleExtras = showAllPalettes ? extras : extras.slice(0, 4);
-
   return (
     <div>
       <button
         type="button"
-        onClick={() => navigate("/dashboard/admin/brands")}
+        onClick={() => navigate(requestId ? "/dashboard/admin/brands?tab=requests" : "/dashboard/admin/brands")}
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ArrowLeft className="size-4" /> Back to Brands
+        <ArrowLeft className="size-4" /> {requestId ? "Back to Requests" : "Back to Brands"}
       </button>
 
-      <h1 className="text-2xl font-semibold tracking-tight">Create New Brand</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {requestId ? "Complete Brand Setup" : "Create New Brand"}
+      </h1>
+
+      {requestId && (
+        <RequestSummary
+          request={request}
+          planName={brandPlans?.find((p) => p.id === request?.brandPlanId)?.name ?? ""}
+          chosenPlan={chosenPlan}
+        />
+      )}
 
       {/* ------------------------- Form + live preview --------------------- */}
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] xl:gap-8">
@@ -404,9 +524,10 @@ export default function AdminBrandCreatePage() {
                 <Field label="Brand Logo">
                   <DropZone
                     file={files.logoLight}
+                    existingUrl={existingAssets.logoLight}
                     accept={LOGO_ACCEPT}
                     hint="SVG, PNG, JPG (Max. 2MB)"
-                    onPick={(file) => setFiles((f) => ({ ...f, logoLight: file }))}
+                    onPick={(file) => pickAsset("logoLight", file)}
                   />
                 </Field>
                 <div>
@@ -637,7 +758,11 @@ export default function AdminBrandCreatePage() {
           <Section
             n={4}
             title="Brand Settings"
-            blurb="Configure how your brand behaves and interacts with customers."
+            blurb={
+              request
+                ? "The settings and permissions this brand gets. Only you can change them — the brand's admin can't."
+                : "Configure how your brand behaves and interacts with customers."
+            }
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <ToggleCard
@@ -695,153 +820,122 @@ export default function AdminBrandCreatePage() {
             </Field>
           </Section>
 
-          {/* ------------------------ 5 · Colours & theme ------------------- */}
+          {/* ---------------------- 5 · Billing & limits ------------------- */}
           <Section
             n={5}
-            title="Colors & Theme"
-            blurb="Choose your brand colors to define its visual identity."
+            title="Brand Plan"
+            blurb="What this brand pays the platform every month — a brand plan from Brand Subscriptions, or a custom deal set by hand. Not the plans it sells its own customers."
           >
-            {catalog ? (
-              <div className="space-y-6">
-                <div>
-                  <Label className="text-sm font-medium">Primary Color</Label>
-                  <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {headline.map((p) => (
-                      <PaletteCard
-                        key={p.id}
-                        preset={p}
-                        selected={draft.themePreset === p.id}
-                        onSelect={() =>
-                          patch({
-                            themePreset: p.id,
-                            primaryColor: p.primary,
-                            accentColor: p.accent,
-                          })
-                        }
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {!!extras.length && (
-                  <div>
-                    <Label className="text-sm font-medium">Additional Colors</Label>
-                    <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      {visibleExtras.map((p, i) => (
-                        <PaletteCard
-                          key={p.id}
-                          preset={p}
-                          selected={draft.themePreset === p.id}
-                          // The last tile of the collapsed row carries the
-                          // "there are more" affordance, as in the mock.
-                          more={
-                            !showAllPalettes &&
-                            i === visibleExtras.length - 1 &&
-                            extras.length > visibleExtras.length
-                              ? () => setShowAllPalettes(true)
-                              : undefined
-                          }
-                          onSelect={() =>
-                            patch({
-                              themePreset: p.id,
-                              primaryColor: p.primary,
-                              accentColor: p.accent,
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
+            {brandPlans === null ? (
+              <CatalogSkeleton />
+            ) : (
+              <>
+                {brandPlans.length === 0 && (
+                  <p className="mb-3 rounded-xl border border-dashed border-border p-3 text-xs text-muted-foreground">
+                    No brand plans yet — create them under Brand Subscriptions, or set this brand up by hand.
+                  </p>
+                )}
+                <BrandPlanPicker
+                  // Archived plans aren't offered, except the one this brand is already on.
+                  plans={brandPlans.filter((p) => p.active || p.id === draft.brandPlanId)}
+                  addons={brandAddons}
+                  value={draft.brandPlanId}
+                  onChange={(brandPlanId) => patch({ brandPlanId })}
+                  allowCustom
+                />
+                {draft.brandPlanId === null && (
+                  <div className="mt-5 border-t border-border pt-5">
+                    <BrandBillingFields value={draft} onChange={patch} feeRequired />
                   </div>
                 )}
-              </div>
-            ) : (
-              <CatalogSkeleton />
+              </>
             )}
           </Section>
 
-          {/* --------------------------- 6 · Typography --------------------- */}
+          {/* ------------------------- 6 · Look & logos -------------------- */}
           <Section
             n={6}
-            title="Typography"
-            blurb="Select the fonts for your brand's text and headings."
+            title="Look & Logos"
+            blurb="Colours, typeface and marks — what this brand's customers see. Anything left empty falls back to the platform's own."
           >
-            {catalog ? (
-              <div className="space-y-5">
-                <Field
-                  id="b-font"
-                  label="Font Family"
-                  hint="One typeface per brand — used for both headings and body text. Business faces are geometric sans; Classic faces are serif."
-                  className="max-w-sm"
-                >
-                  <Select
-                    value={draft.fontFamily}
-                    onValueChange={(fontFamily) => patch({ fontFamily })}
-                  >
-                    <SelectTrigger id="b-font" className="h-10 rounded-xl">
-                      <SelectValue placeholder="Select a typeface" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {catalog.fonts.map((f) => (
-                        <SelectItem key={f.id} value={f.id}>
-                          <span style={{ fontFamily: f.stack }}>{f.label}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-
-                {font && (
-                  <TypeSpecimen font={font} primary={draft.primaryColor} accent={draft.accentColor} />
-                )}
-              </div>
-            ) : (
-              <CatalogSkeleton />
-            )}
-          </Section>
-
-          {/* --------------------------- 7 · File uploads ------------------- */}
-          <Section
-            n={7}
-            title="File Uploads"
-            blurb="Add the marks for your brand (optional). These replace the platform's everywhere this brand's users look — anything left empty falls back to the platform's own asset."
-          >
-            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-              <AssetTile
-                label="Light-mode logo"
-                hint="SVG, PNG, JPG (Max. 2MB)"
-                file={files.logoLight}
-                onPick={(file) => setFiles((f) => ({ ...f, logoLight: file }))}
+            {/* Colours and logos each open their own dialog (same pieces as the public request form);
+                the typeface and its live preview stay on the page. */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ColoursChoice
+                presets={catalog?.presets ?? null}
+                value={draft.themePreset}
+                primary={draft.primaryColor}
+                accent={draft.accentColor}
+                brandName={draft.name}
+                logoUrl={logoPreview}
+                onPick={(p) => patch({ themePreset: p.id, primaryColor: p.primary, accentColor: p.accent })}
               />
-              <AssetTile
-                label="Dark-mode logo"
-                hint="A light mark for dark backgrounds"
-                file={files.logoDark}
-                onPick={(file) => setFiles((f) => ({ ...f, logoDark: file }))}
-                dark
-              />
-              <AssetTile
-                label="Favicon"
-                hint="Square PNG or ICO, 32×32"
-                file={files.favicon}
-                onPick={(file) => setFiles((f) => ({ ...f, favicon: file }))}
+              <LogosChoice
+                files={files}
+                existing={existingAssets}
+                onPick={pickAsset}
+                accept={LOGO_ACCEPT}
+                lightHint="SVG, PNG, JPG (Max. 2MB)"
+                description={
+                  <>
+                    Optional — these replace the platform&rsquo;s marks everywhere this brand&rsquo;s users
+                    look. Uploaded the moment the brand is created; its own mail / SMS / WhatsApp senders
+                    are set up afterwards, from its White-label tab.
+                  </>
+                }
               />
             </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Uploaded the moment the brand is created. This brand's own mail / SMS / WhatsApp
-              senders are set up afterwards, from its White-label tab.
-            </p>
+
+            <div className="mt-6">
+              {catalog ? (
+                <TypographyPicker
+                  fonts={catalog.fonts}
+                  value={draft.fontFamily}
+                  primary={draft.primaryColor}
+                  accent={draft.accentColor}
+                  onChange={(fontFamily) => patch({ fontFamily })}
+                />
+              ) : (
+                <CatalogSkeleton />
+              )}
+            </div>
           </Section>
 
-          {/* ------------------------ 8 · Brand administrator --------------- */}
+          {/* ------------------------ 7 · Brand administrator --------------- */}
           <Section
-            n={8}
+            n={7}
             title="Brand Administrator"
             blurb="Who runs this brand. They get full control of their tenant — and no access to platform keys or any other brand."
             action={
-              <Switch checked={withAdmin} onCheckedChange={setWithAdmin} aria-label="Create an admin" />
+              request ? undefined : (
+                <Switch checked={withAdmin} onCheckedChange={setWithAdmin} aria-label="Create an admin" />
+              )
             }
           >
-            {withAdmin ? (
+            {request ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex items-center gap-3 rounded-xl border border-border p-4">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary-tint text-primary">
+                    <UserCog className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{request.contactName}</p>
+                    <p className="truncate text-xs text-muted-foreground">{request.email}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Signs in with the password they chose when applying.
+                    </p>
+                  </div>
+                </div>
+                <ToggleCard
+                  id="b-notify-applicant"
+                  icon={<Mail className="size-4" />}
+                  title="Email them it's live"
+                  blurb="Sends their sign-in address. No password is sent — they already have it."
+                  checked={notifyApplicant}
+                  onChange={setNotifyApplicant}
+                />
+              </div>
+            ) : withAdmin ? (
               <div className="grid gap-5 sm:grid-cols-2">
                 <Field id="b-admin-name" label="Full Name" required>
                   <InputWithIcon icon={<UserCog className="size-4" />}>
@@ -903,6 +997,9 @@ export default function AdminBrandCreatePage() {
           </Section>
 
           {/* ------------------------------- Actions ----------------------- */}
+          {billingProblem && draft.name.trim().length >= 2 && (
+            <p className="text-right text-xs text-danger">{billingProblem}</p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
             <Button
               variant="outline"
@@ -917,8 +1014,14 @@ export default function AdminBrandCreatePage() {
               disabled={!canSave || saving}
               onClick={() => void save()}
             >
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              Save Brand
+              {saving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : requestId ? (
+                <Wand2 className="size-4" />
+              ) : (
+                <Save className="size-4" />
+              )}
+              {requestId ? "Complete Setup" : "Save Brand"}
             </Button>
           </div>
         </div>
@@ -1032,7 +1135,6 @@ export default function AdminBrandCreatePage() {
 /** Radix Select refuses an empty item value, so "use the platform's" needs a sentinel. */
 const NONE = "__none__";
 const TIME_ZONES = listTimeZones();
-const LOGO_ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml";
 
 const WHY_BRAND = [
   "Multi-brand management",
@@ -1042,19 +1144,83 @@ const WHY_BRAND = [
   "Dedicated support",
 ];
 
-/** A blob URL for a picked file, revoked when it's replaced or the page closes. */
-function useObjectUrl(file: File | null): string {
-  const [url, setUrl] = useState("");
-  useEffect(() => {
-    if (!file) {
-      setUrl("");
-      return;
-    }
-    const next = URL.createObjectURL(file);
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [file]);
-  return url;
+/** What the applicant sent, above the form — the context for every choice below. */
+function RequestSummary({
+  request,
+  planName,
+  chosenPlan,
+}: {
+  request: BrandRequest | null;
+  /** The plan the applicant picked, by name ("" = none or not loaded). */
+  planName: string;
+  /** The plan picked below now — what their card is charged at setup. */
+  chosenPlan: BrandPlan | null;
+}) {
+  if (!request) {
+    return <div className="mt-4 h-24 animate-pulse rounded-2xl bg-muted" />;
+  }
+  return (
+    <Card className="mt-4 border-primary/30 bg-primary-tint-soft p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
+          <Inbox className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">
+            Requested by {request.contactName}
+            <span className="ml-2 font-normal text-muted-foreground">{timeAgo(request.createdAt)}</span>
+          </p>
+          <p className="mt-0.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex min-w-0 items-center gap-1 break-all">
+              <Mail className="size-3 shrink-0" /> {request.email}
+            </span>
+            {request.phone && (
+              <span className="inline-flex items-center gap-1">
+                <Phone className="size-3 shrink-0" /> {request.phone}
+              </span>
+            )}
+            {request.customDomain && (
+              <span className="inline-flex min-w-0 items-center gap-1 break-all" title="Their own domain">
+                <Globe className="size-3 shrink-0" /> {request.customDomain}
+              </span>
+            )}
+          </p>
+          {request.notes && (
+            <p className="mt-2 whitespace-pre-line break-words rounded-lg bg-card/70 p-2.5 text-xs leading-relaxed">
+              {request.notes}
+            </p>
+          )}
+          {(planName || request.card) && (
+            <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              {planName && (
+                <span>
+                  <span className="text-muted-foreground">Chose: </span>
+                  <span className="font-medium">{planName}</span>
+                </span>
+              )}
+              {request.card ? (
+                <span className="inline-flex items-center gap-1 capitalize">
+                  <span className="text-muted-foreground normal-case">Card saved: </span>
+                  {request.card.brand} •••• {request.card.last4}
+                  <span className="text-muted-foreground normal-case">
+                    {chosenPlan && chosenPlan.priceCents > 0
+                      ? ` — charged ${formatMoney(chosenPlan.priceCents, chosenPlan.currency)} when you complete setup`
+                      : " — kept for later charges"}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-muted-foreground">No card — their admin pays at first sign-in.</span>
+              )}
+            </p>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">
+            Their details are filled in below. Review them, choose the brand&rsquo;s settings,
+            permissions and plans, then complete the setup.
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
 }
 
 /** One numbered step of the form. The badge straddles the card's left edge, as
@@ -1172,241 +1338,17 @@ function ToggleCard({
   );
 }
 
-function PaletteCard({
-  preset,
-  selected,
-  more,
-  onSelect,
-}: {
-  preset: { id: string; label: string; primary: string; accent: string; note: string };
-  selected: boolean;
-  /** When set, the tile also offers to reveal the palettes still hidden. */
-  more?: () => void;
-  onSelect: () => void;
-}) {
-  return (
-    <div
-      className={cn(
-        "relative flex items-center gap-3 rounded-xl border p-3 transition-all",
-        selected ? "border-primary ring-2 ring-primary/25" : "border-border hover:border-primary/40",
-      )}
-    >
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-pressed={selected}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:focus-ring"
-      >
-        <span
-          className="size-6 shrink-0 rounded-full ring-1 ring-black/5"
-          style={{ backgroundColor: preset.primary }}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{preset.label}</span>
-          <span className="block truncate font-mono text-[11px] uppercase text-muted-foreground">
-            {preset.primary}
-          </span>
-        </span>
-        {selected && <Check className="size-4 shrink-0 text-primary" />}
-      </button>
-      {more && !selected && (
-        <button
-          type="button"
-          onClick={more}
-          aria-label="Show every palette"
-          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:focus-ring"
-        >
-          <ChevronRight className="size-4" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-const FONT_GROUP: Record<BrandFontOption["group"], { label: string; icon: typeof Briefcase }> = {
-  business: { label: "Business", icon: Briefcase },
-  classic: { label: "Classic", icon: BookOpen },
-};
-
-// Live specimen of app chrome in the chosen font + colours. Every colour comes from the draft so it repaints on any picker change.
-// Shown once per theme: customers pick their own, and a colour that reads on white can vanish on
-// the dark surface (and the reverse), so both have to be on screen while the palette is chosen.
-function TypeSpecimen({
-  font,
-  primary,
-  accent,
-}: {
-  font: BrandFontOption;
-  primary: string;
-  accent: string;
-}) {
-  return (
-    <div>
-      <Label className="text-sm font-medium">Preview</Label>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-        Your customers choose light or dark for themselves — check the palette reads in both.
-      </p>
-      <div className="mt-2 grid gap-4 xl:grid-cols-2">
-        <SpecimenPane theme="light" font={font} primary={primary} accent={accent} />
-        <SpecimenPane theme="dark" font={font} primary={primary} accent={accent} />
-      </div>
-    </div>
-  );
-}
-
-function SpecimenPane({
-  theme,
-  font,
-  primary,
-  accent,
-}: {
-  theme: "light" | "dark";
-  font: BrandFontOption;
-  primary: string;
-  accent: string;
-}) {
-  const group = FONT_GROUP[font.group];
-  const GroupIcon = group.icon;
-  const dark = theme === "dark";
-  const ThemeIcon = dark ? Moon : Sun;
-  // Mirror the live app's rule exactly, or the preview would lie: fills keep the brand's
-  // literal hex, anything read as text or an outline uses the re-levelled ink.
-  const primaryInk = `hsl(${readableInk(primary, theme) ?? primary})`;
-  const accentInk = `hsl(${readableInk(accent, theme) ?? accent})`;
-
-  return (
-    <div>
-      {/* Caption sits OUTSIDE the island, so it stays in the admin's own theme. */}
-      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <ThemeIcon className="size-3.5" />
-        {dark ? "Dark mode" : "Light mode"}
-      </p>
-      {/* The island class repaints surfaces and text only — `primary`/`accent` stay the
-          brand's real hex on both, which is exactly what needs judging. `@container` so the
-          panel lays itself out by its OWN width, side by side or stacked. */}
-      <div className={dark ? "preview-dark" : "preview-light"}>
-        <div className="@container relative overflow-hidden rounded-[var(--radius-card)] border border-border bg-background text-foreground">
-          {/* Colour wash — the brand's own hues, not the app's. */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background: `radial-gradient(120% 140% at 100% 0%, ${primary}17 0%, transparent 55%),
-                radial-gradient(90% 120% at 0% 100%, ${accent}14 0%, transparent 60%)`,
-            }}
-          />
-          {/* Ornament only where the pane is actually wide — i.e. stacked, not side by side. */}
-          <SpecimenGlyphs primary={primary} accent={accent} font={font} />
-
-          {/* Group badge — top-right corner, tinted with the brand's primary. */}
-          <span
-            className="absolute right-5 top-5 z-10 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold @lg:right-8 @lg:top-7"
-            style={{ backgroundColor: `${primary}1a`, color: primaryInk }}
-          >
-            <GroupIcon className="size-3.5" />
-            {group.label}
-          </span>
-
-          <div className="relative z-10 px-5 py-7 @lg:px-8 @lg:py-8 @2xl:max-w-[62%]">
-            <div className="flex items-center gap-3">
-              <span
-                className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-semibold text-white shadow-sm"
-                style={{ background: `linear-gradient(135deg, ${primary}, ${accent})` }}
-              >
-                <span style={{ fontFamily: font.stack }}>Aa</span>
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-base font-semibold">{font.label}</p>
-                <p className="truncate text-xs text-muted-foreground">{font.note}</p>
-              </div>
-            </div>
-
-            <div className="mt-6" style={{ fontFamily: font.stack }}>
-              <p className="text-2xl font-bold leading-[1.15] tracking-tight @lg:text-[2rem]">
-                Never miss another call
-              </p>
-              <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                Body text in {font.label} — roughly the density a customer reads on the dashboard.
-              </p>
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-2.5">
-              <span
-                className="inline-flex h-10 items-center gap-1.5 rounded-xl px-4 text-sm font-medium text-white shadow-sm"
-                style={{ backgroundColor: primary }}
-              >
-                Primary action
-                <ArrowRight className="size-3.5" />
-              </span>
-              <span
-                className="inline-flex h-10 items-center rounded-xl border-[1.5px] bg-card px-4 text-sm font-medium"
-                style={{ borderColor: primaryInk, color: primaryInk }}
-              >
-                Secondary
-              </span>
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold"
-                style={{ backgroundColor: `${accent}22`, color: accentInk }}
-              >
-                Accent badge
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Decorative "Aa" composition in brand hues. Ornamental only (aria-hidden), dropped in a narrow pane.
-function SpecimenGlyphs({
-  primary,
-  accent,
-  font,
-}: {
-  primary: string;
-  accent: string;
-  font: BrandFontOption;
-}) {
-  return (
-    // Inset from top/bottom, not `inset-0` — the strip's overflow-hidden hard-clipped the panel shadow at the edge.
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-x-0 inset-y-8 hidden @2xl:block"
-    >
-      <div
-        className="absolute -right-10 top-1/2 size-56 -translate-y-1/2 rotate-[14deg] rounded-[2rem]"
-        style={{
-          background: `linear-gradient(135deg, ${primary}33, ${accent}1f)`,
-          boxShadow: `0 20px 40px -18px ${primary}40`,
-        }}
-      />
-      <span
-        className="absolute right-16 top-1/2 size-2.5 -translate-y-20 rounded-full"
-        style={{ backgroundColor: accent }}
-      />
-      <span
-        className="absolute right-28 top-1/2 size-20 -translate-y-6 rounded-full border-2"
-        style={{ borderColor: `${primary}55` }}
-      />
-      <div
-        className="absolute right-20 top-1/2 grid size-24 -translate-y-1/2 rotate-[-8deg] place-items-center rounded-2xl bg-card text-3xl font-bold shadow-[var(--shadow-panel)]"
-        style={{ color: accent, fontFamily: font.stack }}
-      >
-        Aa
-      </div>
-    </div>
-  );
-}
-
 /** The big click-or-drag logo target from the top of the form. */
 function DropZone({
   file,
+  existingUrl = "",
   accept,
   hint,
   onPick,
 }: {
   file: File | null;
+  /** An already-uploaded logo (a brand request's), shown until replaced or removed. */
+  existingUrl?: string;
   accept: string;
   hint: string;
   onPick: (file: File | null) => void;
@@ -1441,10 +1383,12 @@ function DropZone({
           e.target.value = ""; // let the same file be re-picked after a removal
         }}
       />
-      {file ? (
+      {file || existingUrl ? (
         <>
-          <p className="max-w-full truncate text-sm font-medium">{file.name}</p>
-          <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</p>
+          <p className="max-w-full truncate text-sm font-medium">{file ? file.name : "Logo from the request"}</p>
+          <p className="text-xs text-muted-foreground">
+            {file ? `${(file.size / 1024).toFixed(0)} KB` : "Kept unless you replace it"}
+          </p>
           <div className="mt-1 flex items-center gap-2">
             <button
               type="button"
@@ -1474,134 +1418,6 @@ function DropZone({
         </button>
       )}
     </div>
-  );
-}
-
-/** A compact file card — the asset row at the foot of the form. */
-function AssetTile({
-  label,
-  hint,
-  file,
-  dark,
-  onPick,
-}: {
-  label: string;
-  hint: string;
-  file: File | null;
-  dark?: boolean;
-  onPick: (file: File | null) => void;
-}) {
-  const input = useRef<HTMLInputElement>(null);
-  const url = useObjectUrl(file);
-
-  const [over, setOver] = useState(false);
-
-  return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setOver(false);
-        onPick(e.dataTransfer.files?.[0] ?? null);
-      }}
-      className={cn(
-        "group relative flex items-center gap-3 rounded-xl border p-3 transition-colors",
-        over ? "border-primary bg-primary-tint-soft" : "border-border hover:border-primary/50",
-      )}
-    >
-      <span
-        className={cn(
-          "grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-border",
-          dark ? "bg-foreground/90" : "bg-warm",
-        )}
-      >
-        {url ? (
-          <img src={url} alt="" className="max-h-9 max-w-9 object-contain" />
-        ) : (
-          <ImageIcon className="size-4 text-muted-foreground" />
-        )}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{label}</p>
-        <p className="truncate text-xs text-muted-foreground">{file ? file.name : hint}</p>
-      </div>
-      <input
-        ref={input}
-        type="file"
-        accept={LOGO_ACCEPT + ",image/x-icon,.ico"}
-        className="hidden"
-        onChange={(e) => {
-          onPick(e.target.files?.[0] ?? null);
-          e.target.value = ""; // let the same file be re-picked after a removal
-        }}
-      />
-      {/* Overlay button, not a wrapper — nesting the Remove button inside would be invalid HTML. */}
-      <button
-        type="button"
-        onClick={() => input.current?.click()}
-        aria-label={file ? `Replace ${label}` : `Upload ${label}`}
-        className="absolute inset-0 cursor-pointer rounded-xl focus-visible:focus-ring"
-      />
-      {file ? (
-        <button
-          type="button"
-          onClick={() => onPick(null)}
-          aria-label={`Remove ${label}`}
-          className="relative grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-danger-tint hover:text-danger focus-visible:focus-ring"
-        >
-          <X className="size-4" />
-        </button>
-      ) : (
-        // Decorative once the card itself is the button — it would otherwise be
-        // a second tab stop onto the same action.
-        <span
-          aria-hidden
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors group-hover:text-primary"
-        >
-          <Upload className="size-4" />
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** The brand's mark as it will appear — the uploaded logo, or its initial on the
- *  chosen palette until one is picked. */
-function BrandMark({
-  logoUrl,
-  name,
-  primary,
-  accent,
-  className,
-}: {
-  logoUrl: string;
-  name: string;
-  primary: string;
-  accent: string;
-  className?: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "grid shrink-0 place-items-center overflow-hidden font-semibold text-white",
-        className,
-      )}
-      style={
-        logoUrl
-          ? { background: "var(--color-card)", boxShadow: "inset 0 0 0 1px var(--color-border)" }
-          : { background: `linear-gradient(135deg, ${primary}, ${accent})` }
-      }
-    >
-      {logoUrl ? (
-        <img src={logoUrl} alt="" className="size-full object-contain p-1.5" />
-      ) : (
-        (name.trim()[0] ?? "B").toUpperCase()
-      )}
-    </span>
   );
 }
 
@@ -1638,14 +1454,3 @@ function PreviewRow({
     </div>
   );
 }
-
-function CatalogSkeleton() {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="h-16 animate-pulse rounded-xl bg-muted" />
-      ))}
-    </div>
-  );
-}
-

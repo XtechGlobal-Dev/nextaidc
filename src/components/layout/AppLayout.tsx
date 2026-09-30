@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, Navigate, Outlet, useNavigate } from "react-router-dom";
+import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Clock,
   AlertTriangle,
@@ -38,6 +38,8 @@ import { useUiStore } from "@/stores/useUiStore";
 import { hasCustomerWorkspace } from "@/lib/roles";
 import { adminLandingPath } from "@/lib/onboardingRoute";
 import { useNotificationStore } from "@/stores/useNotificationStore";
+import { useBrandBillingStore } from "@/stores/useBrandBillingStore";
+import { serviceHoldCopy } from "@/lib/brandBilling";
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
@@ -50,6 +52,16 @@ export function AppLayout() {
   const forceSuspendLogout = useAuthStore((s) => s.forceSuspendLogout);
   const impersonator = useAuthStore((s) => s.impersonator);
   const stopImpersonation = useAuthStore((s) => s.stopImpersonation);
+  const location = useLocation();
+
+  // A brand's own admin-side accounts answer to the brand's bill from the platform: unpaid, the panel
+  // is limited to Billing (the API still enforces the part that matters — the AI pause).
+  const brandSide = !impersonator && !!user?.brandId && (user.role === "ADMIN" || user.role === "STAFF");
+  const brandBilling = useBrandBillingStore((s) => s.billing);
+  const refreshBrandBilling = useBrandBillingStore((s) => s.refresh);
+  useEffect(() => {
+    if (brandSide) void refreshBrandBilling();
+  }, [brandSide, refreshBrandBilling]);
 
   // Expose the sticky impersonation banner's measured height as --chrome-top so the header's sticky top
   // sits below it, not under it. Measured because the banner is responsive.
@@ -112,6 +124,25 @@ export function AppLayout() {
 
   if (user?.role === "RESELLER") return <Navigate to="/reseller" replace />;
   if (adminSuspended) return <Navigate to="/login" replace />;
+
+  const billingLocked = brandSide && !!brandBilling?.locked;
+  if (billingLocked && user?.role === "ADMIN" && !location.pathname.startsWith("/dashboard/admin/billing")) {
+    return <Navigate to="/dashboard/admin/billing" replace />;
+  }
+  // Staff can't pay, so they get a notice where the page would be.
+  const staffBillingLocked = billingLocked && user?.role === "STAFF";
+  // Not locked, but worth saying: a failed renewal still in grace, or a monthly cap reached.
+  const brandNotice =
+    brandSide && brandBilling && !brandBilling.locked
+      ? brandBilling.status === "past_due"
+        ? {
+            title: "Payment to the platform failed",
+            body: `Update the card by ${
+              brandBilling.pausesAt ? new Date(brandBilling.pausesAt).toLocaleDateString() : "soon"
+            } to keep your customers' AI running.`,
+          }
+        : serviceHoldCopy(brandBilling.usage.hold)
+      : null;
 
   function exitImpersonation() {
     stopImpersonation();
@@ -186,12 +217,30 @@ export function AppLayout() {
               <strong>{blocked.title}</strong> — {blocked.reason}. AI calling is
               paused.
             </span>
-            <Link
-              to={trial?.canRenew ? "/dashboard/plans?renew=1" : "/subscribe"}
-              className="ml-auto rounded-md bg-danger px-3 py-1 text-xs font-semibold text-white hover:opacity-90"
-            >
-              {trial?.canRenew ? "Renew plan" : blocked.cta}
-            </Link>
+            {!trial?.brandHold && (
+              <Link
+                to={trial?.canRenew ? "/dashboard/plans?renew=1" : "/subscribe"}
+                className="ml-auto rounded-md bg-danger px-3 py-1 text-xs font-semibold text-white hover:opacity-90"
+              >
+                {trial?.canRenew ? "Renew plan" : blocked.cta}
+              </Link>
+            )}
+          </div>
+        )}
+        {brandNotice && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-warning/30 bg-warning-tint px-8 py-2.5 text-sm text-foreground">
+            <AlertTriangle className="size-4 shrink-0 text-warning" />
+            <span>
+              <strong>{brandNotice.title}</strong> — {brandNotice.body}
+            </span>
+            {user?.role === "ADMIN" && (
+              <Link
+                to="/dashboard/admin/billing"
+                className="ml-auto rounded-md border border-warning/50 bg-card px-3 py-1 text-xs font-semibold text-foreground hover:bg-warning-tint"
+              >
+                Billing
+              </Link>
+            )}
           </div>
         )}
         {/* Mobile top bar — sticky for accounts with no bottom app bar (STAFF,
@@ -294,7 +343,18 @@ export function AppLayout() {
         <AppHeader />
 
         <div className="mx-auto max-w-[1600px] px-4 py-6 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:px-8 md:pt-8 nav:py-8">
-          <Outlet />
+          {staffBillingLocked ? (
+            <div className="mx-auto mt-16 max-w-md rounded-2xl border border-border bg-card p-8 text-center">
+              <AlertTriangle className="mx-auto size-8 text-warning" />
+              <h2 className="mt-3 text-lg font-semibold">This panel is paused</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Your brand&rsquo;s subscription to the platform needs paying. Ask your administrator to
+                sign in and settle it from Billing — everything opens again as soon as it&rsquo;s paid.
+              </p>
+            </div>
+          ) : (
+            <Outlet />
+          )}
         </div>
       </main>
       <BottomNav />

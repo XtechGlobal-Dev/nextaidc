@@ -19,6 +19,7 @@ import {
   needsTranslation,
 } from "../services/summary.js";
 import { enforceTrialMinutes } from "../services/billing.js";
+import { meterCall } from "../services/brandUsage.js";
 import { recordUsage, getPlanFeatures, getCallDurationCap } from "../services/trial.js";
 import { scheduleWrapUp, cancelWrapUp } from "../services/callWrapUp.js";
 import { settleAfterCall } from "../services/provisioning.js";
@@ -850,6 +851,8 @@ router.post(
             void recordUsage(conversion.userId, durationSec).then(() =>
               settleAfterCall(conversion.userId),
             );
+            // The brand's monthly counters too (minutes + one AI interaction).
+            void meterCall(conversion.userId, durationSec);
           }
           void enforceTrialMinutes(conversion.userId);
 
@@ -1062,6 +1065,7 @@ router.post(
     if (body.durationSec !== undefined) {
       await recordUsage(req.user!.sub, body.durationSec);
       await settleAfterCall(req.user!.sub);
+      void meterCall(req.user!.sub, body.durationSec);
     }
     await enforceTrialMinutes(req.user!.sub);
 

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
+  BarChart3,
   Building2,
+  CreditCard,
   ExternalLink,
   FileText,
   Globe,
@@ -44,6 +46,9 @@ import { BrandPlansTab } from "./BrandPlansTab";
 import { BLANK_SETUP, setupFrom, setupPayload, type SetupDraft } from "./brandSetupDraft";
 import { BrandDomainSection } from "./BrandDomainSection";
 import { BrandInsideTab } from "./BrandInsideTab";
+import { BrandBillingTab } from "./BrandBillingTab";
+import { BrandAnalyticsTab } from "./BrandAnalyticsTab";
+import { billingDraftProblem } from "./BrandBillingFields";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { brandStatusLabel, brandStatusVariant, formatDeletesAt } from "./brandStatus";
 
@@ -192,7 +197,8 @@ export default function AdminBrandDetailPage() {
     [draft],
   );
 
-  const canSave = draft.name.trim().length >= 2 && !!draft.slug;
+  const billingProblem = billingDraftProblem(draft);
+  const canSave = draft.name.trim().length >= 2 && !!draft.slug && !billingProblem;
 
   async function save() {
     setSaving(true);
@@ -216,7 +222,8 @@ export default function AdminBrandDetailPage() {
       });
       setBrand(next);
       setDraft(draftFrom(next));
-      toast.success("Brand saved");
+      if (next.billingWarning) toast.warning(next.billingWarning);
+      else toast.success("Brand saved");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Failed to save brand");
     } finally {
@@ -592,6 +599,16 @@ export default function AdminBrandDetailPage() {
               <UserCog className="size-4" /> Team
             </TabsTrigger>
             {brand && (
+              <TabsTrigger value="billing">
+                <CreditCard className="size-4" /> Billing
+              </TabsTrigger>
+            )}
+            {brand && (
+              <TabsTrigger value="analytics">
+                <BarChart3 className="size-4" /> Analytics
+              </TabsTrigger>
+            )}
+            {brand && (
               <TabsTrigger value="inside">
                 <Users className="size-4" /> Inside
               </TabsTrigger>
@@ -647,6 +664,26 @@ export default function AdminBrandDetailPage() {
           <TabsContent value="team" className="space-y-5">
             {brand && <BrandAdminsSection brand={brand} />}
             {brand && <BrandDepartmentsSection brand={brand} />}
+          </TabsContent>
+
+          <TabsContent value="billing" className="space-y-5">
+            {brand && (
+              <BrandBillingTab
+                brand={brand}
+                value={draft}
+                onChange={patch}
+                saveButton={
+                  <div className="flex items-center gap-3">
+                    {billingProblem && <p className="text-xs text-danger">{billingProblem}</p>}
+                    {saveButton}
+                  </div>
+                }
+              />
+            )}
+          </TabsContent>
+
+          <TabsContent value="analytics" className="space-y-5">
+            {brand && <BrandAnalyticsTab brand={brand} />}
           </TabsContent>
 
           <TabsContent value="inside" className="space-y-5">

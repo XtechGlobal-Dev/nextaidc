@@ -43,11 +43,25 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** Module flags. No brand = all on; an unwritten key is on, so a brand created before a module existed keeps getting it. */
-export function brandModules(brand: Brand | null | undefined): BrandModules {
+/** The super admin's on/off switches, as configured. No brand = all on; an unwritten key is on, so a brand
+ *  created before a module existed keeps getting it. This is what the brand editor shows and saves back —
+ *  never the effective set, or saving would switch every unbought add-on off for good. */
+export function brandModuleSwitches(brand: Brand | null | undefined): BrandModules {
   const raw = isPlainObject(brand?.modules) ? brand!.modules : {};
   const out = {} as BrandModules;
   for (const m of BRAND_MODULES) out[m.id] = (raw as Record<string, unknown>)[m.id] !== false;
+  return out;
+}
+
+/** What the brand's people actually get: switched on AND, when it's sold as an add-on, bought. Every gate
+ *  (nav, API middleware, public config) reads this one. */
+export function brandModules(brand: Brand | null | undefined): BrandModules {
+  const out = brandModuleSwitches(brand);
+  const prices = brandFeaturePrices(brand);
+  const bought = new Set(brandPurchasedFeatures(brand));
+  for (const m of BRAND_MODULES) {
+    if (prices[m.id] !== undefined && !bought.has(m.id)) out[m.id] = false;
+  }
   return out;
 }
 
@@ -60,6 +74,60 @@ export function brandModuleEnabled(
 
 export function brandModuleLabel(id: BrandModuleId): string {
   return BRAND_MODULES.find((m) => m.id === id)?.label ?? id;
+}
+
+export function isBrandModuleId(v: unknown): v is BrandModuleId {
+  return typeof v === "string" && BRAND_MODULES.some((m) => m.id === v);
+}
+
+/* ---------------------------- Feature add-ons ---------------------------- */
+// "Feature add-ons" — modules the brand must BUY from the platform. Not to be confused with the plan
+// "addon" (addonEditable / maxAddonCents), which is the brand's own markup on a plan's price.
+
+/** Largest monthly add-on price, in cents. */
+export const MAX_FEATURE_PRICE_CENTS = 10_000_000;
+
+/** Monthly price in cents of each module sold as an add-on. A listed module is locked until bought. */
+export function brandFeaturePrices(brand: Brand | null | undefined): Partial<Record<BrandModuleId, number>> {
+  const raw = isPlainObject(brand?.featurePrices) ? (brand!.featurePrices as Record<string, unknown>) : {};
+  const out: Partial<Record<BrandModuleId, number>> = {};
+  for (const m of BRAND_MODULES) {
+    const v = raw[m.id];
+    if (typeof v === "number" && Number.isInteger(v) && v > 0) out[m.id] = v;
+  }
+  return out;
+}
+
+/** Add-on modules the brand is paying for. */
+export function brandPurchasedFeatures(brand: Brand | null | undefined): BrandModuleId[] {
+  const raw = brand?.purchasedFeatures;
+  return Array.isArray(raw) ? raw.filter(isBrandModuleId) : [];
+}
+
+/** The platform's cut: is this brand billed at all? A fee, or any add-on it has bought. */
+export function brandOwesPlatform(brand: Brand | null | undefined): boolean {
+  return (brand?.platformFeeCents ?? 0) > 0 || brandPurchasedFeatures(brand).length > 0;
+}
+
+/* --------------------------------- Holds --------------------------------- */
+
+/** Why a brand's AI is paused. "minutes" stops calls; "ai" and "billing" stop every AI channel. */
+export type ServiceHold = "" | "minutes" | "ai" | "billing";
+
+export function brandServiceHold(brand: Brand | null | undefined): ServiceHold {
+  const v = brand?.serviceHold;
+  return v === "minutes" || v === "ai" || v === "billing" ? v : "";
+}
+
+/** May the brand's AI answer calls right now? */
+export function brandCallsAllowed(brand: Brand | null | undefined): boolean {
+  return brandServiceHold(brand) === "";
+}
+
+/** May the brand's AI send texts / replies / take actions right now? A minutes cap only stops calls. */
+export function brandAiAllowed(brand: Brand | null | undefined): boolean {
+  const hold = brandServiceHold(brand);
+  return hold === "" || hold === "minutes";
 }
 
 /* --------------------------------- Plans --------------------------------- */
@@ -135,6 +203,13 @@ export interface BrandSetupInput {
   addonEditable?: boolean;
   /** Most a brand may add per cycle, in cents; null = no cap. */
   maxAddonCents?: number | null;
+  /** What the brand pays the platform each month, in minor units; 0 = nothing. */
+  platformFeeCents?: number;
+  platformFeeCurrency?: string;
+  /** { moduleId: monthly cents } — modules sold as feature add-ons. */
+  featurePrices?: Partial<Record<string, number>> | null;
+  monthlyMinuteLimit?: number | null;
+  monthlyAiLimit?: number | null;
 }
 
 /** The columns resolveSetup() may write — typed so the result spreads straight
@@ -160,6 +235,11 @@ export type BrandSetupData = Partial<{
   scripts: Prisma.InputJsonValue;
   addonEditable: boolean;
   maxAddonCents: number | null;
+  platformFeeCents: number;
+  platformFeeCurrency: string;
+  featurePrices: Prisma.InputJsonValue;
+  monthlyMinuteLimit: number | null;
+  monthlyAiLimit: number | null;
 }>;
 
 const TEXT_FIELDS = [
@@ -222,6 +302,31 @@ function normalizeNullableInt(
   return n;
 }
 
+/** A monthly cap: a whole number, or blank for "no cap". */
+function normalizeLimit(v: number | null | undefined, label: string): number | null {
+  if (v === null || v === undefined || (v as unknown) === "") return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 10_000_000) {
+    throw badRequest(`${label} must be a whole number, or blank for no limit.`);
+  }
+  return n;
+}
+
+function normalizeFeaturePrices(raw: BrandSetupInput["featurePrices"]): Prisma.InputJsonValue {
+  const src = isPlainObject(raw) ? raw : {};
+  const out: Record<string, number> = {};
+  for (const m of BRAND_MODULES) {
+    const v = src[m.id];
+    if (v === undefined || v === null) continue;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n <= 0 || n > MAX_FEATURE_PRICE_CENTS) {
+      throw badRequest(`${m.label} add-on needs a monthly price above zero.`);
+    }
+    out[m.id] = n;
+  }
+  return out;
+}
+
 function normalizeModules(raw: BrandSetupInput["modules"]): Prisma.InputJsonValue {
   const out: Record<string, boolean> = {};
   const src = isPlainObject(raw) ? raw : {};
@@ -278,6 +383,25 @@ export function resolveSetup(input: BrandSetupInput): BrandSetupData {
   if (input.addonEditable !== undefined) data.addonEditable = Boolean(input.addonEditable);
   if (input.maxAddonCents !== undefined) {
     data.maxAddonCents = normalizeNullableInt(input.maxAddonCents, "Addon cap", 10_000_000);
+  }
+  if (input.platformFeeCents !== undefined) {
+    const n = Number(input.platformFeeCents);
+    if (!Number.isInteger(n) || n < 0 || n > 10_000_000) {
+      throw badRequest("The monthly fee must be a whole amount in minor units (0 for none).");
+    }
+    data.platformFeeCents = n;
+  }
+  if (input.platformFeeCurrency !== undefined) {
+    const c = (input.platformFeeCurrency ?? "").trim().toLowerCase();
+    if (!/^[a-z]{3}$/.test(c)) throw badRequest("Currency must be a three-letter code like usd.");
+    data.platformFeeCurrency = c;
+  }
+  if (input.featurePrices !== undefined) data.featurePrices = normalizeFeaturePrices(input.featurePrices);
+  if (input.monthlyMinuteLimit !== undefined) {
+    data.monthlyMinuteLimit = normalizeLimit(input.monthlyMinuteLimit, "Monthly minutes");
+  }
+  if (input.monthlyAiLimit !== undefined) {
+    data.monthlyAiLimit = normalizeLimit(input.monthlyAiLimit, "Monthly AI interactions");
   }
   return data;
 }

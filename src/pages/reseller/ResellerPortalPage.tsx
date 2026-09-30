@@ -112,13 +112,17 @@ export default function ResellerPortalPage() {
     }
   }, []);
 
+  // Non-resellers are redirected below; don't fire a request the API will 403 on the way out.
+  const isReseller = user?.role === "RESELLER";
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (isReseller) void load();
+  }, [load, isReseller]);
 
   // Self-contained poll (30s + focus): this page is outside AppLayout so the SSE driver doesn't reach it, and
   // its figures come from sub-customers' channels anyway. `silent` skips the spinner and error toast.
   useEffect(() => {
+    if (!isReseller) return;
     const refresh = () => void load(false, true);
     const id = window.setInterval(() => {
       if (document.visibilityState === "visible") refresh();
@@ -133,7 +137,7 @@ export default function ResellerPortalPage() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [load]);
+  }, [load, isReseller]);
 
   // Only resellers belong here.
   if (user && user.role !== "RESELLER") return <Navigate to="/dashboard" replace />;

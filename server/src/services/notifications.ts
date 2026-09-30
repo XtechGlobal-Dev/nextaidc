@@ -84,6 +84,21 @@ export async function notifyAdmins(n: NotificationInput): Promise<void> {
   }
 }
 
+/** The platform's owners only (SUPER_ADMIN, in Main) — e.g. a brand's billing or usage alert. Best-effort. */
+export async function notifyPlatformOwners(n: NotificationInput): Promise<void> {
+  try {
+    const owners = await prisma.user.findMany({ where: { role: "SUPER_ADMIN" }, select: { id: true } });
+    await notifyIn(
+      controlPlaneAsTenant(),
+      owners.map((o) => o.id),
+      n,
+    );
+    publishToAdmins({ type: n.type });
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Current brand's admins only — the super admin can't open a brand's customer panel, so it'd be noise. No-op without a brand. */
 export async function notifyBrandAdmins(n: NotificationInput): Promise<void> {
   try {

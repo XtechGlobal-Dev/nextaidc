@@ -12,6 +12,7 @@ import {
 import { formatLocal } from "../services/booking/hours.js";
 import { isTwilioConfigured } from "../services/sms.js";
 import { parseToolCalls, toolArgString as str } from "../lib/vapiToolCalls.js";
+import { aiAllowedFor, meterAiInteraction } from "../services/brandUsage.js";
 
 // Vapi booking tool dispatcher. PUBLIC, no auth — owner comes from `?uid=` on the tool URL
 // (web test calls use a transient assistant, so the id can't come from anywhere else).
@@ -143,10 +144,17 @@ router.post(
       return;
     }
     const results = [];
+    // One check per request: a brand out of AI allowance (or unpaid) takes no booking actions.
+    const allowed = await aiAllowedFor(uid);
     for (const c of calls) {
       let result: string;
       try {
-        result = await runTool(uid, callerNumber, c.name, c.args);
+        if (!allowed) {
+          result = "I'm not able to manage bookings right now — our team will follow up with you.";
+        } else {
+          result = await runTool(uid, callerNumber, c.name, c.args);
+          void meterAiInteraction(uid);
+        }
       } catch (e) {
         console.error(`[booking] tool ${c.name} failed for uid ${uid}:`, e);
         result = "Sorry, something went wrong on my end.";

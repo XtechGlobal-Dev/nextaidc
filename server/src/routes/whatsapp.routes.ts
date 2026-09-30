@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { getEffective } from "../services/settings.js";
 import { sendWhatsApp } from "../services/whatsapp.js";
 import { getPlanFeatures } from "../services/trial.js";
+import { aiAllowedFor, meterAiInteraction } from "../services/brandUsage.js";
 import {
   resolveWhatsAppAgent,
   generateAgentReply,
@@ -91,6 +92,10 @@ async function handleMessage(from: string, body: string): Promise<void> {
     console.warn("[whatsapp] inbound message but owner's plan doesn't include WhatsApp");
     return;
   }
+  if (!(await aiAllowedFor(agent.userId))) {
+    console.warn("[whatsapp] inbound message but the brand's AI is paused (monthly cap or billing)");
+    return;
+  }
   const history = threads.get(from) ?? [];
   const reply = await generateAgentReply(agent.config, history, body);
 
@@ -98,6 +103,7 @@ async function handleMessage(from: string, body: string): Promise<void> {
   remember(from, { role: "assistant", content: reply });
 
   await sendWhatsApp(from, reply);
+  void meterAiInteraction(agent.userId);
 }
 
 // --- Inbound messages ---

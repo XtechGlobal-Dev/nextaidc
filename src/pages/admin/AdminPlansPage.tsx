@@ -192,13 +192,16 @@ export default function AdminPlansPage() {
   const [categories, setCategories] = useState<VoiceCategory[]>([]);
 
   // Voice categories need their own permission, so a 403 there degrades to an empty list, not a failed page.
+  // Voice Bank is platform-only, so a brand admin skips the call instead of drawing a guaranteed 403.
   useEffect(() => {
     let active = true;
     (async () => {
       try {
         const [list, cats] = await Promise.all([
           api.admin.plans.list(),
-          api.admin.voiceCategories.list().catch(() => [] as VoiceCategory[]),
+          isSuperAdmin
+            ? api.admin.voiceCategories.list().catch(() => [] as VoiceCategory[])
+            : Promise.resolve([] as VoiceCategory[]),
         ]);
         if (!active) return;
         setPlans(list);
@@ -211,7 +214,7 @@ export default function AdminPlansPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isSuperAdmin]);
 
   // Trial + grace settings — only for users who can manage settings (ADMIN).
   useEffect(() => {

@@ -21,6 +21,7 @@ import { allCallDbs, allTenants, type TenantClient } from "./tenantDb.js";
 import { runWithBrand } from "../lib/brandContext.js";
 import { runTenantRetirementSweep } from "./tenantProvisioning.js";
 import { runBrandDeactivationSweep } from "./brandDeactivation.js";
+import { refreshAllServiceHolds } from "./brandUsage.js";
 import { rollupBrandStats, catchUpBrandStats, msUntilNextUtc } from "./brandStats.js";
 import { env } from "../env.js";
 import { scheduleRecurring } from "../lib/jobQueue.js";
@@ -389,6 +390,9 @@ export function startScheduler(): void {
   // A deactivated brand is deleted for good (row and database) 30 days on. Daily, just after the above.
   setTimeout(() => void runBrandDeactivationSweep().catch(logSweepError("brand deactivation")), 25 * 60 * 1000);
   setInterval(() => void runBrandDeactivationSweep().catch(logSweepError("brand deactivation")), DAY_MS);
+  // Brand holds: lifts a monthly cap when the month turns over, pauses a brand whose billing grace ran out.
+  setTimeout(() => void refreshAllServiceHolds().catch(logSweepError("brand holds")), 2 * 60 * 1000);
+  setInterval(() => void refreshAllServiceHolds().catch(logSweepError("brand holds")), HOUR_MS);
 
   // Nightly brand stats rollup into Main. Fixed at 00:15 UTC because the row is a
   // calendar day; a night the process slept through is caught up at boot.
