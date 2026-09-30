@@ -10,6 +10,7 @@ export const RESERVED_PATH_SEGMENTS = new Set([
   "onboarding",
   "subscribe",
   "reseller",
+  "brand-setup",
   "api",
   "c",
   "assets",

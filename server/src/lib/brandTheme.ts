@@ -160,6 +160,8 @@ export const RESERVED_SLUGS = new Set([
   "billing", "pay", "checkout", "auth", "login", "signup", "account", "accounts",
   "super", "superadmin", "root", "system", "internal", "staging", "dev", "test",
   "demo", "sandbox", "vapi", "webhook", "webhooks", "ns1", "ns2", "mx", "email",
+  // SPA top-level routes on the platform door — a brand at /{slug} must not shadow them.
+  "brand-setup",
 ]);
 
 /** Lowercase, strip anything that isn't [a-z0-9-], collapse and trim dashes. */

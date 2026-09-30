@@ -45,6 +45,16 @@ import {
   verifyBrandDomain,
 } from "../services/brandDomains.js";
 import { deactivateBrand, destroyBrand, reactivateBrand } from "../services/brandDeactivation.js";
+import {
+  assertCurrencyChangeable,
+  brandBillingView,
+  cancelBrandBilling,
+  restartBrandBilling,
+  syncBrandSubscription,
+} from "../services/brandBilling.js";
+import { ensureBillingRow } from "../services/brandUsage.js";
+import { applyBrandPlan, assignBrandPlan } from "../services/brandPlanCatalog.js";
+import { brandAnalytics } from "../services/brandAnalytics.js";
 import { platformApiOrigin } from "../lib/brandUrls.js";
 import { isNeonConfigured, listRegions } from "../services/neonProjects.js";
 import { checkBrandDatabase } from "../services/tenantProvisioning.js";
@@ -266,13 +276,20 @@ router.get(
   asyncHandler(async (_req, res) => {
     const brands = await prisma.brand.findMany({ orderBy: { createdAt: "desc" } });
     const ids = brands.map((b) => b.id);
-    const [counts, wallets] = await Promise.all([brandCounts(ids), walletBalancesFor(ids)]);
+    const [counts, wallets, billingRows] = await Promise.all([
+      brandCounts(ids),
+      walletBalancesFor(ids),
+      prisma.brandBilling.findMany({ where: { brandId: { in: ids } }, select: { brandId: true, status: true } }),
+    ]);
+    const billingStatus = new Map(billingRows.map((b) => [b.brandId, b.status]));
     res.json(
       brands.map((b) => ({
         ...serializeBrand(b, counts.get(b.id)),
         // What the platform currently owes each brand, per currency — so the
         // list answers "who needs paying" without opening every brand.
         walletBalances: wallets.get(b.id) ?? [],
+        // How the brand stands with the platform: "none" when it owes nothing.
+        billingStatus: b.platformFeeCents > 0 ? (billingStatus.get(b.id) ?? "awaiting_card") : "none",
       })),
     );
   }),
@@ -313,6 +330,14 @@ const setupSchema = {
   defaultVoiceId: z.string().trim().max(120).optional(),
   addonEditable: z.boolean().optional(),
   maxAddonCents: z.number().int().min(0).max(10_000_000).nullable().optional(),
+  // What the brand pays the platform, feature add-ons, and monthly caps (services/brandBilling.ts).
+  platformFeeCents: z.number().int().min(0).max(10_000_000).optional(),
+  platformFeeCurrency: z.string().trim().max(3).optional(),
+  featurePrices: z.record(z.number().int().min(1).max(10_000_000)).nullable().optional(),
+  monthlyMinuteLimit: z.number().int().min(0).max(10_000_000).nullable().optional(),
+  monthlyAiLimit: z.number().int().min(0).max(10_000_000).nullable().optional(),
+  // The brand plan it's on (brand_plans). Set = fee, features and caps come from the plan; null = by hand.
+  brandPlanId: z.string().trim().max(64).nullable().optional(),
   scripts: z
     .object({
       head: z.string().max(20_000).optional(),
@@ -323,7 +348,7 @@ const setupSchema = {
     .optional(),
 };
 
-const brandBodySchema = z.object({
+export const brandBodySchema = z.object({
   name: z.string().trim().min(2, "Brand name must be at least 2 characters").max(60),
   slug: z.string().trim().max(40).optional().default(""),
   // Optional here because the schema is shared with PATCH; POST enforces its own required version.
@@ -352,85 +377,77 @@ const brandBodySchema = z.object({
     .optional(),
 });
 
-router.post(
-  "/brands",
-  asyncHandler(async (req, res) => {
-    const body = brandBodySchema.parse(req.body);
-    // A brand's address is set once at creation; slug and customDomain are locked out of PATCH.
+/** The brand half of a create body — everything but the admin. */
+export type BrandLaunchInput = Omit<z.infer<typeof brandBodySchema>, "admin">;
 
-    // Check the admin's email BEFORE creating the brand — otherwise a duplicate
-    // address leaves an orphan tenant behind that the operator has to clean up.
-    if (body.admin) {
-      const existing = await prisma.user.findUnique({ where: { email: body.admin.email } });
-      if (existing) {
-        throw badRequest(
-          `${body.admin.email} already has an account. Use a different address for this brand's admin.`,
-        );
-      }
-    }
+/** The first admin, created in the brand's own database right after it's provisioned. */
+export interface LaunchAdmin {
+  email: string;
+  fullName: string;
+  passwordHash: string;
+  /** Sends their welcome mail once the account exists; resolves to whether it went. */
+  welcome?: (brand: Brand, email: string) => Promise<boolean>;
+}
 
-    const brand = await createBrand(
-      { ...body, slug: body.slug || body.name, customDomain: body.customDomain ?? null },
-      req.user!.sub,
-    );
+/**
+ * Creates a brand (row + database) and, optionally, its first admin — the one
+ * path behind both "New brand" and "Complete setup" on a brand request. Once
+ * the brand exists nothing here throws: an admin that couldn't be created comes
+ * back as `adminError`, so the caller never unwinds a brand that stands.
+ */
+export async function launchBrand(input: BrandLaunchInput, createdById: string, admin?: LaunchAdmin) {
+  const created = await createBrand(
+    { ...input, slug: input.slug || input.name, customDomain: input.customDomain ?? null },
+    createdById,
+  );
+  // On a plan: the plan writes its fee, features and caps over whatever the body said.
+  if (input.brandPlanId) await assignBrandPlan(created.id, input.brandPlanId);
+  const brand = input.brandPlanId ? ((await prisma.brand.findUnique({ where: { id: created.id } })) ?? created) : created;
+  // A brand launched with a fee owes it from today: its admin is asked for a card on first sign-in.
+  if (brand.platformFeeCents > 0) await ensureBillingRow(brand.id);
 
-    // Register with the edge now so the cert is waiting when the client publishes DNS. Failure is reported, not fatal — the subdomain works regardless.
-    let domainEdge = { ok: true, message: "" };
-    if (brand.customDomain) domainEdge = await attachDomainToEdge(brand.customDomain);
+  // Register with the edge now so the cert is waiting when the client publishes DNS. Failure is reported, not fatal — the subdomain works regardless.
+  let domainEdge = { ok: true, message: "" };
+  if (brand.customDomain) domainEdge = await attachDomainToEdge(brand.customDomain);
 
-    let adminCreated: { id: string; email: string; emailSent: boolean } | null = null;
-    let adminError = "";
-    // The admin lives in the just-provisioned brand DB. If that failed, the brand stands (Retry on its page) and the admin is added later.
-    const tenant = body.admin ? await tenantFor(brand.id).catch(() => null) : null;
-    if (body.admin && !tenant) {
-      adminError =
-        "The brand's database isn't ready, so the admin wasn't created. Retry the database, then add the admin from the Team tab.";
-    }
-    if (body.admin && tenant) {
+  let adminCreated: { id: string; email: string; emailSent: boolean } | null = null;
+  let adminError = "";
+  // The admin lives in the just-provisioned brand DB. If that failed, the brand stands (Retry on its page) and the admin is added later.
+  const tenant = admin ? await tenantFor(brand.id).catch(() => null) : null;
+  if (admin && !tenant) {
+    adminError =
+      "The brand's database isn't ready, so the admin wasn't created. Retry the database, then add the admin from the Team tab.";
+  }
+  if (admin && tenant) {
+    try {
       const user = await tenant.user.create({
-        data: {
-          email: body.admin.email,
-          fullName: body.admin.fullName,
-          passwordHash: await hashPassword(body.admin.password),
-          role: "ADMIN",
-        },
+        data: { email: admin.email, fullName: admin.fullName, passwordHash: admin.passwordHash, role: "ADMIN" },
         select: { id: true, email: true },
       });
       let emailSent = false;
-      if (body.admin.sendWelcomeEmail) {
+      if (admin.welcome) {
         try {
-          emailSent = await sendTemplate("brand_admin_welcome", user.email, {
-            user_name: body.admin.fullName,
-            user_email: user.email,
-            password: body.admin.password,
-            brand_name: brand.name,
-            brand_url: brandLoginUrl(brand),
-          });
+          emailSent = await admin.welcome(brand, user.email);
         } catch {
           /* the account exists either way — a failed email must not undo it */
         }
       }
       adminCreated = { id: user.id, email: user.email, emailSent };
+    } catch (err) {
+      console.error(`[brands] admin creation failed for brand ${brand.id}:`, err);
+      adminError = `The brand was created, but its admin (${admin.email}) wasn't. Add them from the Team tab.`;
     }
+  }
 
-    void audit({
-      actorId: req.user!.sub,
-      actorBrandId: req.user!.brandId ?? null,
-      actorEmail: req.user!.email,
-      action: "brand.create",
-      targetType: "brand",
-      targetId: brand.id,
-      metadata: { slug: brand.slug, name: brand.name, adminEmail: adminCreated?.email ?? null },
-      ip: req.ip,
-    });
-
-    res.status(201).json({
+  return {
+    brand,
+    payload: {
       brand: {
         ...serializeBrand(brand, { admins: adminCreated ? 1 : 0, customers: 0, total: adminCreated ? 1 : 0 }),
         tenantDb: await tenantDbSummary(brand.id),
       },
       admin: adminCreated,
-      /** Why no admin was created although one was typed; empty otherwise. */
+      /** Why no admin was created although one was asked for; empty otherwise. */
       adminError,
       loginUrl: brandLoginUrl(brand),
       pathUrl: brandPathUrl(brand.slug),
@@ -444,7 +461,59 @@ router.post(
             edgeMessage: domainEdge.message,
           }
         : null,
+    },
+  };
+}
+
+router.post(
+  "/brands",
+  asyncHandler(async (req, res) => {
+    const { admin, ...input } = brandBodySchema.parse(req.body);
+    // A brand's address is set once at creation; slug and customDomain are locked out of PATCH.
+
+    // Check the admin's email BEFORE creating the brand — otherwise a duplicate
+    // address leaves an orphan tenant behind that the operator has to clean up.
+    if (admin) {
+      const existing = await prisma.user.findUnique({ where: { email: admin.email } });
+      if (existing) {
+        throw badRequest(
+          `${admin.email} already has an account. Use a different address for this brand's admin.`,
+        );
+      }
+    }
+
+    const { brand, payload } = await launchBrand(
+      input,
+      req.user!.sub,
+      admin && {
+        email: admin.email,
+        fullName: admin.fullName,
+        passwordHash: await hashPassword(admin.password),
+        welcome: admin.sendWelcomeEmail
+          ? (b, email) =>
+              sendTemplate("brand_admin_welcome", email, {
+                user_name: admin.fullName,
+                user_email: email,
+                password: admin.password,
+                brand_name: b.name,
+                brand_url: brandLoginUrl(b),
+              })
+          : undefined,
+      },
+    );
+
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: req.user!.brandId ?? null,
+      actorEmail: req.user!.email,
+      action: "brand.create",
+      targetType: "brand",
+      targetId: brand.id,
+      metadata: { slug: brand.slug, name: brand.name, adminEmail: payload.admin?.email ?? null },
+      ip: req.ip,
     });
+
+    res.status(201).json(payload);
   }),
 );
 
@@ -502,6 +571,7 @@ router.post(
   "/brands/:id/deactivate",
   asyncHandler(async (req, res) => {
     const brand = await deactivateBrand(req.params.id);
+    await cancelBrandBilling(brand.id);
     void audit({
       actorId: req.user!.sub,
       actorBrandId: req.user!.brandId ?? null,
@@ -520,6 +590,7 @@ router.post(
   "/brands/:id/reactivate",
   asyncHandler(async (req, res) => {
     const brand = await reactivateBrand(req.params.id);
+    await restartBrandBilling(brand.id);
     void audit({
       actorId: req.user!.sub,
       actorBrandId: req.user!.brandId ?? null,
@@ -531,6 +602,26 @@ router.post(
       ip: req.ip,
     });
     res.json(await brandDetail(brand));
+  }),
+);
+
+/** What the brand pays the platform: fee, add-ons, card, invoices and this month's usage against its caps. */
+router.get(
+  "/brands/:id/billing",
+  asyncHandler(async (req, res) => {
+    res.json(await brandBillingView(req.params.id, { invoices: true }));
+  }),
+);
+
+/** One brand's analytics: daily calls, minutes, customers and revenue, plus usage and billing. */
+router.get(
+  "/brands/:id/analytics",
+  asyncHandler(async (req, res) => {
+    const brand = await prisma.brand.findUnique({ where: { id: req.params.id } });
+    if (!brand) throw notFound("Brand not found");
+    const days = Number(req.query.days ?? 30);
+    if (![7, 30, 90, 365].includes(days)) throw badRequest("days must be 7, 30, 90 or 365");
+    res.json(await brandAnalytics(brand, days));
   }),
 );
 
@@ -551,7 +642,32 @@ router.patch(
     const body = brandBodySchema.partial().omit({ admin: true, slug: true, customDomain: true }).parse(req.body);
     // A plan the brand's customers are on stays offered, whatever the pick says.
     await assertPickKeepsSubscribedPlans(req.params.id, body.planIds);
-    const brand = await updateBrand(req.params.id, body);
+    await assertCurrencyChangeable(req.params.id, body.platformFeeCurrency);
+    let brand = await updateBrand(req.params.id, body);
+
+    // Fee, add-on prices, feature access or caps changed: bring Stripe and the hold in line. A Stripe
+    // failure doesn't undo the save — it's reported so the operator can save again.
+    let billingWarning = "";
+    const touchesBilling = (
+      ["platformFeeCents", "platformFeeCurrency", "featurePrices", "modules", "monthlyMinuteLimit", "monthlyAiLimit"] as const
+    ).some((k) => body[k] !== undefined);
+    if (touchesBilling || body.brandPlanId !== undefined) {
+      try {
+        if (body.brandPlanId !== undefined) {
+          await assignBrandPlan(brand.id, body.brandPlanId);
+        } else if (brand.brandPlanId) {
+          // Still on a plan: the plan wins over any hand-set billing that rode along with this save.
+          await applyBrandPlan(brand.id);
+        } else {
+          if (brand.platformFeeCents > 0) await ensureBillingRow(brand.id);
+          await syncBrandSubscription(brand.id);
+        }
+        brand = (await prisma.brand.findUnique({ where: { id: brand.id } })) ?? brand;
+      } catch (e) {
+        console.error(`[brands] billing sync failed for ${brand.id}:`, e);
+        billingWarning = "Saved, but Stripe couldn't be updated to match. Save again to retry.";
+      }
+    }
     void audit({
       actorId: req.user!.sub,
       actorBrandId: req.user!.brandId ?? null,
@@ -568,6 +684,7 @@ router.patch(
       loginUrl: brandLoginUrl(brand),
       pathUrl: brandPathUrl(brand.slug),
       readiness: brandReadiness(brand, counts.get(brand.id)),
+      billingWarning,
     });
   }),
 );
@@ -578,6 +695,8 @@ router.delete(
     const brand = await prisma.brand.findUnique({ where: { id: req.params.id } });
     if (!brand) throw notFound("Brand not found");
     const members = await prisma.customerDirectory.count({ where: { brandId: brand.id } });
+    // Stop the brand's own subscription first — the row it's mirrored in is about to go.
+    await cancelBrandBilling(brand.id);
     // Immediate and final: the database (with every account in it) goes with the row.
     await destroyBrand(brand);
     void audit({

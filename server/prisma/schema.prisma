@@ -714,6 +714,30 @@ model Brand {
   addonEditable   Boolean  @default(true)
   maxAddonCents   Int?
 
+  // What the BRAND pays the PLATFORM (see services/brandBilling.ts) — the
+  // opposite direction to the wallet. 0 = no fee (every brand from before this
+  // existed); anything else is charged monthly to the brand's own card.
+  platformFeeCents    Int    @default(0)
+  platformFeeCurrency String @default("usd")
+  /// Feature add-ons: { moduleId: monthly cents }. A module listed here is
+  /// locked until the brand buys it; unlisted modules follow `modules` as before.
+  featurePrices       Json   @default("{}")
+  /// Module ids the brand is paying for, kept in step with its Stripe items.
+  purchasedFeatures   Json   @default("[]")
+  /// Monthly caps across ALL the brand's customers (UTC calendar month);
+  /// null = no cap. AI interactions = calls + AI texts/replies/tool actions.
+  monthlyMinuteLimit  Int?
+  monthlyAiLimit      Int?
+  /// Why the brand's AI is paused right now: "" none | "minutes" (calls only) |
+  /// "ai" (every AI channel) | "billing" (unpaid past grace). Derived, written
+  /// by services/brandUsage.ts, and read from the brand cache on every call.
+  serviceHold         String @default("")
+  /// The brand plan it's on (services/brandPlans.ts). Set = the fee, features,
+  /// add-on prices and caps above are the plan's, rewritten whenever the plan or
+  /// the add-on list changes. Null = set by hand ("custom", and older brands).
+  brandPlanId         String?
+  brandPlan           BrandPlan? @relation(fields: [brandPlanId], references: [id], onDelete: SetNull)
+
   /// Who created it (a SUPER_ADMIN user id) — kept as a plain id, not a
   /// relation, so deleting that admin never blocks deleting a brand.
   createdById String?
@@ -744,7 +768,185 @@ model Brand {
   statsDaily BrandStatsDaily[]
   directory  CustomerDirectory[]
 
+  billing BrandBilling?
+  usage   BrandUsageMonthly[]
+
   @@map("brands")
+}
+
+/// What a BRAND pays the PLATFORM each month, as a catalog the super admin
+/// curates on Brand Subscriptions. Nothing to do with SubscriptionPlan — those
+/// are what a brand sells its own customers.
+model BrandPlan {
+  id          String @id @default(cuid())
+  name        String
+  description String @default("")
+  /// Monthly, in minor units of `currency`. 0 = free.
+  priceCents  Int
+  currency    String @default("usd")
+  /// Module ids included in the price. Every other module is sold as an add-on
+  /// (BrandAddonPrice) — or not offered, when the add-on list doesn't carry it.
+  features    Json   @default("[]")
+  /// Caps across the brand's customers per UTC month; null = none.
+  monthlyMinuteLimit Int?
+  monthlyAiLimit     Int?
+  /// Archived plans stay on the brands already using them but aren't offered.
+  active      Boolean @default(true)
+  sortOrder   Int     @default(0)
+  /// Highlighted as "Popular" on the request form.
+  recommended Boolean @default(false)
+  /// Pre-selected on the request form and in the create wizard. At most one.
+  isDefault   Boolean @default(false)
+
+  brands Brand[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("brand_plans")
+}
+
+/// The add-on list: what each module costs a brand whose plan doesn't include
+/// it, per month, in that plan's currency. No row (or inactive) = not offered.
+model BrandAddonPrice {
+  moduleId   String  @id
+  priceCents Int
+  active     Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("brand_addon_prices")
+}
+
+/// The brand as a customer of the PLATFORM's Stripe account: the card, the
+/// monthly subscription for its fee and feature add-ons, and where payment
+/// stands. One row per brand that has ever needed to pay.
+model BrandBilling {
+  brandId String @id
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  stripeCustomerId     String? @unique
+  stripeSubscriptionId String? @unique
+
+  /// awaiting_card — owes a fee, has never paid
+  /// active        — paid up
+  /// past_due      — a renewal failed; Stripe is retrying
+  /// canceled      — the subscription ended
+  status String @default("awaiting_card")
+
+  /// When paying became required (awaiting_card's grace clock).
+  requiredSince    DateTime  @default(now())
+  /// When the current failure run started (past_due's grace clock).
+  pastDueSince     DateTime?
+  currentPeriodEnd DateTime?
+  lastPaidAt       DateTime?
+  lastPaidCents    Int?
+
+  /// The card on file, for display only.
+  cardBrand String @default("")
+  cardLast4 String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("brand_billing")
+}
+
+/// One brand's metered usage for one UTC calendar month, counted across all
+/// its customers. Enforced against Brand.monthlyMinuteLimit / monthlyAiLimit.
+model BrandUsageMonthly {
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  /// "2026-09"
+  period  String
+
+  /// Billed call minutes (each call rounded up, the way customers are billed).
+  minutes        Int @default(0)
+  aiInteractions Int @default(0)
+  /// Highest alert already sent this month per metric: 0, 80 or 100.
+  minutesAlerted Int @default(0)
+  aiAlerted      Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@id([brandId, period])
+  @@map("brand_usage_monthly")
+}
+
+/// A prospective brand asking to be set up, filed from the platform's public
+/// "Set up your brand" page. Holds only what the applicant typed: the brand
+/// itself (row, database, admin) is created when a super admin completes setup
+/// with the look, settings and permissions THEY choose. Platform-only — Main,
+/// never a tenant.
+model BrandRequest {
+  id     String @id @default(cuid())
+  /// pending   — waiting for a super admin
+  /// approving — a "Complete setup" is creating the brand right now; a claim,
+  ///             so two operators can't create it twice (stale after 10 min)
+  /// approved  — the brand exists (`brandId`)
+  /// declined  — turned down (`declineReason`)
+  status String @default("pending")
+
+  brandName  String
+  /// The subdomain asked for, normalised. A wish, not a hold: the super admin
+  /// may change it, and it is re-checked when the brand is created.
+  slug       String
+  tagline    String @default("")
+  /// The applicant's own domain (bare hostname, "" = none). Pre-fills the
+  /// brand's custom domain at setup; nothing is claimed until then.
+  customDomain String @default("")
+
+  /// The look the applicant picked — catalog ids and hexes, validated like a
+  /// brand's; "" = not chosen. Pre-fills the setup, where it can still change.
+  themePreset  String @default("")
+  primaryColor String @default("")
+  accentColor  String @default("")
+  fontFamily   String @default("")
+  /// Logos the applicant uploaded (public storage URLs, "" = none). They
+  /// become the brand's own at setup, or are deleted when it's declined.
+  logoLightUrl String @default("")
+  logoDarkUrl  String @default("")
+  faviconUrl   String @default("")
+
+  /// The brand plan they chose ("" = none). Pre-selects the plan at setup.
+  brandPlanId     String @default("")
+  /// Their card, saved (not charged) on the platform's Stripe: a customer and a
+  /// confirmed payment method. The first month is charged at "Complete setup";
+  /// a declined request's customer is deleted. "" = no card given.
+  stripeCustomerId String @default("")
+  paymentMethodId  String @default("")
+  cardBrand        String @default("")
+  cardLast4        String @default("")
+
+  contactName String
+  /// Becomes the sign-in email of the brand's first admin.
+  email       String
+  phone       String @default("")
+  /// ISO-2 / IANA, stamped on the brand as its locale defaults.
+  country     String @default("")
+  timezone    String @default("")
+
+  /// Plans aren't asked for here: which ones the brand sells is the super
+  /// admin's call at "Complete setup", same as for a brand they create.
+  notes       String @default("")
+
+  /// The applicant's chosen password, hashed. The admin account is created
+  /// with it on approval, so no password ever travels by email. Blanked once
+  /// used or declined.
+  passwordHash String @default("")
+
+  /// Plain ids, not relations: deleting a brand or an admin never blocks on this.
+  brandId       String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  declineReason String    @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email])
+  @@map("brand_requests")
 }
 
 /// A brand whose CALL DATA lives in its own Neon project instead of in this

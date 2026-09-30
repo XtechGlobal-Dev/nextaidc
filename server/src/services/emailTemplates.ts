@@ -260,6 +260,71 @@ export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
     variables: ["caller_name", "summary_block", "recording_block", "transcript_block"],
   },
 
+  /* --------------------------------- Brands -------------------------------- */
+  {
+    key: "brand_request_received",
+    category: "Brands",
+    name: "Brand Request Received",
+    description:
+      "Sent to someone who asks to set up their own brand from the public page, confirming the request is in review.",
+    audience: "User",
+    alwaysOn: false,
+    subject: "We've received your request for {{brand_name}}",
+    body:
+      "Hi {{user_name}},\n\n" +
+      "Thanks for choosing {{app_name}}. Your request to launch {{brand_name}} is with our team.\n\n" +
+      "Requested address: {{brand_host}}\n\n" +
+      "We'll finish setting up your brand's settings and permissions, then email you here the moment it's live. You'll sign in with the email and password you chose on the form.",
+    variables: ["user_name", "brand_name", "brand_host"],
+  },
+  {
+    key: "brand_request_approved",
+    category: "Brands",
+    name: "Brand Request Approved",
+    description:
+      "Sent when a super admin completes setup of a requested brand. The applicant is its first administrator.",
+    audience: "Admin",
+    alwaysOn: false,
+    subject: "{{brand_name}} is live",
+    body:
+      "Hi {{user_name}},\n\n" +
+      "Good news: {{brand_name}} is set up and you are its administrator.\n\n" +
+      "Sign in at: {{brand_url}}\n" +
+      "Email: {{user_email}}\n\n" +
+      "Use the password you chose when you applied. From your admin panel you can manage your customers, plans, phone numbers and team.",
+    variables: ["user_name", "user_email", "brand_name", "brand_url"],
+  },
+  {
+    key: "brand_service_alert",
+    category: "Brands",
+    name: "Brand Usage & Billing Alert",
+    description:
+      "Sent to a brand's admins when it nears or hits a monthly usage cap, a payment to the platform fails, or its AI is paused or restored.",
+    audience: "Admin",
+    alwaysOn: true,
+    subject: "{{brand_name}}: {{alert_title}}",
+    body:
+      "Hi {{user_name}},\n\n" +
+      "{{alert_message}}\n\n" +
+      "{{usage_line}}\n\n" +
+      "You can see your usage, limits and billing from the Billing page of your admin panel.",
+    variables: ["user_name", "brand_name", "alert_title", "alert_message", "usage_line"],
+  },
+  {
+    key: "brand_request_declined",
+    category: "Brands",
+    name: "Brand Request Declined",
+    description: "Sent when a super admin declines a request to set up a brand.",
+    audience: "User",
+    alwaysOn: false,
+    subject: "About your request for {{brand_name}}",
+    body:
+      "Hi {{user_name}},\n\n" +
+      "Thank you for your interest in launching {{brand_name}} with {{app_name}}. We aren't able to set it up at this time.\n\n" +
+      "{{reason}}\n\n" +
+      "If you have questions, reply to this email or contact us at {{support_email}}.",
+    variables: ["user_name", "brand_name", "reason"],
+  },
   /* --------------------------------- Staff --------------------------------- */
   {
     key: "staff_welcome",
@@ -298,6 +363,7 @@ export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
       "For your security, please change your password after your first login.",
     variables: ["user_name", "user_email", "password", "brand_name", "brand_url"],
   },
+
   {
     key: "staff_permissions_updated",
     category: "Staff",

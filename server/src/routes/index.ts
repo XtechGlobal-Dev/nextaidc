@@ -14,6 +14,8 @@ import billingRouter from "./billing.routes.js";
 import adminRouter from "./admin.routes.js";
 import adminPhonesRouter from "./adminPhones.routes.js";
 import brandsRouter from "./brands.routes.js";
+import { publicBrandRequestsRouter, superBrandRequestsRouter } from "./brandRequests.routes.js";
+import brandSubscriptionsRouter from "./brandSubscriptions.routes.js";
 import platformViewsRouter from "./platformViews.routes.js";
 import brandAdminRouter from "./brandAdmin.routes.js";
 import apiCenterRouter from "./apiCenter.routes.js";
@@ -83,6 +85,8 @@ apiRouter.get(
 apiRouter.use("/unsubscribe", unsubscribeRouter);
 apiRouter.use("/events", eventsRouter);
 apiRouter.use("/onboard", onboardRouter);
+// Public "Set up your brand" form. The super admin side mounts under /super below.
+apiRouter.use("/brand-requests", publicBrandRequestsRouter);
 apiRouter.use("/bookings", bookingRouter);
 // `/booking/ai` (public Vapi dispatcher) mounts before `/booking` so the specific
 // path wins. `/bookings` above is the unrelated marketing demo form.
@@ -115,6 +119,10 @@ apiRouter.use("/webhooks/livekit", livekitWebhookRouter);
 // Super-admin only: white-label brands (tenants). Its own prefix, not /admin,
 // so the boundary is visible in the URL as well as in the middleware.
 apiRouter.use("/super", brandsRouter);
+// The Requested tab: brands that asked to be set up, and "Complete setup".
+apiRouter.use("/super", superBrandRequestsRouter);
+// Brand Subscriptions: the brand plan catalog, its add-ons, and what every brand pays the platform.
+apiRouter.use("/super", brandSubscriptionsRouter);
 // The super admin's overview, the customer directory, and one brand's inside
 // (its customers, subscriptions, support) — see platformViews.routes.ts.
 apiRouter.use("/super", platformViewsRouter);

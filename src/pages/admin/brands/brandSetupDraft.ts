@@ -2,6 +2,7 @@ import {
   BRAND_MODULES,
   type Brand,
   type BrandInput,
+  type BrandModuleId,
   type BrandModules,
   type BrandScripts,
   type SignupMode,
@@ -33,6 +34,16 @@ export interface SetupDraft {
   addonEditable: boolean;
   /** Cap on the addon per cycle, in cents; null = no cap. */
   maxAddonCents: number | null;
+  /** What the brand pays the platform each month, in minor units. */
+  platformFeeCents: number;
+  platformFeeCurrency: string;
+  /** Modules sold as feature add-ons → monthly price in minor units. */
+  featurePrices: Partial<Record<BrandModuleId, number>>;
+  /** Monthly caps across the brand's customers; null = no cap. */
+  monthlyMinuteLimit: number | null;
+  monthlyAiLimit: number | null;
+  /** The brand plan it pays the platform on; null = the billing fields above, set by hand. */
+  brandPlanId: string | null;
 }
 
 export const ALL_MODULES_ON = Object.fromEntries(
@@ -60,6 +71,12 @@ export const BLANK_SETUP: SetupDraft = {
   scripts: { head: "", body: "", footer: "" },
   addonEditable: true,
   maxAddonCents: null,
+  platformFeeCents: 0,
+  platformFeeCurrency: "usd",
+  featurePrices: {},
+  monthlyMinuteLimit: null,
+  monthlyAiLimit: null,
+  brandPlanId: null,
 };
 
 export function setupFrom(b: Brand): SetupDraft {
@@ -84,6 +101,12 @@ export function setupFrom(b: Brand): SetupDraft {
     scripts: b.scripts ?? { head: "", body: "", footer: "" },
     addonEditable: b.addonEditable ?? true,
     maxAddonCents: b.maxAddonCents ?? null,
+    platformFeeCents: b.platformFeeCents ?? 0,
+    platformFeeCurrency: b.platformFeeCurrency ?? "usd",
+    featurePrices: b.featurePrices ?? {},
+    monthlyMinuteLimit: b.monthlyMinuteLimit ?? null,
+    monthlyAiLimit: b.monthlyAiLimit ?? null,
+    brandPlanId: b.brandPlanId ?? null,
   };
 }
 
@@ -111,5 +134,11 @@ export function setupPayload(d: SetupDraft): Partial<BrandInput> {
     scripts: d.scripts,
     addonEditable: d.addonEditable,
     maxAddonCents: d.maxAddonCents,
+    platformFeeCents: d.platformFeeCents,
+    platformFeeCurrency: d.platformFeeCurrency,
+    featurePrices: d.featurePrices,
+    monthlyMinuteLimit: d.monthlyMinuteLimit,
+    monthlyAiLimit: d.monthlyAiLimit,
+    brandPlanId: d.brandPlanId,
   };
 }

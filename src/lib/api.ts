@@ -820,11 +820,28 @@ export interface Brand {
   addonEditable: boolean;
   /** Most a brand may add per cycle, in cents; null = no cap. */
   maxAddonCents: number | null;
+  /** What the brand pays the platform each month, in minor units; 0 = nothing. */
+  platformFeeCents: number;
+  platformFeeCurrency: string;
+  /** Modules sold as feature add-ons (locked until bought), with their monthly price in cents. */
+  featurePrices: Partial<Record<BrandModuleId, number>>;
+  purchasedFeatures: BrandModuleId[];
+  /** Monthly caps across all the brand's customers; null = no cap. */
+  monthlyMinuteLimit: number | null;
+  monthlyAiLimit: number | null;
+  /** Why the brand's AI is paused right now; "" = it isn't. */
+  serviceHold: BrandServiceHold;
+  /** The brand plan it's on (what it pays the platform); null = billing set by hand. */
+  brandPlanId: string | null;
   createdAt: string;
   updatedAt: string;
   counts?: { admins: number; customers: number; total: number };
   /** On the list: what the platform currently owes this brand, per currency. */
   walletBalances?: { currency: string; balanceCents: number }[];
+  /** On the list: how the brand stands paying the platform ("none" = owes nothing). */
+  billingStatus?: BrandBillingStatus;
+  /** After a save that touched billing: Stripe couldn't be brought in line. */
+  billingWarning?: string;
   /**
    * Present on single-brand reads: the brand's owner — the first admin account
    * created in its database. null while it has no admin yet.
@@ -911,6 +928,10 @@ export interface BrandInput {
   name: string;
   slug?: string;
   customDomain?: string | null;
+  /** Already-uploaded marks (a brand request's logos carry over at Complete setup). */
+  logoLightUrl?: string;
+  logoDarkUrl?: string;
+  faviconUrl?: string;
   status?: "active" | "suspended";
   tagline?: string;
   supportEmail?: string;
@@ -940,10 +961,247 @@ export interface BrandInput {
   scripts?: Partial<BrandScripts>;
   addonEditable?: boolean;
   maxAddonCents?: number | null;
+  platformFeeCents?: number;
+  platformFeeCurrency?: string;
+  featurePrices?: Partial<Record<BrandModuleId, number>>;
+  monthlyMinuteLimit?: number | null;
+  monthlyAiLimit?: number | null;
+  /** A brand plan: sets the fee, features and caps. null = set them by hand. */
+  brandPlanId?: string | null;
+}
+
+/** Why a brand's AI is paused: "minutes" stops calls; "ai" and "billing" stop every AI channel. */
+export type BrandServiceHold = "" | "minutes" | "ai" | "billing";
+export type BrandBillingStatus = "none" | "awaiting_card" | "active" | "past_due" | "canceled";
+
+/** How one module reaches a brand's customers: free with the brand, bought separately, or not at all. */
+export type FeatureAccess = "included" | "addon" | "off";
+
+export interface BrandFeature {
+  id: BrandModuleId;
+  label: string;
+  description: string;
+  access: FeatureAccess;
+  priceCents: number | null;
+  purchased: boolean;
+}
+
+export interface BrandInvoice {
+  id: string;
+  number: string;
+  amountCents: number;
+  currency: string;
+  status: string;
+  created: string;
+  url: string;
+}
+
+export interface BrandUsage {
+  /** "2026-09" (UTC month). */
+  period: string;
+  resetsAt: string;
+  minutes: number;
+  minutesLimit: number | null;
+  aiInteractions: number;
+  aiLimit: number | null;
+  hold: BrandServiceHold;
+}
+
+/** What a brand pays the platform, and where that stands. */
+export interface BrandBilling {
+  stripeReady: boolean;
+  /** The brand plan it's on; null = billing set by hand. */
+  plan: { id: string; name: string } | null;
+  required: boolean;
+  feeCents: number;
+  currency: string;
+  monthlyTotalCents: number;
+  status: BrandBillingStatus;
+  /** The brand's admin panel is limited to Billing until it pays. */
+  locked: boolean;
+  graceDays: number;
+  /** When the AI pauses if nothing is paid by then; null when paid up. */
+  pausesAt: string | null;
+  currentPeriodEnd: string | null;
+  lastPaidAt: string | null;
+  lastPaidCents: number | null;
+  card: { brand: string; last4: string } | null;
+  features: BrandFeature[];
+  usage: BrandUsage;
+  invoices: BrandInvoice[];
+}
+
+/** What a BRAND pays the PLATFORM each month — not a SubscriptionPlan (what a brand sells its customers). */
+export interface BrandPlan {
+  id: string;
+  name: string;
+  description: string;
+  priceCents: number;
+  currency: string;
+  /** Modules included in the price; the rest are add-ons. */
+  features: BrandModuleId[];
+  monthlyMinuteLimit: number | null;
+  monthlyAiLimit: number | null;
+  active: boolean;
+  sortOrder: number;
+  /** Highlighted as "Popular" on the request form. */
+  recommended: boolean;
+  /** Pre-selected on the request form and in the wizard (at most one). */
+  isDefault: boolean;
+  /** Super admin list only. */
+  brandCount?: number;
+}
+
+export type BrandPlanInput = Omit<
+  BrandPlan,
+  "id" | "brandCount" | "active" | "sortOrder" | "recommended" | "isDefault"
+> & {
+  active?: boolean;
+  sortOrder?: number;
+  recommended?: boolean;
+  isDefault?: boolean;
+};
+
+/** One module on the add-on list: its monthly price for brands whose plan doesn't include it. */
+export interface BrandAddon {
+  moduleId: BrandModuleId;
+  label: string;
+  description: string;
+  priceCents: number | null;
+  active: boolean;
+}
+
+/** One brand on the Brand Subscriptions page: what it pays the platform. */
+export interface BrandBillingRow {
+  brandId: string;
+  name: string;
+  slug: string;
+  primaryColor: string;
+  accentColor: string;
+  logoLightUrl: string;
+  brandStatus: BrandStatus;
+  plan: { id: string; name: string; active: boolean } | null;
+  custom: boolean;
+  feeCents: number;
+  currency: string;
+  addOns: { id: BrandModuleId; label: string; priceCents: number }[];
+  monthlyTotalCents: number;
+  billingStatus: BrandBillingStatus;
+  currentPeriodEnd: string | null;
+  lastPaidAt: string | null;
+  card: { brand: string; last4: string } | null;
+  serviceHold: BrandServiceHold;
+}
+
+export interface BrandBillingOverview {
+  rows: BrandBillingRow[];
+  summary: { paying: number; awaiting: number; failing: number; mrr: { currency: string; cents: number }[] };
+}
+
+export interface BrandAnalyticsDay {
+  day: string;
+  calls: number;
+  minutes: number;
+  customers: number;
+  active: number;
+  revenueCents: number;
+  platformCents: number;
+}
+
+export interface BrandAnalytics {
+  days: number;
+  currency: string;
+  series: BrandAnalyticsDay[];
+  totals: { calls: number; minutes: number; revenueCents: number; platformCents: number; brandCents: number };
+  current: {
+    customers: number;
+    active: number;
+    trialing: number;
+    openTickets: number;
+    callsTotal: number;
+    minutesTotal: number;
+    asOf: string | null;
+  };
+  usageHistory: { period: string; minutes: number; aiInteractions: number }[];
+  billing: BrandBilling;
 }
 
 /** Pass as a field's value to hand that key back to the platform. */
 export const BRAND_INHERIT = "__inherit__";
+
+/** What creating a brand hands back — from "New brand" and from "Complete setup" on a request alike. */
+export interface BrandCreateResult {
+  brand: Brand;
+  admin: BrandAdmin | null;
+  /** Why no admin was created although one was asked for; empty otherwise. */
+  adminError?: string;
+  /** Complete setup only: why the applicant's saved card couldn't be charged; empty otherwise. */
+  billingError?: string;
+  loginUrl: string;
+  pathUrl: string;
+  /** Present only when a vanity domain was named in the same step. */
+  domain: BrandDomain | null;
+}
+
+/** pending → approving (a setup in flight) → approved | declined. */
+export type BrandRequestStatus = "pending" | "approving" | "approved" | "declined";
+
+/** A prospective brand's request to be set up, as the super admin sees it. */
+export interface BrandRequest {
+  id: string;
+  status: BrandRequestStatus;
+  brandName: string;
+  slug: string;
+  tagline: string;
+  /** The applicant's own domain; "" when none. */
+  customDomain: string;
+  /** The look they picked; "" = not chosen. */
+  themePreset: string;
+  primaryColor: string;
+  accentColor: string;
+  fontFamily: string;
+  /** Logos they uploaded; "" = none. */
+  logoLightUrl: string;
+  logoDarkUrl: string;
+  faviconUrl: string;
+  /** The brand plan they chose; "" = none. */
+  brandPlanId: string;
+  /** The card they saved — charged only at Complete setup; null = none. */
+  card: { brand: string; last4: string } | null;
+  contactName: string;
+  email: string;
+  phone: string;
+  country: string;
+  timezone: string;
+  notes: string;
+  brandId: string | null;
+  reviewedAt: string | null;
+  declineReason: string;
+  createdAt: string;
+}
+
+/** What the public "Set up your brand" form sends. */
+export interface BrandRequestInput {
+  brandName: string;
+  slug: string;
+  tagline?: string;
+  customDomain?: string;
+  /** A palette + typeface from the brand catalog. */
+  themePreset?: string;
+  primaryColor?: string;
+  accentColor?: string;
+  fontFamily?: string;
+  brandPlanId?: string;
+  /** The confirmed SetupIntent from the payment step — the saved card. */
+  setupIntentId?: string;
+  contactName: string;
+  email: string;
+  phone?: string;
+  country?: string;
+  timezone?: string;
+  notes?: string;
+  password: string;
+}
 
 export const api = {
   /** A brand admin's own pricing addons and wallet — always the caller's brand. */
@@ -952,6 +1210,16 @@ export const api = {
     setAddon: (planId: string, addonCents: number) =>
       put<BrandPricingRow>(`/api/admin/brand/pricing/${planId}`, { addonCents }),
     wallet: () => get<BrandWallet>("/api/admin/brand/wallet"),
+    /** What the brand pays the platform: fee, feature add-ons, card and this month's usage. */
+    billing: {
+      get: () => get<BrandBilling>("/api/admin/brand/billing"),
+      setupIntent: () => post<{ clientSecret: string }>("/api/admin/brand/billing/setup-intent", {}),
+      /** Saves the confirmed card and settles what's owed with it (charged now). */
+      activate: (paymentMethodId: string) =>
+        post<BrandBilling>("/api/admin/brand/billing/activate", { paymentMethodId }),
+      buyFeature: (id: BrandModuleId) => post<BrandBilling>(`/api/admin/brand/billing/features/${id}`, {}),
+      cancelFeature: (id: BrandModuleId) => del<BrandBilling>(`/api/admin/brand/billing/features/${id}`),
+    },
   },
   /** Resolve a brand by the slug in the URL's first path segment. 404 when the
    *  segment isn't a live brand — the app then paints as the platform. */
@@ -967,6 +1235,32 @@ export const api = {
   onboard: {
     analyze: (url: string) => post<AnalyzeResult>("/api/onboard/analyze", { url }),
     validate: (url: string) => post<{ reachable: boolean }>("/api/onboard/validate", { url }),
+  },
+  /** The platform's public "Set up your brand" form. Refused on a brand's own door. */
+  brandRequests: {
+    checkSlug: (slug: string) =>
+      get<{ slug: string; available: boolean; reason: string; url: string; suffix: string }>(
+        `/api/brand-requests/slug-check${toQuery({ slug })}`,
+      ),
+    /** The brand plans on offer, their add-ons, and whether a card can be saved on this server. */
+    plans: () =>
+      get<{ plans: BrandPlan[]; addons: BrandAddon[]; paymentsEnabled: boolean }>("/api/brand-requests/plans"),
+    /** Starts the payment step's card form (saves the card; nothing is charged until setup). */
+    setupIntent: (data: { email: string; name: string }) =>
+      post<{ clientSecret: string; setupIntentId: string }>("/api/brand-requests/setup-intent", data),
+    /** The palettes and typefaces to pick from, and whether logos can be uploaded here. */
+    catalog: () => get<BrandThemeCatalog & { uploadsEnabled: boolean }>("/api/brand-requests/catalog"),
+    /** Files the request; logos ride along as multipart when there are any. */
+    create: (data: BrandRequestInput, logos: Partial<Record<"logoLight" | "logoDark" | "favicon", File>> = {}) => {
+      const files = Object.entries(logos).filter((e): e is [string, File] => !!e[1]);
+      if (!files.length) {
+        return post<{ id: string; brandName: string; slug: string; email: string }>("/api/brand-requests", data);
+      }
+      const form = new FormData();
+      form.append("data", JSON.stringify(data));
+      for (const [slot, file] of files) form.append(slot, file);
+      return upload<{ id: string; brandName: string; slug: string; email: string }>("/api/brand-requests", form);
+    },
   },
   bookings: {
     create: (data: {
@@ -1413,6 +1707,10 @@ export const api = {
     brands: {
       list: () => get<Brand[]>("/api/super/brands"),
       get: (id: string) => get<Brand>(`/api/super/brands/${id}`),
+      /** What the brand pays the platform, its invoices and this month's usage against its caps. */
+      billing: (id: string) => get<BrandBilling>(`/api/super/brands/${id}/billing`),
+      analytics: (id: string, days: 7 | 30 | 90 | 365 = 30) =>
+        get<BrandAnalytics>(`/api/super/brands/${id}/analytics${toQuery({ days })}`),
       /** Live customers per plan id — the plans that can't be taken off the brand. */
       planSubscribers: (id: string) =>
         get<{ counts: Record<string, number> }>(`/api/super/brands/${id}/plan-subscribers`),
@@ -1432,16 +1730,7 @@ export const api = {
           admin?: { email: string; fullName: string; password: string; sendWelcomeEmail?: boolean };
         },
       ) =>
-        post<{
-          brand: Brand;
-          admin: BrandAdmin | null;
-          /** Why no admin was created although one was typed; empty otherwise. */
-          adminError?: string;
-          loginUrl: string;
-          pathUrl: string;
-          /** Present only when a vanity domain was named in the same step. */
-          domain: BrandDomain | null;
-        }>("/api/super/brands", data),
+        post<BrandCreateResult>("/api/super/brands", data),
       update: (id: string, data: Partial<BrandInput>) =>
         patch<Brand>(`/api/super/brands/${id}`, data),
       /** Immediate and final: the brand's database, and every account in it, goes with the row. */
@@ -1527,6 +1816,34 @@ export const api = {
         remove: (id: string, deptId: string) =>
           del<{ ok: true }>(`/api/super/brands/${id}/ticket-departments/${deptId}`),
       },
+    },
+    /** The brand plan catalog: what BRANDS pay the platform (not what they sell their customers). */
+    brandPlans: {
+      list: () => get<BrandPlan[]>("/api/super/brand-plans"),
+      create: (data: BrandPlanInput) => post<BrandPlan>("/api/super/brand-plans", data),
+      update: (id: string, data: Partial<BrandPlanInput>) => patch<BrandPlan>(`/api/super/brand-plans/${id}`, data),
+      remove: (id: string) => del<{ ok: true }>(`/api/super/brand-plans/${id}`),
+    },
+    /** The add-on list: what each module costs a brand whose plan doesn't include it. */
+    brandAddons: {
+      list: () => get<BrandAddon[]>("/api/super/brand-addons"),
+      save: (rows: { moduleId: BrandModuleId; priceCents: number; active: boolean }[]) =>
+        put<BrandAddon[]>("/api/super/brand-addons", rows),
+    },
+    /** Every brand and what it pays the platform. */
+    brandSubscriptions: () => get<BrandBillingOverview>("/api/super/brand-subscriptions"),
+    /** Brands that asked to be set up from the public page — the Requested tab. */
+    brandRequests: {
+      list: (status: "open" | "approved" | "declined" | "all" = "open") =>
+        get<{ requests: BrandRequest[]; counts: { open: number; approved: number; declined: number } }>(
+          `/api/super/brand-requests${toQuery({ status })}`,
+        ),
+      get: (id: string) => get<BrandRequest>(`/api/super/brand-requests/${id}`),
+      /** "Complete setup": creates the brand with these settings; the applicant becomes its admin. */
+      approve: (id: string, data: BrandInput & { notifyApplicant?: boolean }) =>
+        post<BrandCreateResult>(`/api/super/brand-requests/${id}/approve`, data),
+      decline: (id: string, data: { reason?: string; notify?: boolean }) =>
+        post<BrandRequest>(`/api/super/brand-requests/${id}/decline`, data),
     },
     /** What the platform earned in a window (this month by default), overall and per brand. */
     ledger: (window?: { from?: string; to?: string }) =>

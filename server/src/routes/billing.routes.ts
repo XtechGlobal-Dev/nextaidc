@@ -69,6 +69,7 @@ import { reverseCreditForRefund } from "../services/brandWallet.js";
 import { recordPaidInvoice, recordRefund } from "../services/platformLedger.js";
 import { indexStripeCustomer, resolveStripeCustomer } from "../services/stripeCustomers.js";
 import { customerIdOf, isRoutedEventType, parkUnroutedEvent } from "../services/stripeUnrouted.js";
+import { handleBrandBillingEvent } from "../services/brandBilling.js";
 import { runWithBrand } from "../lib/brandContext.js";
 import { brandIdForOwner } from "../services/customerDirectory.js";
 import type Stripe from "stripe";
@@ -745,6 +746,12 @@ router.post(
     }
 
     try {
+      // A brand paying the PLATFORM has no customer account to route to — handle those first, or
+      // they'd be parked as unrouted.
+      if (await handleBrandBillingEvent(event)) {
+        res.json({ received: true });
+        return;
+      }
       // Place the event in its brand first; unplaceable ones are parked for the super admin, never dropped. Stripe gets "received" either way.
       const customerId = customerIdOf(event.data.object);
       if (customerId && isRoutedEventType(event.type)) {

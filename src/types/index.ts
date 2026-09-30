@@ -92,6 +92,9 @@ export interface TrialState {
   /** Admin locked the account (manual suspend). Hard-logs-out to /login; only an
    *  admin can lift it (distinct from the self-recoverable `suspended` above). */
   adminSuspended: boolean;
+  /** Set when the BRAND is what's blocking the account (its monthly cap, or its bill to the platform):
+   *  nothing the customer can fix by buying a plan. */
+  brandHold?: "" | "minutes" | "ai" | "billing";
 }
 
 export type CrmProvider = "google_calendar" | "custom" | "movermate" | "perfex";

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Building2, ExternalLink, Globe, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Building2, ExternalLink, Globe, Inbox, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatMoney } from "@/lib/currency";
 import {
   DataCard,
@@ -17,9 +18,11 @@ import {
 } from "@/components/ui/data-card";
 import { Pagination } from "@/components/ui/pagination";
 import { usePagination } from "@/hooks/usePagination";
-import { api, ApiError, type Brand } from "@/lib/api";
+import { api, ApiError, type Brand, type BrandRequest } from "@/lib/api";
 import { StripeUnroutedCard } from "./StripeUnroutedCard";
+import { BrandRequestsTab, type RequestFilter } from "./BrandRequestsTab";
 import { brandStatusLabel, brandStatusVariant } from "./brandStatus";
+import { billingStatusMeta } from "@/lib/brandBilling";
 
 /** Stable stand-in for the pre-load `null`, so paging doesn't re-slice each render. */
 const EMPTY: Brand[] = [];
@@ -44,7 +47,39 @@ export default function AdminBrandsPage() {
   const [rows, setRows] = useState<Brand[] | null>(null);
   const [toDelete, setToDelete] = useState<Brand | null>(null);
 
+  // ?tab=requests is where the "New brand request" notification lands.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "requests" ? "requests" : "brands";
+  const setTab = (t: string) => setSearchParams(t === "requests" ? { tab: t } : {}, { replace: true });
+
+  const [reqFilter, setReqFilter] = useState<RequestFilter>("open");
+  const [requests, setRequests] = useState<BrandRequest[] | null>(null);
+  const [reqCounts, setReqCounts] = useState<Record<RequestFilter, number>>({ open: 0, approved: 0, declined: 0 });
+  const [reqError, setReqError] = useState("");
+
   const { page, pageSize, pageItems, total, setPage, setPageSize } = usePagination(rows ?? EMPTY);
+
+  // Loaded with the page, not the tab, so the Requested badge is right from the start.
+  useEffect(() => {
+    let active = true;
+    setRequests(null);
+    setReqError("");
+    api.super.brandRequests
+      .list(reqFilter)
+      .then((res) => {
+        if (!active) return;
+        setRequests(res.requests);
+        setReqCounts(res.counts);
+      })
+      .catch((e) => {
+        if (!active) return;
+        setRequests([]);
+        setReqError(e instanceof ApiError ? e.message : "Failed to load brand requests");
+      });
+    return () => {
+      active = false;
+    };
+  }, [reqFilter]);
 
   useEffect(() => {
     let active = true;
@@ -111,9 +146,18 @@ export default function AdminBrandsPage() {
     </span>
   );
 
-  const renderStatus = (b: Brand) => (
-    <Badge variant={brandStatusVariant(b)}>{brandStatusLabel(b)}</Badge>
-  );
+  // Lifecycle first; then, only when something needs attention, how it stands paying the platform.
+  const renderStatus = (b: Brand) => {
+    const billing = billingStatusMeta(b.billingStatus);
+    const attention = b.billingStatus === "awaiting_card" || b.billingStatus === "past_due" || b.billingStatus === "canceled";
+    return (
+      <span className="flex flex-wrap items-center gap-1.5">
+        <Badge variant={brandStatusVariant(b)}>{brandStatusLabel(b)}</Badge>
+        {attention && <Badge variant={billing.variant}>{billing.label}</Badge>}
+        {b.serviceHold && <Badge variant="danger">AI paused</Badge>}
+      </span>
+    );
+  };
 
   return (
     <div>
@@ -127,6 +171,37 @@ export default function AdminBrandsPage() {
         }
       />
 
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="mb-5">
+          <TabsTrigger value="brands">
+            <Building2 className="size-4" /> Brands
+            {rows !== null && <span className="tabular-nums text-xs opacity-70">{rows.length}</span>}
+          </TabsTrigger>
+          <TabsTrigger value="requests">
+            <Inbox className="size-4" /> Requested
+            {reqCounts.open > 0 && (
+              <span className="rounded-full bg-primary px-1.5 py-px text-[10px] font-semibold tabular-nums text-primary-foreground">
+                {reqCounts.open}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="requests">
+          <BrandRequestsTab
+            filter={reqFilter}
+            onFilter={setReqFilter}
+            rows={requests}
+            counts={reqCounts}
+            error={reqError}
+            onDeclined={(r) => {
+              setRequests((prev) => (prev ?? []).filter((x) => x.id !== r.id));
+              setReqCounts((c) => ({ ...c, open: Math.max(0, c.open - 1), declined: c.declined + 1 }));
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="brands">
       {/* Only appears when a Stripe event is waiting for a brand. */}
       <StripeUnroutedCard />
 
@@ -253,6 +328,8 @@ export default function AdminBrandsPage() {
         onPageSizeChange={setPageSize}
         noun="brands"
       />
+        </TabsContent>
+      </Tabs>
 
       <ConfirmDeleteDialog
         open={toDelete !== null}
@@ -272,7 +349,7 @@ export default function AdminBrandsPage() {
         }
       />
 
-      {rows !== null && rows.length > 0 && (
+      {tab === "brands" && rows !== null && rows.length > 0 && (
         <p className="mt-4 flex items-center gap-1.5 text-xs text-muted-foreground">
           <ExternalLink className="size-3.5" />
           Point each subdomain (and any custom domain) at this deployment in DNS before handing it

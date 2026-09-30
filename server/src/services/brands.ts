@@ -23,14 +23,20 @@ import {
 } from "../lib/brandTheme.js";
 import { loadBrandSettings } from "./settings.js";
 import {
+  brandFeaturePrices,
+  brandModuleSwitches,
   brandModules,
+  brandPurchasedFeatures,
+  brandServiceHold,
   brandPlanIds,
   brandScripts,
   brandSignupMode,
   resolveSetup,
   type BrandModules,
   type BrandScripts,
+  type BrandModuleId,
   type BrandSetupInput,
+  type ServiceHold,
   type SignupMode,
 } from "./brandSetup.js";
 
@@ -236,6 +242,17 @@ export interface BrandView {
   scripts: BrandScripts;
   addonEditable: boolean;
   maxAddonCents: number | null;
+  /* ---- what the brand pays the platform: see services/brandBilling.ts ---- */
+  platformFeeCents: number;
+  platformFeeCurrency: string;
+  /** Modules sold as feature add-ons, with their monthly price in cents. */
+  featurePrices: Partial<Record<BrandModuleId, number>>;
+  purchasedFeatures: BrandModuleId[];
+  monthlyMinuteLimit: number | null;
+  monthlyAiLimit: number | null;
+  serviceHold: ServiceHold;
+  /** The brand plan it's on; null = billing set by hand. */
+  brandPlanId: string | null;
   createdAt: string;
   updatedAt: string;
   /** How many accounts sit inside this tenant, split by kind. */
@@ -280,7 +297,8 @@ export function serializeBrand(b: Brand, counts?: BrandView["counts"]): BrandVie
     signupMode: brandSignupMode(b),
     loginHeadline: b.loginHeadline,
     loginBlurb: b.loginBlurb,
-    modules: brandModules(b),
+    // The configured switches — the editor saves these back. Add-on locking is its own field.
+    modules: brandModuleSwitches(b),
     planIds: brandPlanIds(b),
     trialDays: b.trialDays,
     trialMinutes: b.trialMinutes,
@@ -289,6 +307,14 @@ export function serializeBrand(b: Brand, counts?: BrandView["counts"]): BrandVie
     scripts: brandScripts(b),
     addonEditable: b.addonEditable,
     maxAddonCents: b.maxAddonCents,
+    platformFeeCents: b.platformFeeCents,
+    platformFeeCurrency: b.platformFeeCurrency,
+    featurePrices: brandFeaturePrices(b),
+    purchasedFeatures: brandPurchasedFeatures(b),
+    monthlyMinuteLimit: b.monthlyMinuteLimit,
+    monthlyAiLimit: b.monthlyAiLimit,
+    serviceHold: brandServiceHold(b),
+    brandPlanId: b.brandPlanId,
     createdAt: b.createdAt.toISOString(),
     updatedAt: b.updatedAt.toISOString(),
     ...(counts ? { counts } : {}),
@@ -396,7 +422,7 @@ export interface BrandIdentityInput {
 export type BrandInput = BrandIdentityInput & BrandSetupInput;
 
 // Colours matching a preset keep its id; hand-picked ones flip to "custom" so the UI's selected swatch is never a lie.
-function resolveTheme(input: Partial<BrandInput>) {
+export function resolveTheme(input: Partial<BrandInput>) {
   const fontId = (input.fontFamily ?? DEFAULT_FONT_ID).trim();
   const font = findFont(fontId);
   if (!font) {
@@ -453,7 +479,8 @@ export function normalizeDomain(raw: string | null | undefined): string {
     .replace(/\.$/, "");
 }
 
-async function assertDomainAvailable(
+/** A vanity domain normalised and checked: well-formed, not on the platform apex, not another brand's. Null when blank. */
+export async function assertDomainAvailable(
   raw: string | null | undefined,
   exceptBrandId?: string,
 ): Promise<string | null> {

@@ -42,6 +42,7 @@ import {
   ArrowRight,
   Crown,
   Radar,
+  Receipt,
   Building2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -125,6 +126,8 @@ interface NavItem {
   adminOnly?: boolean;
   /** SUPER_ADMIN only: platform API accounts and tenant setup. A brand ADMIN never sees these. */
   superAdminOnly?: boolean;
+  /** A brand's own ADMIN only — never staff, never the super admin (who has no brand to pay for). */
+  brandAdminOnly?: boolean;
   /** What a brand's people see instead of `label` — the same page reads differently from inside a tenant
    *  (the platform's "Plans" are a brand's read-only "Default plans"). */
   brandLabel?: string;
@@ -172,6 +175,8 @@ const ADMIN_NAV: NavItem[] = [
   // them here (they live on the brand's page under Brands instead).
   { to: "/dashboard/admin/pricing", label: "Price addon", icon: BadgeDollarSign, permission: "pricing" },
   { to: "/dashboard/admin/wallet", label: "Wallet", icon: Wallet, permission: "wallet" },
+  // What the brand pays the platform (fee + feature add-ons) — money out, so its admin alone.
+  { to: "/dashboard/admin/billing", label: "Billing", icon: CreditCard, brandAdminOnly: true },
   // Platform-only (like Audit): one catalog attached to the platform's plans, so the super admin curates it.
   { to: "/dashboard/admin/voice-bank", label: "Voice Library", icon: Mic, permission: "voice_bank" },
   { to: "/dashboard/admin/phone-numbers", label: "Phone Numbers", icon: Phone, permission: "phone_numbers" },
@@ -195,6 +200,8 @@ const ADMIN_NAV: NavItem[] = [
   // The tenant panel: create a brand, give it a subdomain, a look and its own
   // mail/SMS/WhatsApp senders.
   { to: "/dashboard/admin/brands", label: "Brands", icon: Building2, superAdminOnly: true },
+  // What brands pay the platform — not the customer Subscriptions above, which brands sell.
+  { to: "/dashboard/admin/brand-subscriptions", label: "Brand Subscriptions", icon: Receipt, superAdminOnly: true },
 ];
 
 // Admin-only "User Dashboard" panel: folds the customer modules so the sidebar isn't doubled. Always mounted
@@ -538,6 +545,7 @@ export function Sidebar() {
           {isAdminOrStaff && (() => {
             const visibleAdminItems = ADMIN_NAV.filter((item) => {
               if (item.superAdminOnly && !isSuperAdmin) return false;
+              if (item.brandAdminOnly && !(user?.role === "ADMIN" && user?.brandId)) return false;
               if (item.adminOnly && !isAdmin) return false;
               // Brand-scoped sections are refused to the super admin; keyed off the permission so nav and API can't drift.
               if (!canUseSection(user?.role, item.permission, user?.brandId)) return false;

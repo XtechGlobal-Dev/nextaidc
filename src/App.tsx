@@ -25,6 +25,7 @@ import { OnboardingGate } from "@/components/auth/OnboardingGate";
 import { brandBasename, setActiveBrandSlug, setHostBrand, slugFromPath } from "@/lib/brandRoute";
 
 const LandingPage = lazy(() => import("@/pages/marketing/LandingPage"));
+const BrandSetupPage = lazy(() => import("@/pages/marketing/BrandSetupPage"));
 const OnboardingPage = lazy(() => import("@/pages/onboarding/OnboardingPage"));
 const LoginPage = lazy(() => import("@/pages/auth/LoginPage"));
 const SubscribePage = lazy(() => import("@/pages/subscribe/SubscribePage"));
@@ -53,6 +54,7 @@ const AdminCouponsPage = lazy(() => import("@/pages/admin/AdminCouponsPage"));
 const AdminResellersPage = lazy(() => import("@/pages/admin/AdminResellersPage"));
 const AdminBrandPricingPage = lazy(() => import("@/pages/admin/AdminBrandPricingPage"));
 const AdminBrandWalletPage = lazy(() => import("@/pages/admin/AdminBrandWalletPage"));
+const AdminBrandBillingPage = lazy(() => import("@/pages/admin/AdminBrandBillingPage"));
 const AdminSettingsPage = lazy(() => import("@/pages/admin/AdminSettingsPage"));
 const AdminVoiceBankPage = lazy(() => import("@/pages/admin/AdminVoiceBankPage"));
 const AdminAuditLogPage = lazy(() => import("@/pages/admin/AdminAuditLogPage"));
@@ -76,6 +78,10 @@ const AdminTicketRatingsPage = lazy(
 
 // Super-admin only: the white-label brand (tenant) panel.
 const AdminBrandsPage = lazy(() => import("@/pages/admin/brands/AdminBrandsPage"));
+const AdminBrandSubscriptionsPage = lazy(
+  () => import("@/pages/admin/brand-subscriptions/AdminBrandSubscriptionsPage"),
+);
+const AdminBrandPlansPage = lazy(() => import("@/pages/admin/brand-subscriptions/AdminBrandPlansPage"));
 const AdminBrandDetailPage = lazy(() => import("@/pages/admin/brands/AdminBrandDetailPage"));
 const AdminBrandCreatePage = lazy(() => import("@/pages/admin/brands/AdminBrandCreatePage"));
 
@@ -155,6 +161,11 @@ function adminRoutes(base: string) {
           path={`${base}/wallet`}
           element={<RequireAdmin><AdminBrandWalletPage /></RequireAdmin>}
         />
+        {/* What the brand pays the PLATFORM: fee, feature add-ons, card. Brand admin only. */}
+        <Route
+          path={`${base}/billing`}
+          element={<RequireAdmin><AdminBrandBillingPage /></RequireAdmin>}
+        />
         {/* Support requests. RequireAdmin lets STAFF in as well; which lane
             they get, and what they may do in it, is decided server-side. */}
         <Route
@@ -189,6 +200,16 @@ function adminRoutes(base: string) {
         <Route
           path={`${base}/brands`}
           element={<RequireSuperAdmin><AdminBrandsPage /></RequireSuperAdmin>}
+        />
+        {/* What BRANDS pay the platform: brand plans, add-ons, every brand's subscription. */}
+        <Route
+          path={`${base}/brand-subscriptions`}
+          element={<RequireSuperAdmin><AdminBrandSubscriptionsPage /></RequireSuperAdmin>}
+        />
+        {/* The brand plan catalog — laid out like Plans, but what brands pay (not what they sell). */}
+        <Route
+          path={`${base}/brand-plans`}
+          element={<RequireSuperAdmin><AdminBrandPlansPage /></RequireSuperAdmin>}
         />
         <Route
           path={`${base}/brands/new`}
@@ -283,6 +304,8 @@ function buildRouter(basename?: string) {
         }
       />
       <Route path="/login" element={<LoginPage />} />
+      {/* Public "Set up your brand" request form — platform door only (the page sends a brand door home). */}
+      <Route path="/brand-setup" element={<BrandSetupPage />} />
       <Route
         path="/subscribe"
         element={

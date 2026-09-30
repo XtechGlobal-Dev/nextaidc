@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  Building2,
   Check,
   Globe,
   Info,
@@ -16,6 +17,7 @@ import { Wordmark } from "@/components/branding/Wordmark";
 import { HowItWorksDialog } from "@/components/marketing/HowItWorksDialog";
 import { QuickControls } from "@/components/layout/QuickControls";
 import { useOnboardingStore } from "@/stores/useOnboardingStore";
+import { useBrandingStore } from "@/stores/useBrandingStore";
 import { LANDING_VOICES, providerForVoiceId } from "@/data/voices";
 import { speak, stopSpeaking } from "@/lib/speech";
 import { cn } from "@/lib/utils";
@@ -96,6 +98,8 @@ export default function LandingPage() {
   const skipWebsite = useOnboardingStore((s) => s.skipWebsite);
   const voiceId = useOnboardingStore((s) => s.voiceId);
   const setVoiceId = useOnboardingStore((s) => s.setVoiceId);
+  // "Set up your brand" is the platform's funnel — never shown on a brand's own door.
+  const onBrandDoor = useBrandingStore((s) => !!s.brand);
 
   const [url, setLocalUrl] = useState("");
   const [howOpen, setHowOpen] = useState(false);
@@ -208,6 +212,14 @@ export default function LandingPage() {
           </Link>
           <div className="flex items-center gap-2.5">
             <QuickControls />
+            {!onBrandDoor && (
+              <Button asChild variant="outline" className="bg-card/80 backdrop-blur-sm">
+                <Link to="/brand-setup" aria-label="Set up your brand">
+                  <Building2 className="size-4" />
+                  <span className="hidden sm:inline">Set up your brand</span>
+                </Link>
+              </Button>
+            )}
             <Button asChild className="shadow-md transition-shadow hover:shadow-lg">
               <Link to="/login">
                 <LogIn className="size-4" /> Sign In

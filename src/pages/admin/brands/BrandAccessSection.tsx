@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, BRAND_MODULES } from "@/lib/api";
+import { api } from "@/lib/api";
 import { COUNTRIES } from "@/data/countries";
 import { listTimeZones } from "@/lib/timezone";
 import type { SetupDraft } from "./brandSetupDraft";
@@ -141,29 +141,13 @@ export function BrandAccessSection({ value, onChange }: Props) {
   return (
     <div className="space-y-5">
       <Card className="space-y-4 p-5">
+        {/* One editor per state: whether a module is included, sold as an add-on or off is set with its
+            price on the Billing tab, so it lives there alone. */}
         <Head
           icon={LayoutGrid}
           title="Modules"
-          blurb="What this brand's customers get. A module switched off disappears from their navigation and its API answers 403 — a brand that sold “no booking” should not have booking quietly working."
+          blurb="Which modules this brand's customers get — included, sold to the brand as a paid add-on, or off — is set on the Billing tab, next to their prices. A module that's off (or an add-on not yet bought) disappears from their navigation and its API answers 403."
         />
-        <div className="grid gap-2 sm:grid-cols-2">
-          {BRAND_MODULES.map((m) => (
-            <label
-              key={m.id}
-              className="flex cursor-pointer items-start justify-between gap-3 rounded-lg border border-border px-3 py-2.5"
-            >
-              <span>
-                <span className="text-sm font-medium">{m.label}</span>
-                <span className="block text-xs text-muted-foreground">{m.description}</span>
-              </span>
-              <Switch
-                checked={value.modules[m.id]}
-                onCheckedChange={(on) => onChange({ modules: { ...value.modules, [m.id]: on } })}
-                aria-label={m.label}
-              />
-            </label>
-          ))}
-        </div>
       </Card>
 
       <Card className="space-y-4 p-5">
