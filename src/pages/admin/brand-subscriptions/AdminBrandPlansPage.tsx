@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
-import { api, ApiError, BRAND_MODULES, type BrandAddon, type BrandModuleId, type BrandPlan, type BrandPlanInput } from "@/lib/api";
+import { api, ApiError, BRAND_MODULES, isAddonEligible, type BrandAddon, type BrandModuleId, type BrandPlan, type BrandPlanInput } from "@/lib/api";
 import { formatMoney } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import { BrandAddonsDialog } from "./BrandAddonsDialog";
@@ -292,7 +292,7 @@ export default function AdminBrandPlansPage() {
                   {plan.recommended && <Badge variant="premium">Popular</Badge>}
                 </div>
 
-                {/* Every feature, in the catalog's order: in the price, sold as an add-on, or not offered. */}
+                {/* Every feature, in the catalog's order: in the price, sold as an add-on, or switched off. */}
                 <ul className="mt-4 flex flex-1 flex-col gap-2">
                   {BRAND_MODULES.map((m) => {
                     const addon = addonFor(m.id);
@@ -503,11 +503,12 @@ export default function AdminBrandPlansPage() {
               <SectionHeading icon={<SlidersHorizontal className="size-3.5" />}>Features &amp; visibility</SectionHeading>
               <p className="-mt-2 text-xs text-muted-foreground">
                 On = included in the price. Off = sold as an add-on at its price under Add-ons, or not offered when
-                it has none.
+                it has none. SMS to Caller and WhatsApp are default features — on free, or off, never an add-on.
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 {BRAND_MODULES.map((m) => {
                   const on = form.features.includes(m.id);
+                  const eligible = isAddonEligible(m.id);
                   const addon = addonFor(m.id);
                   return (
                     <ToggleCard
@@ -516,9 +517,11 @@ export default function AdminBrandPlansPage() {
                       desc={
                         on
                           ? "Included in the price."
-                          : addon
-                            ? `Add-on · ${formatMoney(addon.priceCents ?? 0, form.currency)}/mo`
-                            : "Not offered — no add-on price."
+                          : !eligible
+                            ? "Switched off for this plan — not sold as an add-on."
+                            : addon
+                              ? `Add-on · ${formatMoney(addon.priceCents ?? 0, form.currency)}/mo`
+                              : "Not offered — no add-on price."
                       }
                       checked={on}
                       onChange={(v) =>

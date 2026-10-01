@@ -8,6 +8,7 @@ import {
   brandModuleLabel,
   brandOwesPlatform,
   brandPurchasedFeatures,
+  isAddonEligible,
   isBrandModuleId,
   type BrandModuleId,
 } from "./brandSetup.js";
@@ -90,19 +91,22 @@ async function addonRows(): Promise<Map<string, BrandAddonPrice>> {
   return new Map(rows.map((r) => [r.moduleId, r]));
 }
 
-/** Every module, with its add-on price and whether it's offered. */
+/** Every sellable module, with its add-on price and whether it's offered. SMS to Caller and WhatsApp never
+ *  appear here — they're default features (bundled whenever switched on), not something sold separately. */
 export async function listAddonPrices(opts: { activeOnly?: boolean } = {}): Promise<BrandAddonView[]> {
   const rows = await addonRows();
-  return BRAND_MODULES.map((m) => {
-    const row = rows.get(m.id);
-    return {
-      moduleId: m.id,
-      label: m.label,
-      description: m.description,
-      priceCents: row?.priceCents ?? null,
-      active: !!row?.active && (row?.priceCents ?? 0) > 0,
-    };
-  }).filter((a) => !opts.activeOnly || a.active);
+  return BRAND_MODULES.filter((m) => isAddonEligible(m.id))
+    .map((m) => {
+      const row = rows.get(m.id);
+      return {
+        moduleId: m.id,
+        label: m.label,
+        description: m.description,
+        priceCents: row?.priceCents ?? null,
+        active: !!row?.active && (row?.priceCents ?? 0) > 0,
+      };
+    })
+    .filter((a) => !opts.activeOnly || a.active);
 }
 
 export interface AddonPriceInput {
@@ -116,6 +120,9 @@ export interface AddonPriceInput {
 export async function saveAddonPrices(input: AddonPriceInput[]): Promise<BrandAddonView[]> {
   for (const a of input) {
     if (!isBrandModuleId(a.moduleId)) throw badRequest(`Unknown feature "${a.moduleId}".`);
+    if (!isAddonEligible(a.moduleId)) {
+      throw badRequest(`${brandModuleLabel(a.moduleId)} is a default feature — it can't be sold as an add-on.`);
+    }
     if (!Number.isInteger(a.priceCents) || a.priceCents < 0 || a.priceCents > 10_000_000) {
       throw badRequest(`${brandModuleLabel(a.moduleId)}: the price must be a whole amount.`);
     }
@@ -248,7 +255,9 @@ export function planConfig(
       modules[m.id] = true;
       continue;
     }
-    const addon = addons.get(m.id);
+    // A default feature (SMS to Caller, WhatsApp) the plan leaves out is simply off — never sold as an
+    // add-on, even if a stale price row exists for it.
+    const addon = isAddonEligible(m.id) ? addons.get(m.id) : undefined;
     const offered = !!addon?.active && addon.priceCents > 0;
     modules[m.id] = offered;
     if (offered) featurePrices[m.id] = addon!.priceCents;

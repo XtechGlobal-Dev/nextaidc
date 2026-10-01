@@ -7,37 +7,51 @@ import { isValidTimeZone } from "../lib/phoneTimeZone.js";
 
 /* -------------------------------- Modules -------------------------------- */
 
-/** Modules a brand can switch off. Only optional products — dashboard, inbox and AI Brain are the receptionist itself. */
+/** Modules a brand can switch off. Only optional products — dashboard, inbox and AI Brain are the receptionist itself.
+ *  `addonEligible: false` means the module is never sold separately — it's bundled free whenever it's switched on,
+ *  the same as before feature add-ons existed. SMS to Caller and WhatsApp are core channels, not upsells: every
+ *  brand gets them as part of its fee, same as Booking, Transfer and CRM used to be before add-ons existed for them. */
 export const BRAND_MODULES = [
   {
     id: "booking",
     label: "Booking",
     description: "Website booking module and calendar appointments.",
+    addonEligible: true,
   },
   {
     id: "transfer",
     label: "Call Transfer",
     description: "Hand a live call over to a human.",
+    addonEligible: true,
   },
   {
     id: "crm",
     label: "Connect CRM",
     description: "Lead delivery into the customer's own CRM.",
+    addonEligible: true,
   },
   {
     id: "smsToCaller",
     label: "SMS to Caller",
     description: "The AI texts callers the details they ask for mid-call.",
+    addonEligible: false,
   },
   {
     id: "whatsapp",
     label: "WhatsApp",
     description: "WhatsApp call summaries and inbound auto-replies.",
+    addonEligible: false,
   },
 ] as const;
 
 export type BrandModuleId = (typeof BRAND_MODULES)[number]["id"];
 export type BrandModules = Record<BrandModuleId, boolean>;
+
+/** May this module ever be sold as a paid add-on? False for core channels (SMS to Caller, WhatsApp) — those
+ *  are either switched on for free or off, never priced separately. */
+export function isAddonEligible(id: BrandModuleId): boolean {
+  return BRAND_MODULES.find((m) => m.id === id)?.addonEligible !== false;
+}
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -87,11 +101,14 @@ export function isBrandModuleId(v: unknown): v is BrandModuleId {
 /** Largest monthly add-on price, in cents. */
 export const MAX_FEATURE_PRICE_CENTS = 10_000_000;
 
-/** Monthly price in cents of each module sold as an add-on. A listed module is locked until bought. */
+/** Monthly price in cents of each module sold as an add-on. A listed module is locked until bought.
+ *  Never includes a non-addon-eligible module (SMS to Caller, WhatsApp), even if one is still stored from
+ *  before — those read as plain included/off from here on, which is what un-gates them automatically. */
 export function brandFeaturePrices(brand: Brand | null | undefined): Partial<Record<BrandModuleId, number>> {
   const raw = isPlainObject(brand?.featurePrices) ? (brand!.featurePrices as Record<string, unknown>) : {};
   const out: Partial<Record<BrandModuleId, number>> = {};
   for (const m of BRAND_MODULES) {
+    if (!isAddonEligible(m.id)) continue;
     const v = raw[m.id];
     if (typeof v === "number" && Number.isInteger(v) && v > 0) out[m.id] = v;
   }
@@ -318,6 +335,7 @@ function normalizeFeaturePrices(raw: BrandSetupInput["featurePrices"]): Prisma.I
   for (const m of BRAND_MODULES) {
     const v = src[m.id];
     if (v === undefined || v === null) continue;
+    if (!isAddonEligible(m.id)) throw badRequest(`${m.label} is a default feature — it can't be sold as an add-on.`);
     const n = Number(v);
     if (!Number.isInteger(n) || n <= 0 || n > MAX_FEATURE_PRICE_CENTS) {
       throw badRequest(`${m.label} add-on needs a monthly price above zero.`);

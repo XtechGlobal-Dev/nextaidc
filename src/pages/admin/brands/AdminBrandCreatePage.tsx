@@ -377,6 +377,11 @@ export default function AdminBrandCreatePage() {
   const billingProblem = billingDraftProblem(draft, { feeRequired: true });
   const chosenPlan = brandPlans?.find((p) => p.id === draft.brandPlanId) ?? null;
 
+  // The applicant already chose and paid for a plan when they filed their request — the super admin
+  // completing setup can't swap it out for a different one here. (No lock if they applied before any
+  // plan existed, or chose "custom" — there's nothing to lock to in that case.)
+  const planLocked = !!requestId && !!request?.brandPlanId;
+
   const canSave =
     draft.name.trim().length >= 2 &&
     addressReady &&
@@ -830,7 +835,7 @@ export default function AdminBrandCreatePage() {
               <CatalogSkeleton />
             ) : (
               <>
-                {brandPlans.length === 0 && (
+                {brandPlans.length === 0 && !planLocked && (
                   <p className="mb-3 rounded-xl border border-dashed border-border p-3 text-xs text-muted-foreground">
                     No brand plans yet — create them under Brand Subscriptions, or set this brand up by hand.
                   </p>
@@ -841,9 +846,10 @@ export default function AdminBrandCreatePage() {
                   addons={brandAddons}
                   value={draft.brandPlanId}
                   onChange={(brandPlanId) => patch({ brandPlanId })}
-                  allowCustom
+                  allowCustom={!planLocked}
+                  locked={planLocked}
                 />
-                {draft.brandPlanId === null && (
+                {draft.brandPlanId === null && !planLocked && (
                   <div className="mt-5 border-t border-border pt-5">
                     <BrandBillingFields value={draft} onChange={patch} feeRequired />
                   </div>

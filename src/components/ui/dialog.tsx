@@ -19,6 +19,34 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = "DialogOverlay";
 
+/**
+ * While a Select (or another Radix popper-based overlay) is open above this dialog, Radix disables
+ * `pointer-events` on everything below the open popup EXCEPT the popup's own content — including this
+ * dialog's own content. So the very next click, wherever it visually lands inside the dialog, doesn't
+ * reach the dialog at all: it passes straight through to the overlay behind it, which reads as a
+ * genuine click outside the dialog and closes it along with the dropdown. The event's `target` is
+ * useless here — it's the overlay, not anything related to the popper.
+ *
+ * The only reliable signal is "was a popper open at the moment this pointerdown started" — and that has
+ * to be captured as early as possible. The popper's OWN dismissal (also triggered by this same
+ * pointerdown) runs in the bubble phase and unmounts it, same as this dialog's; by the time either
+ * dialog's bubble-phase outside-handler asks, the popper may already be gone. The capture phase runs
+ * before any bubble-phase handler gets a chance to unmount anything, so a single document-level capture
+ * listener — set up once — records the answer while it's still true. Every Radix popper-based overlay
+ * (Select, DropdownMenu, Popover, …) marks its portaled content the same way, so one check covers all
+ * of them, for every dialog on the page.
+ */
+let popperWasOpenAtPointerDown = false;
+if (typeof document !== "undefined") {
+  document.addEventListener(
+    "pointerdown",
+    () => {
+      popperWasOpenAtPointerDown = !!document.querySelector("[data-radix-popper-content-wrapper]");
+    },
+    true,
+  );
+}
+
 export const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
@@ -27,11 +55,19 @@ export const DialogContent = React.forwardRef<
      *  must sit ABOVE another modal (both overlay and content need lifting). */
     overlayClassName?: string;
   }
->(({ className, children, hideClose, overlayClassName, ...props }, ref) => (
+>(({ className, children, hideClose, overlayClassName, onPointerDownOutside, onInteractOutside, ...props }, ref) => (
   <DialogPrimitive.Portal>
     <DialogOverlay className={overlayClassName} />
     <DialogPrimitive.Content
       ref={ref}
+      onPointerDownOutside={(e) => {
+        if (popperWasOpenAtPointerDown) e.preventDefault();
+        else onPointerDownOutside?.(e);
+      }}
+      onInteractOutside={(e) => {
+        if (popperWasOpenAtPointerDown) e.preventDefault();
+        else onInteractOutside?.(e);
+      }}
       className={cn(
         // Mobile: bottom sheet — anchored to the bottom edge, full width, rounded
         // top, slides up like a native mobile app modal.

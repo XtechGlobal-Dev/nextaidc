@@ -43,4 +43,11 @@ describe("planConfig", () => {
   it("ignores unknown feature ids", () => {
     expect(planFeatures(plan)).toEqual(["booking", "transfer"]);
   });
+
+  it("never turns a default feature into an add-on, even with a stale active price row for it", () => {
+    // whatsapp isn't in `plan.features`; a leftover active price row for it must still be ignored.
+    const config = planConfig(plan, new Map([["whatsapp", { priceCents: 900, active: true }]]));
+    expect(config.modules.whatsapp).toBe(false);
+    expect(config.featurePrices.whatsapp).toBeUndefined();
+  });
 });
