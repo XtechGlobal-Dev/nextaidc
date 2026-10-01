@@ -39,6 +39,7 @@ import {
 import { CardSkeleton } from "@/components/ui/skeleton";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { api, ApiError, BRAND_MODULES, isAddonEligible, type BrandAddon, type BrandModuleId, type BrandPlan, type BrandPlanInput } from "@/lib/api";
+import { BRAND_PLAN_BASICS } from "@/lib/brandPlanFeatures";
 import { formatMoney } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import { BrandAddonsDialog } from "./BrandAddonsDialog";
@@ -292,8 +293,15 @@ export default function AdminBrandPlansPage() {
                   {plan.recommended && <Badge variant="premium">Popular</Badge>}
                 </div>
 
-                {/* Every feature, in the catalog's order: in the price, sold as an add-on, or switched off. */}
+                {/* The basics every plan includes, then every module in the catalog's order: in the price,
+                    sold as an add-on, or switched off. */}
                 <ul className="mt-4 flex flex-1 flex-col gap-2">
+                  {BRAND_PLAN_BASICS.map((label) => (
+                    <li key={label} className="flex items-start gap-2 text-sm">
+                      <Check className="mt-0.5 size-4 shrink-0 text-success" />
+                      <span>{label}</span>
+                    </li>
+                  ))}
                   {BRAND_MODULES.map((m) => {
                     const addon = addonFor(m.id);
                     return (
