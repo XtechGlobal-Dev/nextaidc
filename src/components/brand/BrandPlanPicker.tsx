@@ -1,5 +1,6 @@
 import { Check, Lock, Plus, SlidersHorizontal } from "lucide-react";
 import { BRAND_MODULES, type BrandAddon, type BrandPlan } from "@/lib/api";
+import { BRAND_PLAN_BASICS } from "@/lib/brandPlanFeatures";
 import { formatMoney } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 
@@ -145,12 +146,11 @@ function PlanCard({
       {plan.description && <span className="mt-1 text-xs leading-relaxed text-muted-foreground">{plan.description}</span>}
 
       <span className="mt-3 block space-y-1">
-        {BRAND_MODULES.filter((m) => included.has(m.id)).map((m) => (
-          <span key={m.id} className="flex items-center gap-1.5 text-xs">
-            <Check className="size-3.5 shrink-0 text-success" /> {m.label}
+        {[...BRAND_PLAN_BASICS, ...BRAND_MODULES.filter((m) => included.has(m.id)).map((m) => m.label)].map((label) => (
+          <span key={label} className="flex items-center gap-1.5 text-xs">
+            <Check className="size-3.5 shrink-0 text-success" /> {label}
           </span>
         ))}
-        {included.size === 0 && <span className="block text-xs text-muted-foreground">The AI receptionist, no extras</span>}
       </span>
 
       {addOns.length > 0 && (
