@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { BRAND_MODULES, type BrandModuleId, type FeatureAccess } from "@/lib/api";
+import { BRAND_MODULES, isAddonEligible, type BrandModuleId, type FeatureAccess } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { SetupDraft } from "./brandSetupDraft";
 
@@ -146,9 +146,11 @@ export function BrandBillingFields({
           <strong className="font-medium text-foreground">Add-on</strong> stays hidden from the brand
           until its admin buys it from Billing, at the monthly price you set.{" "}
           <strong className="font-medium text-foreground">Off</strong> isn&rsquo;t offered at all.
+          SMS to Caller and WhatsApp are default features and are never sold as add-ons.
         </p>
         <div className="mt-3 divide-y divide-border rounded-xl border border-border">
           {BRAND_MODULES.map((m) => {
+            const eligible = isAddonEligible(m.id);
             const access = featureAccessOf(value, m.id);
             const bought = purchased.includes(m.id);
             return (
@@ -190,6 +192,8 @@ export function BrandBillingFields({
                     value={access}
                     onChange={(a) => setAccess(m.id, a)}
                     label={`${m.label} access`}
+                    // A default feature only ever toggles Included/Off — it's never offered as an add-on.
+                    options={eligible ? ACCESS_OPTIONS : ACCESS_OPTIONS.filter((o) => o.id !== "addon")}
                   />
                 </div>
               </div>
@@ -221,14 +225,16 @@ function Segmented({
   value,
   onChange,
   label,
+  options = ACCESS_OPTIONS,
 }: {
   value: FeatureAccess;
   onChange: (v: FeatureAccess) => void;
   label: string;
+  options?: typeof ACCESS_OPTIONS;
 }) {
   return (
     <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
-      {ACCESS_OPTIONS.map((o) => (
+      {options.map((o) => (
         <button
           key={o.id}
           type="button"

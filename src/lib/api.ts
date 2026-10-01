@@ -460,15 +460,23 @@ export interface BrandDomain {
 
 /** The optional customer modules a brand may switch off. Mirrors
  *  server/src/services/brandSetup.ts — keep the two lists in step. */
+// `addonEligible: false` = never sold separately — bundled free whenever it's switched on. SMS to Caller and
+// WhatsApp are default/core features, not upsells.
 export const BRAND_MODULES = [
-  { id: "booking", label: "Booking", description: "Website booking module and calendar appointments." },
-  { id: "transfer", label: "Call Transfer", description: "Hand a live call over to a human." },
-  { id: "crm", label: "Connect CRM", description: "Lead delivery into the customer's own CRM." },
-  { id: "smsToCaller", label: "SMS to Caller", description: "The AI texts callers the details they ask for mid-call." },
-  { id: "whatsapp", label: "WhatsApp", description: "WhatsApp call summaries and inbound auto-replies." },
+  { id: "booking", label: "Booking", description: "Website booking module and calendar appointments.", addonEligible: true },
+  { id: "transfer", label: "Call Transfer", description: "Hand a live call over to a human.", addonEligible: true },
+  { id: "crm", label: "Connect CRM", description: "Lead delivery into the customer's own CRM.", addonEligible: true },
+  { id: "smsToCaller", label: "SMS to Caller", description: "The AI texts callers the details they ask for mid-call.", addonEligible: false },
+  { id: "whatsapp", label: "WhatsApp", description: "WhatsApp call summaries and inbound auto-replies.", addonEligible: false },
 ] as const;
 export type BrandModuleId = (typeof BRAND_MODULES)[number]["id"];
 export type BrandModules = Record<BrandModuleId, boolean>;
+
+/** May this module ever be sold as a paid add-on? False for core channels — those are switched on for free
+ *  or off, never priced separately. */
+export function isAddonEligible(id: BrandModuleId): boolean {
+  return BRAND_MODULES.find((m) => m.id === id)?.addonEligible !== false;
+}
 export type SignupMode = "public" | "invite";
 export interface BrandScripts {
   head: string;

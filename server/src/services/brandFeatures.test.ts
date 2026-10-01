@@ -42,9 +42,20 @@ describe("feature add-ons", () => {
   });
 
   it("ignores junk prices and unknown ids", () => {
-    expect(brandFeaturePrices(brand({ featurePrices: { crm: 0, booking: -5, nope: 100, whatsapp: 900 } }))).toEqual({
-      whatsapp: 900,
+    expect(brandFeaturePrices(brand({ featurePrices: { crm: 0, booking: -5, nope: 100, transfer: 1200 } }))).toEqual({
+      transfer: 1200,
     });
+  });
+
+  it("never prices a default feature as an add-on, even if one is stored", () => {
+    // Legacy data (set before these became default-only) self-heals: it reads as plain included/off.
+    expect(brandFeaturePrices(brand({ featurePrices: { whatsapp: 900, smsToCaller: 500 } }))).toEqual({});
+    const stale = brand({ modules: { whatsapp: true }, featurePrices: { whatsapp: 900 }, purchasedFeatures: [] });
+    expect(brandModules(stale).whatsapp).toBe(true);
+  });
+
+  it("refuses to save an add-on price for a default feature", () => {
+    expect(() => resolveSetup({ featurePrices: { whatsapp: 900 } })).toThrow(/default feature/);
   });
 
   it("owes the platform with a fee or a bought add-on", () => {

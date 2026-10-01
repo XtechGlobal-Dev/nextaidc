@@ -80,7 +80,8 @@ export function BrandAddonsDialog({
           <DialogTitle>Add-ons</DialogTitle>
           <DialogDescription>
             What a brand pays each month for a feature its plan doesn&rsquo;t include — charged in the brand&rsquo;s
-            plan currency. Switched off, the feature isn&rsquo;t sold at all.
+            plan currency. Switched off, the feature isn&rsquo;t sold at all. SMS to Caller and WhatsApp don&rsquo;t
+            appear here — they&rsquo;re default features, included free whenever a plan switches them on.
           </DialogDescription>
         </DialogHeader>
 
