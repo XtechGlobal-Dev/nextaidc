@@ -192,8 +192,7 @@ function SubscriptionsCard({ brandId }: { brandId: string }) {
         <CreditCard className="size-4 text-primary" /> Subscriptions
       </h3>
       <p className="mt-1 text-sm text-muted-foreground">
-        Who is on what, from this brand's own database. Payments and the platform's share are on the Pricing &amp;
-        wallet tab.
+        Who is on what, from this brand's own database. Payments are on the Analytics tab.
       </p>
 
       {error ? (

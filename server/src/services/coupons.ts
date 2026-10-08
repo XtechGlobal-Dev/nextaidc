@@ -1,7 +1,8 @@
 import type { Coupon } from "@prisma/client";
 import type { CouponRedemption } from "@prisma/tenant-client";
 import { prisma } from "../prisma.js";
-import { allTenants, tenantForUser, TenantUnavailableError, type TenantClient } from "./tenantDb.js";
+import { tenantFor, tenantForUser, TenantUnavailableError, type TenantClient } from "./tenantDb.js";
+import { brandIdForOwner } from "./customerDirectory.js";
 import {
   attachSubscriptionDiscount,
   createStripeCoupon,
@@ -88,18 +89,37 @@ export function rejectionMessage(reason: CouponRejection): string {
 
 export type CouponValidation = { ok: true; coupon: Coupon } | { ok: false; reason: CouponRejection };
 
-/** Reservations still holding a slot (created inside the TTL). */
-function livePendingWhere(couponId: string, cutoff = new Date(Date.now() - PENDING_RESERVATION_TTL_MS)) {
-  return { couponId, status: "pending", reservedAt: { gt: cutoff } } as const;
+/** Live reservations for a coupon across every account — one indexed count of Main's holds (each pending
+ *  redemption has its twin there), never a count in every account database. */
+async function livePendingCount(couponId: string, cutoff = new Date(Date.now() - PENDING_RESERVATION_TTL_MS)): Promise<number> {
+  return prisma.couponHold.count({ where: { couponId, reservedAt: { gt: cutoff } } });
 }
 
-/** Live reservations for a coupon across every brand's database. */
-async function livePendingCount(couponId: string, cutoff?: Date): Promise<number> {
-  let n = 0;
-  for (const { db } of await allTenants()) {
-    n += await db.couponRedemption.count({ where: livePendingWhere(couponId, cutoff) });
-  }
-  return n;
+/** Records the slot a pending redemption holds, in Main. Best-effort: a missing hold only under-counts until the
+ *  checkout completes (then the redeemed tally has it), and the TTL ends an orphaned one. */
+async function holdSlot(couponId: string, userId: string, reservedAt: Date): Promise<void> {
+  const brandId = await brandIdForOwner(userId);
+  if (!brandId) return;
+  await prisma.couponHold
+    .upsert({
+      where: { couponId_brandId_userId: { couponId, brandId, userId } },
+      create: { couponId, brandId, userId, reservedAt },
+      update: { reservedAt },
+    })
+    .catch((e: unknown) => console.warn("[coupons] could not record a hold:", e instanceof Error ? e.message : e));
+}
+
+/** Lets go of this account's holds — on one coupon, or every one but `exceptCouponId`. Best-effort, like holdSlot. */
+async function releaseHolds(userId: string, opts: { couponId?: string; exceptCouponId?: string | null } = {}): Promise<void> {
+  await prisma.couponHold
+    .deleteMany({
+      where: {
+        userId,
+        ...(opts.couponId ? { couponId: opts.couponId } : {}),
+        ...(opts.exceptCouponId ? { couponId: { not: opts.exceptCouponId } } : {}),
+      },
+    })
+    .catch(() => undefined);
 }
 
 /** Bump the catalogue's tally — the control plane's side of a redemption. */
@@ -185,7 +205,7 @@ export async function reserveRedemption(couponId: string, userId: string): Promi
   const db = await tenantForUser(userId);
   const coupon = await prisma.coupon.findUnique({ where: { id: couponId } });
   if (!coupon) throw new Error("coupon not found");
-  return db.$transaction(async (inBrand) => {
+  const held = await db.$transaction(async (inBrand) => {
     // Clear the user's own stale reservation first, or the unique constraint rejects a legitimate retry until the hourly sweep.
     await inBrand.couponRedemption.deleteMany({
       where: { couponId, userId, status: "pending", reservedAt: { lte: cutoff } },
@@ -202,6 +222,8 @@ export async function reserveRedemption(couponId: string, userId: string): Promi
     }
     return inBrand.couponRedemption.create({ data: { couponId, userId, status: "pending" } });
   });
+  if (held.status === "pending") await holdSlot(couponId, userId, held.reservedAt);
+  return held;
 }
 
 /** Turns the reservation into a live discount once the subscription starts. Any other live redemption is revoked — one discount at a time. */
@@ -228,8 +250,10 @@ export async function activateRedemption(userId: string, subscriptionId?: string
     });
     await inBrand.profile.update({ where: { userId }, data: { activeCouponRedemptionId: applied.id } });
   });
-  // The catalogue's tally is in the control plane: a second database, a second write.
+  // The catalogue's tally is in the control plane: a second database, a second write. The slot is redeemed now,
+  // so it stops counting as held.
   await countRedeemed(applied.couponId, 1);
+  await releaseHolds(userId, { couponId: applied.couponId });
 
   await syncStripeDiscountTo(db, userId, subscriptionId ?? null, applied.coupon);
   void recordPlanEvent({
@@ -355,6 +379,7 @@ export async function clearOtherPendingReservations(userId: string, keepCouponId
         ...(keepCouponId ? { couponId: { not: keepCouponId } } : {}),
       },
     });
+    await releaseHolds(userId, { exceptCouponId: keepCouponId });
   } catch (e) {
     if (!isMissingCouponTable(e)) throw e;
   }
@@ -574,6 +599,7 @@ export async function grantCoupon(
     await inBrand.profile.update({ where: { userId }, data: { activeCouponRedemptionId: created.id } });
   });
   await countRedeemed(couponId, 1);
+  await releaseHolds(userId, { couponId });
 
   await syncStripeDiscountTo(db, userId, profile?.stripeSubscriptionId ?? null, coupon);
   void recordPlanEvent({
@@ -707,15 +733,28 @@ export async function syncStripeCoupon(coupon: {
   return { stripeCouponId };
 }
 
-/** Frees abandoned-checkout reservations across every tenant. Rows are DELETED, not marked — a leftover would trip the unique index and lock the user out of a code they never used. */
+/** Frees abandoned-checkout reservations. Rows are DELETED, not marked — a leftover would trip the unique index and
+ *  lock the user out of a code they never used (reserveRedemption also clears a user's own stale row on retry).
+ *  Only the accounts Main's stale holds point at are opened — not every account database each hour. */
 export async function sweepStalePendingRedemptions(): Promise<number> {
   const cutoff = new Date(Date.now() - PENDING_RESERVATION_TTL_MS);
+  const stale = await prisma.couponHold.findMany({
+    where: { reservedAt: { lte: cutoff } },
+    select: { brandId: true },
+    distinct: ["brandId"],
+  });
   let total = 0;
-  for (const { db } of await allTenants()) {
-    const { count } = await db.couponRedemption.deleteMany({
-      where: { status: "pending", reservedAt: { lte: cutoff } },
-    });
-    total += count;
+  for (const { brandId } of stale) {
+    try {
+      const db = await tenantFor(brandId);
+      const { count } = await db.couponRedemption.deleteMany({
+        where: { status: "pending", reservedAt: { lte: cutoff } },
+      });
+      total += count;
+    } catch (e) {
+      console.warn(`[coupons] stale sweep skipped brand ${brandId}:`, e instanceof Error ? e.message : e);
+    }
   }
+  await prisma.couponHold.deleteMany({ where: { reservedAt: { lte: cutoff } } });
   return total;
 }

@@ -211,7 +211,7 @@ export default function ResellerPortalPage() {
         ) : (
           <>
             {/* Referral link — hero CTA */}
-            <section className="relative mt-6 overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-[#1d4ed8] p-6 text-white shadow-[var(--shadow-soft)]">
+            <section className="relative mt-6 overflow-hidden rounded-2xl bg-primary p-6 text-white shadow-[var(--shadow-soft)]">
               <span
                 aria-hidden
                 className="pointer-events-none absolute -right-12 -top-12 size-44 rounded-full bg-white/10 blur-2xl"

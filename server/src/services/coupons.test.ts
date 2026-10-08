@@ -15,6 +15,13 @@ vi.mock("../prisma.js", () => ({
       deleteMany: vi.fn(async () => ({ count: 0 })),
     },
     planEvent: { findFirst: vi.fn(async () => null) },
+    // Main's twin of each pending redemption — the supply count reads it, never every account database.
+    couponHold: {
+      count: vi.fn(async () => 0),
+      upsert: vi.fn(async () => ({})),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+      findMany: vi.fn(async () => []),
+    },
     // `update` resolves: production code chains .catch() on it for best-effort
     // writes, which a bare vi.fn() (returning undefined) would blow up on.
     profile: { findUnique: vi.fn(async () => null), update: vi.fn(async () => ({})) },
@@ -66,7 +73,8 @@ const couponFindUnique = prisma.coupon.findUnique as unknown as ReturnType<typeo
 const couponFindFirst = prisma.coupon.findFirst as unknown as ReturnType<typeof vi.fn>;
 const redemptionFindUnique = fake.couponRedemption.findUnique as unknown as ReturnType<typeof vi.fn>;
 const redemptionFindFirst = fake.couponRedemption.findFirst as unknown as ReturnType<typeof vi.fn>;
-const redemptionCount = fake.couponRedemption.count as unknown as ReturnType<typeof vi.fn>;
+/** Live holds on a coupon (in-flight checkouts), as Main counts them. */
+const redemptionCount = fake.couponHold.count as unknown as ReturnType<typeof vi.fn>;
 const redemptionUpdate = fake.couponRedemption.update as unknown as ReturnType<typeof vi.fn>;
 // Billing history lives in the customer brand database; the stand-in hands back
 // the same stubbed plan-history model the suite already drives.
@@ -74,8 +82,14 @@ vi.mock("./tenantDb.js", async () => {
   const { prisma } = await import("../prisma.js");
   class TenantUnavailableError extends Error {}
   // The customer's brand's database is the same stand-in as Main here.
-  return { tenantForUser: async () => prisma, allTenants: async () => [{ brandId: "b1", db: prisma }], TenantUnavailableError };
+  return {
+    tenantForUser: async () => prisma,
+    tenantFor: async () => prisma,
+    allTenants: async () => [{ brandId: "b1", db: prisma }],
+    TenantUnavailableError,
+  };
 });
+vi.mock("./customerDirectory.js", () => ({ brandIdForOwner: async () => "b1" }));
 
 const planEventFindFirst = fake.planEvent.findFirst as unknown as ReturnType<typeof vi.fn>;
 const profileFindUnique = fake.profile.findUnique as unknown as ReturnType<typeof vi.fn>;
@@ -275,6 +289,26 @@ describe("reserveRedemption", () => {
         where: expect.objectContaining({ couponId: "c1", userId: "u1", status: "pending" }),
       }),
     );
+  });
+
+  it("records the held slot in Main, where the supply is counted", async () => {
+    couponFindUnique.mockResolvedValue(coupon({ maxRedemptions: 5, redeemedCount: 0 }));
+    redemptionFindUnique.mockResolvedValue(null);
+    const reservedAt = new Date();
+    (fake.couponRedemption.create as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      redemption({ status: "pending", reservedAt }),
+    );
+    await reserveRedemption("c1", "u1");
+    expect(fake.couponHold.upsert).toHaveBeenCalledWith({
+      where: { couponId_brandId_userId: { couponId: "c1", brandId: "b1", userId: "u1" } },
+      create: { couponId: "c1", brandId: "b1", userId: "u1", reservedAt },
+      update: { reservedAt },
+    });
+    // The supply check is one count in Main, not one per account database.
+    expect(fake.couponHold.count).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ couponId: "c1" }) }),
+    );
+    expect(fake.couponRedemption.count).not.toHaveBeenCalled();
   });
 
   it("reuses a fresh reservation instead of failing a double-submit", async () => {

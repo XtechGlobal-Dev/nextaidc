@@ -51,7 +51,7 @@ export function AgentDefaultsSettings() {
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-col items-start gap-2.5 sm:flex-row sm:items-center sm:gap-3.5 border-b border-border bg-card px-4 py-4 sm:px-6 sm:py-5">
-        <span className="grid size-12 shrink-0 aspect-square place-items-center rounded-2xl bg-primary/15 text-primary shadow-[inset_0_0_0_1px_hsl(217_84%_55%/0.25)]">
+        <span className="grid size-12 shrink-0 aspect-square place-items-center rounded-2xl bg-primary/15 text-primary shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_25%,transparent)]">
           <UserRound className="size-6" />
         </span>
         <div>

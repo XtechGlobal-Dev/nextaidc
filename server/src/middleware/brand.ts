@@ -9,6 +9,8 @@ declare global {
     interface Request {
       /** The white-label tenant this request arrived through (null = platform). */
       brand?: Brand | null;
+      /** How it was reached: its own host (subdomain / domain), or the main domain's /{slug} path. */
+      brandDoor?: "host" | "path" | null;
     }
   }
 }
@@ -19,15 +21,20 @@ export function brandContext(req: Request, _res: Response, next: NextFunction) {
   // req.hostname honours X-Forwarded-Host via `trust proxy`; fall back to the raw header.
   const host = req.hostname || req.headers.host;
   let brand = resolveBrandForHost(host);
+  let via: "host" | "path" | null = brand ? "host" : null;
 
   // The API rarely shares the app's hostname, so fall back to Origin (browser-set, not script-writable)
   // and Referer (covers same-origin navigations that omit Origin).
   if (!brand) brand = resolveBrandForHost(originHost(req.get("origin")));
   if (!brand) brand = resolveBrandForHost(originHost(req.get("referer")));
+  if (brand) via = "host";
 
   // Path routing: the client names its front door. Client-asserted is fine here — it picks a PUBLIC
   // look and sender and grants nothing; requireAuth replaces it with the account's real tenant.
-  if (!brand) brand = brandBySlug(req.get("x-brand"));
+  if (!brand) {
+    brand = brandBySlug(req.get("x-brand"));
+    if (brand) via = "path";
+  }
 
   // Dev/test only: bypasses the public lookup by raw id.
   if (!brand && process.env.NODE_ENV !== "production") {
@@ -40,6 +47,7 @@ export function brandContext(req: Request, _res: Response, next: NextFunction) {
   }
 
   req.brand = brand;
+  req.brandDoor = brand ? (via ?? "host") : null;
   runWithBrand(brand?.id ?? null, () => next());
 }
 

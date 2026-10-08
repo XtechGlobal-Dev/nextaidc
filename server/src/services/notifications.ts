@@ -2,6 +2,7 @@ import { prisma } from "../prisma.js";
 import { publishToUser, publishToAdmins } from "./events.js";
 import { currentBrandId } from "../lib/brandContext.js";
 import { brandIdForOwner } from "./customerDirectory.js";
+import { cachedBrand, isCustomerBrand } from "./brands.js";
 import { controlPlaneAsTenant, planeOf, type TenantClient } from "./tenantDb.js";
 
 // Notifications follow the person: a brand's people keep theirs in the brand DB,
@@ -99,19 +100,26 @@ export async function notifyPlatformOwners(n: NotificationInput): Promise<void> 
   }
 }
 
-/** Current brand's admins only — the super admin can't open a brand's customer panel, so it'd be noise. No-op without a brand. */
-export async function notifyBrandAdmins(n: NotificationInput): Promise<void> {
+/** Current brand's admins only — the super admin can't open a brand's customer panel, so it'd be noise. No-op without
+ *  a brand. A main-domain customer's own row has no brand team: the platform is its provider, so its owners hear it,
+ *  pointed at `platformLink` (their Platform Customers page) when given. */
+export async function notifyBrandAdmins(n: NotificationInput & { platformLink?: string }): Promise<void> {
+  const { platformLink, ...note } = n;
   try {
     const brandId = currentBrandId();
     if (!brandId) return;
+    if (isCustomerBrand(cachedBrand(brandId))) {
+      await notifyPlatformOwners({ ...note, link: platformLink ?? note.link });
+      return;
+    }
     const tenant = await planeOf(brandId);
     const admins = await tenant.user.findMany({ where: { role: "ADMIN" }, select: { id: true } });
     await notifyIn(
       tenant,
       admins.map((a) => a.id),
-      n,
+      note,
     );
-    publishToAdmins({ type: n.type });
+    publishToAdmins({ type: note.type });
   } catch {
     /* best-effort */
   }

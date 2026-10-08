@@ -1,12 +1,15 @@
 import express from "express";
 import type { Prisma as TenantPrisma } from "@prisma/tenant-client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../prisma.js";
+import { refreshBrand } from "../services/brands.js";
 import { requireAuth, requireSuperAdmin } from "../middleware/auth.js";
-import { asyncHandler, notFound } from "../lib/http.js";
+import { asyncHandler, badRequest, notFound } from "../lib/http.js";
 import { audit } from "../services/audit.js";
 import { tenantFor, type TenantClient } from "../services/tenantDb.js";
-import { platformOverview, rollupBrandStats, utcDay, ACTIVE_SUB_STATUSES } from "../services/brandStats.js";
+import { latestStatsRows, platformOverview, rollupBrandStats, utcDay, ACTIVE_SUB_STATUSES } from "../services/brandStats.js";
 import { searchDirectory } from "../services/customerDirectory.js";
+import { customerDetailFor } from "./admin.routes.js";
 
 // Super-admin platform views. Platform-wide screens read Main only (rollup, ledger,
 // directory); one brand's inside reads that brand's tenant DB and nothing else.
@@ -65,6 +68,186 @@ router.get(
     const q = str(req.query.q);
     const hits = q ? await searchDirectory(q, 25) : [];
     res.json({ q, hits });
+  }),
+);
+
+// Main-domain customers (docs/brand-as-customer-plan.md) — each is its own customer-state brand row. The platform
+// is their provider, so this is the super admin's customer list. Main only: the owner comes from the directory and
+// the plan state from last night's rollup, so a page costs three indexed reads however many customers there are.
+
+const PLATFORM_CUSTOMER_STATUSES = ["active", "suspended"] as const;
+
+router.get(
+  "/platform-customers",
+  asyncHandler(async (req, res) => {
+    const q = str(req.query.q);
+    const status = str(req.query.status);
+    const { page, pageSize, skip } = paging(req);
+    const where: Prisma.BrandWhereInput = {
+      kind: "customer",
+      poolSpare: false,
+      // A row still being set up (or whose setup failed) has no account to show yet.
+      status: (PLATFORM_CUSTOMER_STATUSES as readonly string[]).includes(status)
+        ? (status as (typeof PLATFORM_CUSTOMER_STATUSES)[number])
+        : { in: [...PLATFORM_CUSTOMER_STATUSES] },
+      ...(q
+        ? {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              {
+                directory: {
+                  some: {
+                    OR: [
+                      { email: { contains: q, mode: "insensitive" } },
+                      { fullName: { contains: q, mode: "insensitive" } },
+                    ],
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+    const [total, rows] = await Promise.all([
+      prisma.brand.count({ where }),
+      prisma.brand.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          ownerUserId: true,
+          activatedAt: true,
+          downgradedAt: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+    const ids = rows.map((r) => r.id);
+    const [people, stats] = ids.length
+      ? await Promise.all([
+          prisma.customerDirectory.findMany({
+            where: { brandId: { in: ids } },
+            select: { brandId: true, userId: true, email: true, fullName: true },
+          }),
+          latestStatsRows(ids),
+        ])
+      : [[], []];
+    const statsOf = new Map(stats.map((s) => [s.brandId, s]));
+    res.json({
+      page,
+      pageSize,
+      total,
+      customers: rows.map((r) => {
+        const owner =
+          people.find((p) => p.brandId === r.id && p.userId === r.ownerUserId) ??
+          people.find((p) => p.brandId === r.id);
+        const s = statsOf.get(r.id);
+        return {
+          id: r.id,
+          businessName: r.name,
+          email: owner?.email ?? "",
+          fullName: owner?.fullName ?? "",
+          status: r.status,
+          // As of the last nightly rollup; null before the first one.
+          plan: s ? (s.active > 0 ? "paying" : s.trialing > 0 ? "trial" : "none") : null,
+          callsTotal: s?.callsTotal ?? 0,
+          statsAsOf: s?.day ?? null,
+          activatedAt: r.activatedAt,
+          // Set when this account was a brand once and was downgraded.
+          downgradedAt: r.downgradedAt,
+          createdAt: r.createdAt,
+        };
+      }),
+    });
+  }),
+);
+
+/** One main-domain customer's page: the account row from Main, and the owner's deep dive from the customer's own
+ *  database. Once approved the row is a brand, and its page is the brand's — `convertedToBrand` says so. */
+router.get(
+  "/platform-customers/:id",
+  asyncHandler(async (req, res) => {
+    const row = await prisma.brand.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        kind: true,
+        status: true,
+        poolSpare: true,
+        ownerUserId: true,
+        activatedAt: true,
+        downgradedAt: true,
+        createdAt: true,
+      },
+    });
+    if (!row || row.poolSpare) throw notFound("Customer not found");
+    const account = {
+      id: row.id,
+      businessName: row.name,
+      slug: row.slug,
+      status: row.status,
+      activatedAt: row.activatedAt,
+      downgradedAt: row.downgradedAt,
+      createdAt: row.createdAt,
+    };
+    if (row.kind !== "customer") {
+      res.json({ account, convertedToBrand: true, owner: null, detail: null });
+      return;
+    }
+    const people = await prisma.customerDirectory.findMany({
+      where: { brandId: row.id },
+      orderBy: { createdAt: "asc" },
+      select: { userId: true, email: true, fullName: true },
+    });
+    const owner = people.find((p) => p.userId === row.ownerUserId) ?? people[0] ?? null;
+    // A database that won't open (re-provisioning, mid-setup) still leaves the account row worth showing.
+    let detail: Awaited<ReturnType<typeof customerDetailFor>> | null = null;
+    let detailError = "";
+    if (owner) {
+      try {
+        detail = await customerDetailFor(await tenantFor(row.id), row.id, owner.userId);
+      } catch (e) {
+        detailError = e instanceof Error ? e.message : "Couldn't read this customer's account";
+      }
+    }
+    res.json({
+      account,
+      convertedToBrand: false,
+      owner,
+      detail,
+      detailError,
+    });
+  }),
+);
+
+/** Suspend or restore a main-domain customer: sign-in and every open session are refused while suspended. */
+router.post(
+  "/platform-customers/:id/:action(suspend|reactivate)",
+  asyncHandler(async (req, res) => {
+    const row = await prisma.brand.findUnique({ where: { id: req.params.id }, select: { id: true, kind: true, status: true } });
+    if (!row || row.kind !== "customer") throw notFound("Customer not found");
+    const suspend = req.params.action === "suspend";
+    if (suspend ? row.status !== "active" : row.status !== "suspended") {
+      throw badRequest(suspend ? "Only an active account can be suspended." : "This account isn't suspended.");
+    }
+    await prisma.brand.update({ where: { id: row.id }, data: { status: suspend ? "suspended" : "active" } });
+    await refreshBrand(row.id);
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: req.user!.brandId ?? null,
+      actorEmail: req.user!.email,
+      action: suspend ? "platform_customer.suspend" : "platform_customer.reactivate",
+      targetType: "brand",
+      targetId: row.id,
+      ip: req.ip,
+    });
+    res.json({ ok: true, status: suspend ? "suspended" : "active" });
   }),
 );
 

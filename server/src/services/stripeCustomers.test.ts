@@ -1,25 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// The Stripe customer index: how a payment finds its brand. Rebuilt from the
-// profile when missing; never guesses when nobody holds the customer.
+// The Stripe customer index: how a payment finds its brand. A customer not indexed yet is placed from the owner
+// stamped on the Stripe customer — believed only if Main's directory agrees — never by scanning every account
+// database; and it never guesses when nobody holds the customer.
 
 const h = vi.hoisted(() => ({
   indexFindUnique: vi.fn(),
   indexUpsert: vi.fn(),
   profileFindFirst: vi.fn(),
   profileFindMany: vi.fn(),
+  dirFindUnique: vi.fn(),
+  stripeOn: vi.fn(() => true),
+  retrieve: vi.fn(),
 }));
 
 vi.mock("../prisma.js", () => ({
   prisma: {
     stripeCustomer: { findUnique: h.indexFindUnique, upsert: h.indexUpsert },
     profile: { findFirst: h.profileFindFirst, findMany: h.profileFindMany },
+    customerDirectory: { findUnique: h.dirFindUnique },
   },
 }));
 vi.mock("./tenantDb.js", async () =>
   (await import("../test/tenantDbFake.js")).tenantDbFake({}),
 );
-vi.mock("./stripe.js", () => ({ isStripeConfigured: () => false, stripe: vi.fn() }));
+vi.mock("./stripe.js", () => ({
+  isStripeConfigured: h.stripeOn,
+  stripe: () => ({ customers: { retrieve: h.retrieve } }),
+}));
 
 const { indexStripeCustomer, resolveStripeCustomer, backfillStripeCustomerIndex, stripeOwnerMetadata } =
   await import("./stripeCustomers.js");
@@ -29,6 +37,8 @@ beforeEach(() => {
   h.indexFindUnique.mockResolvedValue(null);
   h.profileFindFirst.mockResolvedValue(null);
   h.indexUpsert.mockResolvedValue({});
+  h.dirFindUnique.mockResolvedValue(null);
+  h.retrieve.mockResolvedValue({ id: "cus_x", metadata: {} });
 });
 
 describe("indexStripeCustomer", () => {
@@ -63,19 +73,25 @@ describe("resolveStripeCustomer", () => {
 
   // Customers from before the index existed: the profile still holds the id,
   // and the index is repaired on the way out so the next event is one lookup.
-  it("falls back to the profile holding the id, and repairs the index", async () => {
-    h.profileFindFirst.mockResolvedValue({ userId: "u1", user: { brandId: "b_acme" } });
-    expect(await resolveStripeCustomer("cus_old")).toEqual({ brandId: "b_acme", userId: "u1" });
-    expect(h.profileFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { OR: [{ stripeCustomerId: "cus_old" }, { pendingSwitchCustomerId: "cus_old" }] },
-      }),
-    );
-    expect(h.indexUpsert).toHaveBeenCalledWith(expect.objectContaining({ where: { stripeCustomerId: "cus_old" } }));
+  it("places an unindexed customer from its Stripe stamp, checked against the directory, and indexes it", async () => {
+    h.retrieve.mockResolvedValue({ id: "cus_new", metadata: { brandId: "b_acme", userId: "u1" } });
+    h.dirFindUnique.mockResolvedValue({ userId: "u1" });
+    expect(await resolveStripeCustomer("cus_new")).toEqual({ brandId: "b_acme", userId: "u1" });
+    expect(h.indexUpsert).toHaveBeenCalledWith(expect.objectContaining({ where: { stripeCustomerId: "cus_new" } }));
+    // Never a scan of every account database.
+    expect(h.profileFindFirst).not.toHaveBeenCalled();
   });
 
-  it("says so when no brand holds the customer — never guesses", async () => {
+  it("doesn't believe a stamp the directory doesn't know", async () => {
+    h.retrieve.mockResolvedValue({ id: "cus_forged", metadata: { brandId: "b_other", userId: "u9" } });
+    expect(await resolveStripeCustomer("cus_forged")).toBeNull();
+    expect(h.indexUpsert).not.toHaveBeenCalled();
+  });
+
+  it("says so when no brand holds the customer — never guesses — and asks Stripe once, not per retry", async () => {
     expect(await resolveStripeCustomer("cus_stranger")).toBeNull();
+    expect(await resolveStripeCustomer("cus_stranger")).toBeNull();
+    expect(h.retrieve).toHaveBeenCalledTimes(1);
     expect(await resolveStripeCustomer(null)).toBeNull();
     expect(h.indexUpsert).not.toHaveBeenCalled();
   });

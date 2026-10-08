@@ -96,7 +96,7 @@ export function QuickSetupModal() {
         {/* Header */}
         <header className="flex items-center justify-between gap-3 border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-primary to-[#1d4ed8] text-white shadow-[var(--shadow-soft)]">
+            <div className="grid size-10 place-items-center rounded-xl bg-primary text-white shadow-[var(--shadow-soft)]">
               <Rocket className="size-5" />
             </div>
             <div>
@@ -167,7 +167,7 @@ export function QuickSetupModal() {
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-primary to-[#1d4ed8] transition-[width] duration-500"
+                  className="h-full rounded-full bg-primary transition-[width] duration-500"
                   style={{ width: `${donePct}%` }}
                 />
               </div>

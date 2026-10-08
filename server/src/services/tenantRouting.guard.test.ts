@@ -12,7 +12,6 @@ const ALLOWED = new Map<string, string>([
   ["services/otp.ts", "the platform's own door keeps its codes in the control plane's table"],
   ["middleware/auth.ts", "a token naming no brand is one of the platform's own people, read from Main"],
   ["routes/auth.routes.ts", "the platform's own people sign in from Main; everyone else from their brand's door"],
-  ["routes/brands.routes.ts", "a new brand's first admin must not collide with one of the platform's own people"],
   ["services/notifications.ts", "notifyAdmins reaches the platform's owners, who live in Main"],
   ["services/voices.ts", "the platform's own people have no brand; their role is read from Main"],
 ]);

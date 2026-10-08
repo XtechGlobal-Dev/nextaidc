@@ -54,11 +54,10 @@ export default function LoginPage() {
   const suspendedNotice = useAuthStore((s) => s.suspendedNotice);
   const clearSuspendedNotice = useAuthStore((s) => s.clearSuspendedNotice);
   const resetOnboarding = useOnboardingStore((s) => s.reset);
-  // Brand door (null on the platform's own). A brand may close self-serve sign-up; the platform
-  // door takes no sign-ups at all (every customer is some brand's), so it reads closed once branding loads.
+  // Brand door (null on the platform's own). A brand may close self-serve sign-up; the platform's own
+  // door is always open (each main-domain customer gets its own account database).
   const brand = useBrandingStore((s) => s.brand);
-  const brandLoaded = useBrandingStore((s) => s.loaded);
-  const inviteOnly = brand ? brand.signupMode === "invite" : brandLoaded;
+  const inviteOnly = brand?.signupMode === "invite";
 
   // Keep /login out of search results (vercel.json X-Robots-Tag covers prod; this covers dev/non-Vercel). Removed on unmount so it doesn't leak to other routes.
   useEffect(() => {
@@ -273,7 +272,7 @@ export default function LoginPage() {
 
         <Card className="overflow-hidden">
           {/* gradient top accent */}
-          <div className="h-1.5 w-full bg-gradient-to-r from-primary to-[#1d4ed8]" />
+          <div className="h-1.5 w-full bg-primary" />
           <CardContent className="pt-6">
             <div className="mb-5 text-center">
               <h1 className="text-2xl font-bold">{copy.title}</h1>

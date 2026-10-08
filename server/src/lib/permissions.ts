@@ -62,8 +62,6 @@ export const SECTIONS: SectionDef[] = [
   { key: "coupons", label: "Coupons", capabilities: ["view", "create", "edit", "delete"] },
   { key: "phone_numbers", label: "Phone Numbers", capabilities: ["view", "create", "edit", "delete"] },
   { key: "emails", label: "System Emails", capabilities: ["view", "edit"] },
-  { key: "pricing", label: "Pricing", capabilities: ["view", "edit"] },
-  { key: "wallet", label: "Wallet", capabilities: ["view"] },
   // Not listed on purpose: audit and voice_bank (platform-only), resellers (every ADMIN, never staff), and the
   // requireAdmin/requireSuperAdmin areas — a grantable box that authorizes nothing is worse than none.
 ];
@@ -76,9 +74,6 @@ export const BRAND_SCOPED_SECTIONS = new Set([
   "subscriptions",
   // The support inbox is the customer list in conversation form; the platform's own is `brand_tickets`.
   "tickets",
-  // Brand markup and its wallet — the platform owner manages these from the brand's page.
-  "pricing",
-  "wallet",
   // A brand recruits and pays its own resellers; the platform owner has no programme of their own.
   "resellers",
 ]);

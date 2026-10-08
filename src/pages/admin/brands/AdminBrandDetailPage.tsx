@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   BarChart3,
   Building2,
-  CreditCard,
   ExternalLink,
   FileText,
   Globe,
@@ -20,7 +19,6 @@ import {
   UserCog,
   UserRound,
   Users,
-  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -41,15 +39,13 @@ import { BrandDepartmentsSection } from "./BrandDepartmentsSection";
 import { BrandAccessSection, BrandLocaleFields } from "./BrandAccessSection";
 import { BrandContentSection } from "./BrandContentSection";
 import { BrandReadinessCard } from "./BrandReadinessCard";
-import { BrandPricingTab } from "./BrandPricingTab";
 import { BrandPlansTab } from "./BrandPlansTab";
 import { BLANK_SETUP, setupFrom, setupPayload, type SetupDraft } from "./brandSetupDraft";
 import { BrandDomainSection } from "./BrandDomainSection";
 import { BrandInsideTab } from "./BrandInsideTab";
-import { BrandBillingTab } from "./BrandBillingTab";
 import { BrandAnalyticsTab } from "./BrandAnalyticsTab";
-import { billingDraftProblem } from "./BrandBillingFields";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
+import { BrandRetireDialog } from "./BrandRetireDialog";
 import { brandStatusLabel, brandStatusVariant, formatDeletesAt } from "./brandStatus";
 
 interface Draft extends ThemeDraft, SetupDraft {
@@ -112,6 +108,8 @@ export default function AdminBrandDetailPage() {
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [confirmingDeactivate, setConfirmingDeactivate] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Deactivate and Delete first ask which kind: downgrade to a platform customer, or the permanent route.
+  const [retiring, setRetiring] = useState<"deactivate" | "delete" | null>(null);
   // A link may open a particular tab (the platform overview and the directory
   // send people straight to what is inside the brand).
   const [searchParams] = useSearchParams();
@@ -197,8 +195,7 @@ export default function AdminBrandDetailPage() {
     [draft],
   );
 
-  const billingProblem = billingDraftProblem(draft);
-  const canSave = draft.name.trim().length >= 2 && !!draft.slug && !billingProblem;
+  const canSave = draft.name.trim().length >= 2 && !!draft.slug;
 
   async function save() {
     setSaving(true);
@@ -222,8 +219,7 @@ export default function AdminBrandDetailPage() {
       });
       setBrand(next);
       setDraft(draftFrom(next));
-      if (next.billingWarning) toast.warning(next.billingWarning);
-      else toast.success("Brand saved");
+      toast.success("Brand saved");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Failed to save brand");
     } finally {
@@ -461,6 +457,13 @@ export default function AdminBrandDetailPage() {
     navigate("/dashboard/admin/brands");
   }
 
+  // Back to the owner's platform customer account; the database is kept as it is.
+  async function downgrade() {
+    await api.super.brands.downgrade(id!);
+    toast.success(`"${brand?.name}" is a platform customer again — its database is untouched.`);
+    navigate(`/dashboard/admin/platform-customers/${id}`);
+  }
+
   const deactivated = brand?.status === "deactivated";
   const inSetup = brand?.status === "provisioning" || brand?.status === "failed";
   const lifecycleCard = brand && (
@@ -483,8 +486,8 @@ export default function AdminBrandDetailPage() {
             <>
               <p className="font-medium">Deactivate</p>
               <p className="text-xs text-muted-foreground">
-                Takes the brand offline now and deletes it, database and accounts included, after 30
-                days. You can reactivate it any time before then.
+                Hand it back to its owner as a platform customer (database kept), or take it offline and
+                delete it, database and accounts included, after 30 days.
               </p>
             </>
           )}
@@ -503,7 +506,7 @@ export default function AdminBrandDetailPage() {
             variant="outline"
             // In setup there is nothing to switch off: Retry finishes it, Delete removes it.
             disabled={inSetup}
-            onClick={() => setConfirmingDeactivate(true)}
+            onClick={() => setRetiring("deactivate")}
           >
             <Power className="size-4" /> Deactivate
           </Button>
@@ -513,10 +516,11 @@ export default function AdminBrandDetailPage() {
         <div className="text-sm">
           <p className="font-medium">Delete now</p>
           <p className="text-xs text-muted-foreground">
-            Immediate and permanent: the database and every account in it go with the brand.
+            Hand it back to its owner as a platform customer (database kept), or delete it now with its
+            database and every account in it.
           </p>
         </div>
-        <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+        <Button variant="danger" onClick={() => setRetiring("delete")}>
           <Trash2 className="size-4" /> Delete brand
         </Button>
       </div>
@@ -589,20 +593,12 @@ export default function AdminBrandDetailPage() {
             <TabsTrigger value="content">
               <FileText className="size-4" /> Content
             </TabsTrigger>
-            <TabsTrigger value="pricing">
-              <Wallet className="size-4" /> Pricing &amp; wallet
-            </TabsTrigger>
             <TabsTrigger value="whitelabel">
               <Mail className="size-4" /> White-label
             </TabsTrigger>
             <TabsTrigger value="team">
               <UserCog className="size-4" /> Team
             </TabsTrigger>
-            {brand && (
-              <TabsTrigger value="billing">
-                <CreditCard className="size-4" /> Billing
-              </TabsTrigger>
-            )}
             {brand && (
               <TabsTrigger value="analytics">
                 <BarChart3 className="size-4" /> Analytics
@@ -645,17 +641,6 @@ export default function AdminBrandDetailPage() {
             <div className="flex justify-end">{saveButton}</div>
           </TabsContent>
 
-          <TabsContent value="pricing" className="space-y-5">
-            {brand && (
-              <BrandPricingTab
-                brand={brand}
-                value={{ addonEditable: draft.addonEditable, maxAddonCents: draft.maxAddonCents }}
-                onChange={patch}
-              />
-            )}
-            <div className="flex justify-end">{saveButton}</div>
-          </TabsContent>
-
           <TabsContent value="whitelabel" className="space-y-5">
             {brand && <BrandAssetsSection brand={brand} onChange={setBrand} />}
             {brand && <BrandMessagingSection brandId={brand.id} />}
@@ -664,22 +649,6 @@ export default function AdminBrandDetailPage() {
           <TabsContent value="team" className="space-y-5">
             {brand && <BrandAdminsSection brand={brand} />}
             {brand && <BrandDepartmentsSection brand={brand} />}
-          </TabsContent>
-
-          <TabsContent value="billing" className="space-y-5">
-            {brand && (
-              <BrandBillingTab
-                brand={brand}
-                value={draft}
-                onChange={patch}
-                saveButton={
-                  <div className="flex items-center gap-3">
-                    {billingProblem && <p className="text-xs text-danger">{billingProblem}</p>}
-                    {saveButton}
-                  </div>
-                }
-              />
-            )}
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-5">
@@ -691,6 +660,19 @@ export default function AdminBrandDetailPage() {
           </TabsContent>
         </Tabs>
 
+        {brand && (
+          <BrandRetireDialog
+            action={retiring}
+            brand={brand}
+            onOpenChange={(open) => !open && setRetiring(null)}
+            onPermanent={() => {
+              if (retiring === "delete") setConfirmingDelete(true);
+              else setConfirmingDeactivate(true);
+              setRetiring(null);
+            }}
+            onDowngrade={downgrade}
+          />
+        )}
         <ConfirmDeleteDialog
           open={confirmingDeactivate}
           onOpenChange={(open) => !open && setConfirmingDeactivate(false)}

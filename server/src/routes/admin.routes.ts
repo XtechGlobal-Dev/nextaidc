@@ -30,7 +30,6 @@ import { withPlan, withPlans } from "../services/planLookup.js";
 import { cachedBrand } from "../services/brands.js";
 import { brandPlanIds } from "../services/brandSetup.js";
 import type { Prisma as TenantPrisma } from "@prisma/tenant-client";
-import { refreshBrandPricesForPlan } from "../services/brandPricing.js";
 import { nextAvailableForBrand } from "../services/phones.js";
 import {
   SECTIONS,
@@ -1977,11 +1976,11 @@ async function planSubscriberCount(planId: string): Promise<number> {
   return total;
 }
 
-/** Live subscribers per plan, summed over every brand's database — the plan
- *  is the platform's, its subscribers are everywhere. */
-async function liveSubscribersByPlan(): Promise<Map<string | null, number>> {
+/** Live subscribers per plan. The super admin's (no brand) are summed over every account database — the plan is
+ *  the platform's; a brand's people see their own brand's only (one database, and no other brand's numbers). */
+async function liveSubscribersByPlan(viewerBrandId: string | null | undefined): Promise<Map<string | null, number>> {
   const countById = new Map<string | null, number>();
-  for (const { db } of await allTenants()) {
+  for (const { db } of await tenantsFor(viewerBrandId)) {
     const counts = await db.profile.groupBy({
       by: ["subscriptionPlanId"],
       where: { subscriptionStatus: { in: LIVE_SUB_STATUSES }, subscriptionPlanId: { not: null } },
@@ -2007,7 +2006,7 @@ router.get(
     });
     // Annotate each plan with its live subscriber count + legacy flag so the
     // admin UI can lock pricing edits / deletes and badge legacy plans.
-    const countById = await liveSubscribersByPlan();
+    const countById = await liveSubscribersByPlan(req.user!.brandId);
     res.json(
       plans.map((p) => {
         const subscriberCount = countById.get(p.id) ?? 0;
@@ -2133,10 +2132,6 @@ router.patch(
         data: { ...data, ...stripeIds, ...(clearsOwnDefault ? { isDefault: false } : {}) },
       });
     });
-    // A new base means new brand Prices (base + addon). Rebuilt in the background — the save must not hang on N Stripe calls.
-    if (priceChanged) {
-      void refreshBrandPricesForPlan(plan.id).catch(() => undefined);
-    }
     res.json(plan);
   }),
 );
@@ -2343,10 +2338,11 @@ router.get(
   "/coupons/:id/redemptions",
   requirePermission("coupons"),
   asyncHandler(async (req, res) => {
-    // From every brand's database, newest first, each row naming its brand.
+    // Newest first, each row naming its brand. A brand's people see their own customers only — never another
+    // brand's; the super admin (no brand) sees every account database's.
     const redemptions = (
       await Promise.all(
-        (await allTenants()).map(async ({ brandId, db }) =>
+        (await tenantsFor(req.user!.brandId)).map(async ({ brandId, db }) =>
           (
             await db.couponRedemption.findMany({
               where: { couponId: req.params.id },
@@ -3408,105 +3404,111 @@ router.get(
 );
 
 /* --------------------- Customer deep dive -------------------------- */
+
+/** One customer's deep dive, read from the database of the brand they belong to. Shared by the brand admin's
+ *  customer page and the super admin's Platform Customer page (routes/platformViews.routes.ts). */
+export async function customerDetailFor(db: TenantClient, brandId: string, userId: string) {
+  const found = await db.user.findUnique({
+    where: { id: userId },
+    include: { profile: true, conversion: true },
+  });
+  if (!found) throw notFound("Customer not found");
+  if (isAdminTeamRole(found.role))
+    throw badRequest("This endpoint is for customers only.");
+  // The plan's name from the catalogue, and the newest calls from the
+  // brand's call table — neither is a relation any more.
+  const recentCalls = found.conversion
+    ? await db.callLog.findMany({
+        where: { conversionId: found.conversion.id },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          type: true,
+          callerName: true,
+          callerNumber: true,
+          outcome: true,
+          durationSec: true,
+          createdAt: true,
+        },
+      })
+    : [];
+  const user = {
+    ...found,
+    brandId,
+    profile: await withPlan(found.profile),
+    conversion: found.conversion ? { ...found.conversion, callLogs: recentCalls } : null,
+  };
+
+  const detailLifecycle = deriveCustomerLifecycle(user.profile, await loadTrialCtx());
+
+  const conv = user.conversion;
+  // Every call, each rounded up to a full minute (matches the entitlement counter). Aggregated in Postgres, not Node.
+  const [callsHandled, billedMinutes] = conv
+    ? await Promise.all([
+        countCalls(user.brandId, { conversionId: conv.id }),
+        billedMinutesFor(db, conv.id),
+      ])
+    : [0, 0];
+
+  return {
+    customer: {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      businessName: user.profile?.businessName ?? "",
+      plan: user.profile?.plan ?? "free",
+      numberActivated: user.profile?.numberActivated ?? false,
+      mobile: user.profile?.mobile ?? "",
+      website: user.profile?.website ?? "",
+      subscriptionStatus: user.profile?.subscriptionStatus ?? "none",
+      trialEndsAt: user.profile?.trialEndsAt ?? null,
+      receptionistNumber: user.profile?.receptionistNumber ?? "",
+      emailOptOutAt: user.emailOptOutAt ?? null,
+      createdAt: user.createdAt,
+    },
+    agent: conv
+      ? {
+          name: (conv.agentConfig as unknown as AgentConfig)?.identity?.assistantName ?? "",
+          status: conv.status,
+          vapiAssistantId: conv.vapiAssistantId,
+          agentConfig: conv.agentConfig,
+        }
+      : null,
+    calls: conv?.callLogs ?? [],
+    usage: {
+      callsHandled: callsHandled,
+      minutesUsed: billedMinutes,
+    },
+    billing: {
+      plan: user.profile?.plan ?? "free",
+      // The subscribed plan's display name ("Standard") — shown in preference to
+      // the free/premium flag, which reads "Free" during a trial on a paid plan.
+      planName: user.profile?.subscriptionPlan?.displayName ?? null,
+      subscriptionStatus: user.profile?.subscriptionStatus ?? "none",
+      // Same rule as the customer-list `onboarding` flag.
+      onboarding: detailLifecycle.onboarding,
+      // Completed onboarding, no plan, still inside the card-less free trial.
+      freeTrial: detailLifecycle.freeTrial,
+      // True only for an admin account lock (vs grace-lapsed billing suspension).
+      suspended: !!user.profile?.suspendedAt,
+      stripeCustomerId: user.profile?.stripeCustomerId ?? null,
+      trialEndsAt: user.profile?.trialEndsAt ?? null,
+      // The card rule THIS account signed up under — the only way support can explain two customers behaving differently.
+      cardRequiredAtSignup: user.profile?.cardRequiredAtSignup ?? false,
+      // When their first card landed; null = never. Paired with the flag above
+      // it identifies a customer stuck at the card wall.
+      cardConfirmedAt: user.profile?.cardConfirmedAt ?? null,
+    },
+  };
+}
+
 router.get(
   "/customers/:id/detail",
   requirePermission("customers"),
   asyncHandler(async (req, res) => {
-    const db = await requestTenant(req);
-    const found = await db.user.findUnique({
-      where: { id: req.params.id },
-      include: { profile: true, conversion: true },
-    });
-    if (!found) throw notFound("Customer not found");
-    if (isAdminTeamRole(found.role))
-      throw badRequest("This endpoint is for customers only.");
-    // The plan's name from the catalogue, and the newest calls from the
-    // brand's call table — neither is a relation any more.
-    const recentCalls = found.conversion
-      ? await db.callLog.findMany({
-          where: { conversionId: found.conversion.id },
-          orderBy: { createdAt: "desc" },
-          take: 20,
-          select: {
-            id: true,
-            type: true,
-            callerName: true,
-            callerNumber: true,
-            outcome: true,
-            durationSec: true,
-            createdAt: true,
-          },
-        })
-      : [];
-    const user = {
-      ...found,
-      brandId: req.user!.brandId!,
-      profile: await withPlan(found.profile),
-      conversion: found.conversion ? { ...found.conversion, callLogs: recentCalls } : null,
-    };
-
-    const detailLifecycle = deriveCustomerLifecycle(user.profile, await loadTrialCtx());
-
-    const conv = user.conversion;
-    // Every call, each rounded up to a full minute (matches the entitlement counter). Aggregated in Postgres, not Node.
-    const [callsHandled, billedMinutes] = conv
-      ? await Promise.all([
-          countCalls(user.brandId, { conversionId: conv.id }),
-          billedMinutesFor(db, conv.id),
-        ])
-      : [0, 0];
-
-    res.json({
-      customer: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        role: user.role,
-        businessName: user.profile?.businessName ?? "",
-        plan: user.profile?.plan ?? "free",
-        numberActivated: user.profile?.numberActivated ?? false,
-        mobile: user.profile?.mobile ?? "",
-        website: user.profile?.website ?? "",
-        subscriptionStatus: user.profile?.subscriptionStatus ?? "none",
-        trialEndsAt: user.profile?.trialEndsAt ?? null,
-        receptionistNumber: user.profile?.receptionistNumber ?? "",
-        emailOptOutAt: user.emailOptOutAt ?? null,
-        createdAt: user.createdAt,
-      },
-      agent: conv
-        ? {
-            name: (conv.agentConfig as unknown as AgentConfig)?.identity?.assistantName ?? "",
-            status: conv.status,
-            vapiAssistantId: conv.vapiAssistantId,
-            agentConfig: conv.agentConfig,
-          }
-        : null,
-      calls: conv?.callLogs ?? [],
-      usage: {
-        callsHandled: callsHandled,
-        minutesUsed: billedMinutes,
-      },
-      billing: {
-        plan: user.profile?.plan ?? "free",
-        // The subscribed plan's display name ("Standard") — shown in preference to
-        // the free/premium flag, which reads "Free" during a trial on a paid plan.
-        planName: user.profile?.subscriptionPlan?.displayName ?? null,
-        subscriptionStatus: user.profile?.subscriptionStatus ?? "none",
-        // Same rule as the customer-list `onboarding` flag.
-        onboarding: detailLifecycle.onboarding,
-        // Completed onboarding, no plan, still inside the card-less free trial.
-        freeTrial: detailLifecycle.freeTrial,
-        // True only for an admin account lock (vs grace-lapsed billing suspension).
-        suspended: !!user.profile?.suspendedAt,
-        stripeCustomerId: user.profile?.stripeCustomerId ?? null,
-        trialEndsAt: user.profile?.trialEndsAt ?? null,
-        // The card rule THIS account signed up under — the only way support can explain two customers behaving differently.
-        cardRequiredAtSignup: user.profile?.cardRequiredAtSignup ?? false,
-        // When their first card landed; null = never. Paired with the flag above
-        // it identifies a customer stuck at the card wall.
-        cardConfirmedAt: user.profile?.cardConfirmedAt ?? null,
-      },
-    });
+    res.json(await customerDetailFor(await requestTenant(req), req.user!.brandId!, req.params.id));
   }),
 );
 

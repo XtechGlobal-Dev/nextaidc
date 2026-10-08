@@ -1,18 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Loader2, PhoneCall, Timer, TrendingUp, Users, Wallet, Sparkles } from "lucide-react";
+import { Loader2, PhoneCall, Receipt, Timer, TrendingUp, Users } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { TimeSeriesChart } from "@/components/charts/Charts";
 import { compactNumber } from "@/components/charts/primitives";
-import { UsageMeter } from "@/components/billing/UsageMeter";
 import { api, ApiError, type Brand, type BrandAnalytics } from "@/lib/api";
 import { formatMoney } from "@/lib/currency";
-import { billingStatusMeta } from "@/lib/brandBilling";
 import { cn } from "@/lib/utils";
 
 // One brand's numbers for the super admin: stat tiles for the headline figures, then one chart per
-// measure (calls, minutes, money and headcount each get their own scale — never two on one axis), this
-// month's usage against its caps, and the last six months as a table.
+// measure (calls, minutes, money and headcount each get their own scale — never two on one axis).
 
 type Window = 7 | 30 | 90 | 365;
 const WINDOWS: { days: Window; label: string }[] = [
@@ -23,12 +19,6 @@ const WINDOWS: { days: Window; label: string }[] = [
 ];
 
 const DAY_SEC = 86_400;
-
-/** "2026-09" → "Sep 2026". */
-function monthLabel(period: string): string {
-  const [y, m] = period.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
-}
 
 export function BrandAnalyticsTab({ brand }: { brand: Brand }) {
   const [days, setDays] = useState<Window>(30);
@@ -74,7 +64,7 @@ export function BrandAnalyticsTab({ brand }: { brand: Brand }) {
         </div>
         {data?.current.asOf && (
           <p className="text-xs text-muted-foreground">
-            Headcounts as of {new Date(data.current.asOf).toLocaleString()} · money and usage are live
+            Headcounts as of {new Date(data.current.asOf).toLocaleString()} · money is live
           </p>
         )}
       </div>
@@ -100,16 +90,8 @@ export function BrandAnalyticsTab({ brand }: { brand: Brand }) {
             <Tile icon={TrendingUp} label="Customer payments" value={money(data.totals.revenueCents)}>
               What {brand.name}&rsquo;s customers paid in this window
             </Tile>
-            <Tile icon={Wallet} label="Platform share" value={money(data.totals.platformCents)}>
+            <Tile icon={Receipt} label="Platform share" value={money(data.totals.platformCents)}>
               {money(data.totals.brandCents)} went to the brand
-            </Tile>
-            <Tile icon={Sparkles} label="Platform fee" value={
-              data.billing.required ? money(data.billing.monthlyTotalCents) : "None"
-            }>
-              <Badge variant={billingStatusMeta(data.billing.status).variant} className="text-[10px]">
-                {billingStatusMeta(data.billing.status).label}
-              </Badge>
-              {data.billing.required && <span className="ml-1.5">per month, fee + add-ons</span>}
             </Tile>
           </div>
 
@@ -155,42 +137,6 @@ export function BrandAnalyticsTab({ brand }: { brand: Brand }) {
               />
             </ChartCard>
           </div>
-
-          <Card className="p-5">
-            <h3 className="text-base font-semibold">Usage against limits</h3>
-            <p className="mb-4 text-sm text-muted-foreground">This month, across every customer of {brand.name}.</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <UsageMeter label="Call minutes" used={data.billing.usage.minutes} limit={data.billing.usage.minutesLimit} unit="min" />
-              <UsageMeter
-                label="AI interactions"
-                used={data.billing.usage.aiInteractions}
-                limit={data.billing.usage.aiLimit}
-                unit="interactions"
-              />
-            </div>
-
-            <div className="mt-5 overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-sm">
-                <caption className="sr-only">Monthly usage, last six months</caption>
-                <thead>
-                  <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Month</th>
-                    <th className="px-3 py-2 text-right font-medium">Call minutes</th>
-                    <th className="px-3 py-2 text-right font-medium">AI interactions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...data.usageHistory].reverse().map((m) => (
-                    <tr key={m.period} className="border-b border-border/60 last:border-0">
-                      <td className="px-3 py-2">{monthLabel(m.period)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{m.minutes.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{m.aiInteractions.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
         </>
       )}
     </div>

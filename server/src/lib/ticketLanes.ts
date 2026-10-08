@@ -8,9 +8,13 @@ export type TicketLane = "support" | "brand";
 
 export const TICKET_LANES: readonly TicketLane[] = ["support", "brand"];
 
-/** Lane this account raises tickets in; null for STAFF (ask their own admin) and SUPER_ADMIN (nothing above). */
-export function requesterLane(role: Role | string | null | undefined): TicketLane | null {
-  if (role === "USER" || role === "RESELLER") return "support";
+/** Lane this account raises tickets in; null for STAFF (ask their own admin) and SUPER_ADMIN (nothing above).
+ *  A main-domain customer has no brand team above it — the platform is its provider — so it asks the platform. */
+export function requesterLane(
+  role: Role | string | null | undefined,
+  platformCustomer = false,
+): TicketLane | null {
+  if (role === "USER" || role === "RESELLER") return platformCustomer ? "brand" : "support";
   if (role === "ADMIN") return "brand";
   return null;
 }

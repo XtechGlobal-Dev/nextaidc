@@ -3,7 +3,7 @@ import { integrationsStatus } from "./settings.js";
 import { isTwilioConfigured } from "./sms.js";
 import { nextAvailableForBrand } from "./phones.js";
 import { brandIdForOwner } from "./customerDirectory.js";
-import { allTenants, tenantForUser } from "./tenantDb.js";
+import { activeTenantIds, allTenants, tenantForUser } from "./tenantDb.js";
 import {
   upsertAssistant,
   importTwilioNumber,
@@ -261,7 +261,17 @@ export async function syncVapiWithDb(): Promise<{ deletedAssistants: number; rel
   // Every brand's agents and numbers, from every brand's database.
   const liveAssistants = new Set<string | null>();
   const liveNumbers = new Set<string>();
-  for (const { db } of await allTenants()) {
+  const tenants = await allTenants();
+  // allTenants() quietly skips a database that won't open (a compute waking up, a timeout). Its assistants would
+  // then look orphaned and be DELETED at Vapi — so a partial picture is no picture: stop.
+  const expected = (await activeTenantIds()).length;
+  if (tenants.length < expected) {
+    console.warn(
+      `⚠️  Vapi sync skipped: only ${tenants.length} of ${expected} account databases opened — refusing to delete anything on a partial list.`,
+    );
+    return { deletedAssistants: 0, releasedNumbers: 0 };
+  }
+  for (const { db } of tenants) {
     const [convs, profiles] = await Promise.all([
       db.conversion.findMany({ where: { vapiAssistantId: { not: null } }, select: { vapiAssistantId: true } }),
       db.profile.findMany({ where: { receptionistNumber: { not: "" } }, select: { receptionistNumber: true } }),

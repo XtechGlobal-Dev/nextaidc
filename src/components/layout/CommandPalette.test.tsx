@@ -69,10 +69,11 @@ describe("CommandPalette — what each role is offered", () => {
     expect(rows().some((t) => t.includes("Admin"))).toBe(false);
   });
 
-  it("hides Plans & Billing from an ADMIN but keeps the admin areas", () => {
+  it("offers an ADMIN their own Plans & Billing and the admin areas", () => {
     const { has } = setup(user("ADMIN"));
 
-    expect(has("Plans & Billing")).toBe(false);
+    // A brand admin pays their own customer plan.
+    expect(has("Plans & Billing")).toBe(true);
     expect(has("Dashboard")).toBe(true); // admins do hold a real profile
     for (const label of [
       "Coupons",

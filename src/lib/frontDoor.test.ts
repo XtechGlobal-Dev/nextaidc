@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 // The RequireBrandFrontDoor rule: an account on the wrong door sees the wrong brand's name, logo and colours.
 
-import { frontDoorTarget } from "./frontDoor";
+import { frontDoorTarget, movedAccountOrigin } from "./frontDoor";
 
 describe("frontDoorTarget", () => {
   it("sends a brand's user from the bare path into their brand", () => {
@@ -136,5 +136,29 @@ describe("frontDoorTarget on a developer's machine", () => {
         pathname: "/dashboard",
       }),
     ).toBe("/acme/dashboard");
+  });
+});
+
+describe("movedAccountOrigin — an approved Brand Admin still on the platform's own domain", () => {
+  const base = { brandKind: "brand", accountOrigin: "https://acme.example.com", pageSlug: null, pageOrigin: "https://app.example.com" };
+
+  it("points them at the brand's own address", () => {
+    expect(movedAccountOrigin(base)).toBe("https://acme.example.com");
+  });
+
+  it("leaves a main-domain customer where they are", () => {
+    expect(movedAccountOrigin({ ...base, brandKind: "customer", accountOrigin: null })).toBeNull();
+  });
+
+  it("leaves them alone on the brand's own door, path or host", () => {
+    expect(movedAccountOrigin({ ...base, pageSlug: "acme" })).toBeNull();
+    expect(movedAccountOrigin({ ...base, pageMode: "host", pageOrigin: "https://acme.example.com" })).toBeNull();
+  });
+
+  it("never sends a dev machine to a production host, but does follow a local brand subdomain", () => {
+    expect(movedAccountOrigin({ ...base, pageOrigin: "http://localhost:5174" })).toBeNull();
+    expect(
+      movedAccountOrigin({ ...base, accountOrigin: "http://acme.localhost:5174", pageOrigin: "http://localhost:5174" }),
+    ).toBe("http://acme.localhost:5174");
   });
 });

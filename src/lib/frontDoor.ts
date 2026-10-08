@@ -64,3 +64,27 @@ export function frontDoorTarget(opts: FrontDoorInput): string | null {
   const target = `${accountSlug ? `/${accountSlug}` : ""}${bare}${search}${hash}`;
   return target === `${pathname}${search}${hash}` ? null : target;
 }
+
+export interface MovedAccountInput {
+  /** "brand" once the account's row is a white-label brand; "customer" for a main-domain customer. */
+  brandKind: string | null;
+  /** That brand's own origin, when the server said. */
+  accountOrigin: string | null;
+  pageSlug: string | null;
+  pageMode?: "path" | "host";
+  pageOrigin: string;
+}
+
+/** A brand account signed in on the platform's own door — a customer whose Brand Admin request was approved, still in
+ *  their old main-domain session. Returns the brand's origin to send them to (they sign in there), or null. */
+export function movedAccountOrigin(opts: MovedAccountInput): string | null {
+  const { brandKind, accountOrigin, pageSlug, pageMode = "path", pageOrigin } = opts;
+  if (brandKind !== "brand" || !accountOrigin) return null;
+  // Only the platform's bare door: on a brand's own door (path or host) frontDoorTarget decides.
+  if (pageSlug || pageMode === "host") return null;
+  const target = accountOrigin.replace(/\/+$/, "");
+  if (target === pageOrigin.replace(/\/+$/, "")) return null;
+  // Never send a dev machine to a production host.
+  if (isLoopbackOrigin(pageOrigin) && !isLoopbackOrigin(target)) return null;
+  return target;
+}

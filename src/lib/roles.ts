@@ -33,9 +33,6 @@ export const BRAND_SCOPED_SECTIONS = new Set([
   "subscriptions",
   // A tenant's own customer inbox; the platform owner's inbox is `brand_tickets`.
   "tickets",
-  // Brand's own markup and the wallet it lands in; the platform owner manages these from the brand's page.
-  "pricing",
-  "wallet",
   // A brand recruits and pays its own resellers; the platform owner has no programme of their own.
   "resellers",
 ]);

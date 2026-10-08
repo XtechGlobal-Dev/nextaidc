@@ -47,6 +47,17 @@ enum BrandStatus {
   deactivated
 }
 
+/// What a brand row stands for (docs/brand-as-customer-plan.md):
+///   customer — a main-domain customer: its own row + database, but no door of
+///              its own; it signs in on the platform's main domain
+///   brand    — an approved white-label brand with its own subdomain / domain
+/// Approval flips customer → brand and a downgrade flips it back; the database
+/// is the same throughout.
+enum BrandKind {
+  customer
+  brand
+}
+
 enum Plan {
   free
   premium
@@ -217,6 +228,7 @@ model PhoneNumber {
   @@index([userId])
   /// Drives every tenant-scoped pool read and the brand-first allocation.
   @@index([brandId, poolStatus])
+  @@index([assistantId])
   @@map("phone_numbers")
 }
 
@@ -651,6 +663,25 @@ model Brand {
   /// When the brand was deactivated (see BrandStatus.deactivated); null otherwise.
   deactivatedAt DateTime?
 
+  /// customer = a main-domain customer (never opens a door); brand = approved. See BrandKind.
+  kind            BrandKind @default(brand)
+  /// The tenant user who owns this row — the customer who signed up, later the
+  /// Brand Admin. Plain id: the account lives in the brand's own database.
+  ownerUserId     String?
+  /// First plan or trial started. A customer row still null 30 days after
+  /// creation was abandoned and is cleaned up.
+  activatedAt     DateTime?
+  /// When it last became a brand (approval); null while a customer.
+  brandSince      DateTime?
+  /// When it was last downgraded back to a customer; null if never.
+  downgradedAt    DateTime?
+  /// The month ("YYYY-MM") the brand was warned it had no active customers;
+  /// "" when not warned. Cleared once it has an active customer again.
+  statusWarnedFor String    @default("")
+  /// A ready-made customer database held in reserve (services/customerPool.ts): no owner, no
+  /// directory rows. A main-domain sign-up claims one instead of waiting for a fresh database.
+  poolSpare       Boolean   @default(false)
+
   // Whitelabel: UI assets (public S3 URLs; blank = platform default).
   logoLightUrl String @default("")
   logoDarkUrl  String @default("")
@@ -709,6 +740,8 @@ model Brand {
   // brand host these REPLACE the platform's, so a tenant's pages never carry
   // the platform's tracking.
   scripts         Json     @default("{}")
+  // RETIRED (phase 6) — the markup, fee, add-on, cap, hold and brand-plan columns below are no longer read
+  // or written; they go with the retired billing tables once `npm run brand-billing:report` is reviewed.
   // Pricing: may the brand's own admin set its addons (its charge on top of a
   // plan's base price), and the most it may add per cycle (null = no cap).
   addonEditable   Boolean  @default(true)
@@ -771,9 +804,13 @@ model Brand {
   billing BrandBilling?
   usage   BrandUsageMonthly[]
 
+  @@index([kind])
+  @@index([poolSpare, status])
   @@map("brands")
 }
 
+/// RETIRED (docs/brand-as-customer-plan.md, phase 6): no code reads or writes this any more. Kept only until
+/// `npm run brand-billing:report` has been reviewed (live Stripe items, unpaid wallet balances), then dropped.
 /// What a BRAND pays the PLATFORM each month, as a catalog the super admin
 /// curates on Brand Subscriptions. Nothing to do with SubscriptionPlan — those
 /// are what a brand sells its own customers.
@@ -806,6 +843,8 @@ model BrandPlan {
   @@map("brand_plans")
 }
 
+/// RETIRED (docs/brand-as-customer-plan.md, phase 6): no code reads or writes this any more. Kept only until
+/// `npm run brand-billing:report` has been reviewed (live Stripe items, unpaid wallet balances), then dropped.
 /// The add-on list: what each module costs a brand whose plan doesn't include
 /// it, per month, in that plan's currency. No row (or inactive) = not offered.
 model BrandAddonPrice {
@@ -818,6 +857,8 @@ model BrandAddonPrice {
   @@map("brand_addon_prices")
 }
 
+/// RETIRED (docs/brand-as-customer-plan.md, phase 6): no code reads or writes this any more. Kept only until
+/// `npm run brand-billing:report` has been reviewed (live Stripe items, unpaid wallet balances), then dropped.
 /// The brand as a customer of the PLATFORM's Stripe account: the card, the
 /// monthly subscription for its fee and feature add-ons, and where payment
 /// stands. One row per brand that has ever needed to pay.
@@ -852,6 +893,8 @@ model BrandBilling {
   @@map("brand_billing")
 }
 
+/// RETIRED (docs/brand-as-customer-plan.md, phase 6): no code reads or writes this any more. Kept only until
+/// `npm run brand-billing:report` has been reviewed (live Stripe items, unpaid wallet balances), then dropped.
 /// One brand's metered usage for one UTC calendar month, counted across all
 /// its customers. Enforced against Brand.monthlyMinuteLimit / monthlyAiLimit.
 model BrandUsageMonthly {
@@ -880,12 +923,21 @@ model BrandUsageMonthly {
 /// never a tenant.
 model BrandRequest {
   id     String @id @default(cuid())
-  /// pending   — waiting for a super admin
-  /// approving — a "Complete setup" is creating the brand right now; a claim,
-  ///             so two operators can't create it twice (stale after 10 min)
-  /// approved  — the brand exists (`brandId`)
-  /// declined  — turned down (`declineReason`)
+  /// pending         — waiting for a super admin
+  /// approving       — a "Complete setup" is creating the brand right now; a claim,
+  ///                   so two operators can't create it twice (stale after 10 min)
+  /// awaiting_domain — approved; the applicant's own domain must go live first, then
+  ///                   the account becomes the Brand Admin by itself
+  /// approved        — the brand exists (`brandId`)
+  /// declined        — turned down (`declineReason`)
   status String @default("pending")
+
+  /// The main-domain customer who asked (docs/brand-as-customer-plan.md): their
+  /// customer-state brand row and the owner inside it. Approval turns THAT row
+  /// into the brand, so the account keeps its assistant, number and password.
+  /// Null on requests filed from the old public form.
+  applicantBrandId String?
+  applicantUserId  String?
 
   brandName  String
   /// The subdomain asked for, normalised. A wish, not a hold: the super admin
@@ -946,6 +998,7 @@ model BrandRequest {
 
   @@index([status, createdAt])
   @@index([email])
+  @@index([applicantBrandId, status])
   @@map("brand_requests")
 }
 
@@ -1087,6 +1140,21 @@ model CallShare {
 /// (the platform's), so this is how a payment finds its way home: written when
 /// the Stripe customer is created (and stamped on the Stripe object as
 /// metadata, a second copy), read by the webhook before it touches anything.
+/// A coupon slot held by a checkout in progress (services/coupons.ts): the Main-side twin of a tenant's `pending`
+/// coupon redemption, so a limited coupon's supply is one indexed count here instead of one in every account
+/// database. A hold older than the reservation TTL no longer counts and is swept. Plain ids: nothing to cascade.
+model CouponHold {
+  couponId   String
+  brandId    String
+  userId     String
+  reservedAt DateTime @default(now())
+
+  @@id([couponId, brandId, userId])
+  @@index([couponId, reservedAt])
+  @@index([reservedAt])
+  @@map("coupon_holds")
+}
+
 model StripeCustomer {
   stripeCustomerId String   @id
   brandId          String
@@ -1170,6 +1238,8 @@ model TenantDatabaseRetirement {
   @@map("tenant_database_retirements")
 }
 
+/// RETIRED (docs/brand-as-customer-plan.md, phase 6): no code reads or writes this any more. Kept only until
+/// `npm run brand-billing:report` has been reviewed (live Stripe items, unpaid wallet balances), then dropped.
 /// A brand's own charge on top of a platform plan. The customer pays
 /// (plan price + addon) to the platform through a Stripe Price of the brand's
 /// own, created under the plan's product; the addon share lands in the
@@ -1194,6 +1264,8 @@ model BrandPlanAddon {
   @@map("brand_plan_addons")
 }
 
+/// RETIRED (docs/brand-as-customer-plan.md, phase 6): no code reads or writes this any more. Kept only until
+/// `npm run brand-billing:report` has been reviewed (live Stripe items, unpaid wallet balances), then dropped.
 /// The brand's wallet, as a ledger. Balance = sum(amountCents) per currency.
 ///   credit   — a customer's paid invoice earned the brand its addon (positive)
 ///   payout   — the platform paid the brand, recorded by the super admin (negative)

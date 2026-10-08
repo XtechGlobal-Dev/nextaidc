@@ -8,7 +8,7 @@ import { asyncHandler, badRequest, notFound } from "../lib/http.js";
 import { appBaseUrl, platformSubdomainHost, platformSubdomainUrl } from "../env.js";
 import { audit } from "../services/audit.js";
 import { hashPassword } from "../lib/password.js";
-import { ledgerSummary, listLedgerRows } from "../services/platformLedger.js";
+import { ledgerSummary } from "../services/platformLedger.js";
 import { listUnroutedEvents, resolveUnroutedEvent } from "../services/stripeUnrouted.js";
 import { resolveStripeCustomer } from "../services/stripeCustomers.js";
 import { runWithBrand } from "../lib/brandContext.js";
@@ -30,7 +30,6 @@ import { normalizeSlug, slugProblem } from "../lib/brandTheme.js";
 import {
   provisionBrand,
   brandOrigin,
-  createBrand,
   brandDeletesAt,
   loadBrands,
   serializeBrand,
@@ -45,32 +44,14 @@ import {
   verifyBrandDomain,
 } from "../services/brandDomains.js";
 import { deactivateBrand, destroyBrand, reactivateBrand } from "../services/brandDeactivation.js";
-import {
-  assertCurrencyChangeable,
-  brandBillingView,
-  cancelBrandBilling,
-  restartBrandBilling,
-  syncBrandSubscription,
-} from "../services/brandBilling.js";
-import { ensureBillingRow } from "../services/brandUsage.js";
-import { applyBrandPlan, assignBrandPlan } from "../services/brandPlanCatalog.js";
 import { brandAnalytics } from "../services/brandAnalytics.js";
+import { downgradeToCustomer } from "../services/brandLifecycle.js";
+import { setBrandOwner } from "../services/platformCustomers.js";
 import { platformApiOrigin } from "../lib/brandUrls.js";
 import { isNeonConfigured, listRegions } from "../services/neonProjects.js";
 import { checkBrandDatabase } from "../services/tenantProvisioning.js";
 import { latestTenantMigration } from "../services/tenantMigrations.js";
-import {
-  applyBrandPriceToSubscribers,
-  listBrandPricing,
-  setBrandAddon,
-} from "../services/brandPricing.js";
 import { assertPickKeepsSubscribedPlans, livePlanSubscribers } from "../services/brandPlans.js";
-import {
-  listWalletEntries,
-  recordPayout,
-  walletBalances,
-  walletBalancesFor,
-} from "../services/brandWallet.js";
 import {
   BRAND_INTEGRATION_IDS,
   brandIntegrationsView,
@@ -274,24 +255,10 @@ function brandReadiness(brand: Brand, counts?: BrandView["counts"]) {
 router.get(
   "/brands",
   asyncHandler(async (_req, res) => {
-    const brands = await prisma.brand.findMany({ orderBy: { createdAt: "desc" } });
+    const brands = await prisma.brand.findMany({ where: { kind: "brand" }, orderBy: { createdAt: "desc" } });
     const ids = brands.map((b) => b.id);
-    const [counts, wallets, billingRows] = await Promise.all([
-      brandCounts(ids),
-      walletBalancesFor(ids),
-      prisma.brandBilling.findMany({ where: { brandId: { in: ids } }, select: { brandId: true, status: true } }),
-    ]);
-    const billingStatus = new Map(billingRows.map((b) => [b.brandId, b.status]));
-    res.json(
-      brands.map((b) => ({
-        ...serializeBrand(b, counts.get(b.id)),
-        // What the platform currently owes each brand, per currency — so the
-        // list answers "who needs paying" without opening every brand.
-        walletBalances: wallets.get(b.id) ?? [],
-        // How the brand stands with the platform: "none" when it owes nothing.
-        billingStatus: b.platformFeeCents > 0 ? (billingStatus.get(b.id) ?? "awaiting_card") : "none",
-      })),
-    );
+    const counts = await brandCounts(ids);
+    res.json(brands.map((b) => serializeBrand(b, counts.get(b.id))));
   }),
 );
 
@@ -328,16 +295,6 @@ const setupSchema = {
   trialMinutes: z.number().int().min(0).max(100_000).nullable().optional(),
   cardRequired: z.boolean().nullable().optional(),
   defaultVoiceId: z.string().trim().max(120).optional(),
-  addonEditable: z.boolean().optional(),
-  maxAddonCents: z.number().int().min(0).max(10_000_000).nullable().optional(),
-  // What the brand pays the platform, feature add-ons, and monthly caps (services/brandBilling.ts).
-  platformFeeCents: z.number().int().min(0).max(10_000_000).optional(),
-  platformFeeCurrency: z.string().trim().max(3).optional(),
-  featurePrices: z.record(z.number().int().min(1).max(10_000_000)).nullable().optional(),
-  monthlyMinuteLimit: z.number().int().min(0).max(10_000_000).nullable().optional(),
-  monthlyAiLimit: z.number().int().min(0).max(10_000_000).nullable().optional(),
-  // The brand plan it's on (brand_plans). Set = fee, features and caps come from the plan; null = by hand.
-  brandPlanId: z.string().trim().max(64).nullable().optional(),
   scripts: z
     .object({
       head: z.string().max(20_000).optional(),
@@ -364,168 +321,25 @@ export const brandBodySchema = z.object({
   faviconUrl: z.string().trim().max(500).optional(),
   ...themeSchema,
   ...setupSchema,
-  /** Optionally create the brand's administrator in the same step — this is how
-   *  the "New brand" wizard works, so a brand is never left with no way in. */
-  admin: z
-    .object({
-      email: z.string().trim().email("Enter a valid email address").max(160),
-      fullName: z.string().trim().min(2, "Enter the admin's name").max(80),
-      password: z.string().min(8, "Password must be at least 8 characters").max(200),
-      /** Email the credentials to them (best-effort — never blocks creation). */
-      sendWelcomeEmail: z.boolean().optional().default(true),
-    })
-    .optional(),
 });
 
-/** The brand half of a create body — everything but the admin. */
-export type BrandLaunchInput = Omit<z.infer<typeof brandBodySchema>, "admin">;
-
-/** The first admin, created in the brand's own database right after it's provisioned. */
-export interface LaunchAdmin {
-  email: string;
-  fullName: string;
-  passwordHash: string;
-  /** Sends their welcome mail once the account exists; resolves to whether it went. */
-  welcome?: (brand: Brand, email: string) => Promise<boolean>;
-}
+// No "create brand" here: a brand only ever comes from a main-domain customer's approved Brand Admin request
+// (docs/brand-as-customer-plan.md) — the same account becomes the brand. See brandRequests.routes.ts.
 
 /**
- * Creates a brand (row + database) and, optionally, its first admin — the one
- * path behind both "New brand" and "Complete setup" on a brand request. Once
- * the brand exists nothing here throws: an admin that couldn't be created comes
- * back as `adminError`, so the caller never unwinds a brand that stands.
+ * The brand's owner: the account recorded on the row (the customer whose request made it a brand), else — for a
+ * brand from before that was recorded — the first admin in its own database. Read from the tenant; while the
+ * tenant is being set up (or paused) Main's directory mirror stands in.
  */
-export async function launchBrand(input: BrandLaunchInput, createdById: string, admin?: LaunchAdmin) {
-  const created = await createBrand(
-    { ...input, slug: input.slug || input.name, customDomain: input.customDomain ?? null },
-    createdById,
-  );
-  // On a plan: the plan writes its fee, features and caps over whatever the body said.
-  if (input.brandPlanId) await assignBrandPlan(created.id, input.brandPlanId);
-  const brand = input.brandPlanId ? ((await prisma.brand.findUnique({ where: { id: created.id } })) ?? created) : created;
-  // A brand launched with a fee owes it from today: its admin is asked for a card on first sign-in.
-  if (brand.platformFeeCents > 0) await ensureBillingRow(brand.id);
-
-  // Register with the edge now so the cert is waiting when the client publishes DNS. Failure is reported, not fatal — the subdomain works regardless.
-  let domainEdge = { ok: true, message: "" };
-  if (brand.customDomain) domainEdge = await attachDomainToEdge(brand.customDomain);
-
-  let adminCreated: { id: string; email: string; emailSent: boolean } | null = null;
-  let adminError = "";
-  // The admin lives in the just-provisioned brand DB. If that failed, the brand stands (Retry on its page) and the admin is added later.
-  const tenant = admin ? await tenantFor(brand.id).catch(() => null) : null;
-  if (admin && !tenant) {
-    adminError =
-      "The brand's database isn't ready, so the admin wasn't created. Retry the database, then add the admin from the Team tab.";
-  }
-  if (admin && tenant) {
-    try {
-      const user = await tenant.user.create({
-        data: { email: admin.email, fullName: admin.fullName, passwordHash: admin.passwordHash, role: "ADMIN" },
-        select: { id: true, email: true },
-      });
-      let emailSent = false;
-      if (admin.welcome) {
-        try {
-          emailSent = await admin.welcome(brand, user.email);
-        } catch {
-          /* the account exists either way — a failed email must not undo it */
-        }
-      }
-      adminCreated = { id: user.id, email: user.email, emailSent };
-    } catch (err) {
-      console.error(`[brands] admin creation failed for brand ${brand.id}:`, err);
-      adminError = `The brand was created, but its admin (${admin.email}) wasn't. Add them from the Team tab.`;
-    }
-  }
-
-  return {
-    brand,
-    payload: {
-      brand: {
-        ...serializeBrand(brand, { admins: adminCreated ? 1 : 0, customers: 0, total: adminCreated ? 1 : 0 }),
-        tenantDb: await tenantDbSummary(brand.id),
-      },
-      admin: adminCreated,
-      /** Why no admin was created although one was asked for; empty otherwise. */
-      adminError,
-      loginUrl: brandLoginUrl(brand),
-      pathUrl: brandPathUrl(brand.slug),
-      // Present only when a vanity domain was named — the DNS the client has to
-      // publish, handed back with the brand so the wizard can show it at once.
-      domain: brand.customDomain
-        ? {
-            ...pendingDomainCheck(brand),
-            ...domainPayload(brand),
-            edgeOk: domainEdge.ok,
-            edgeMessage: domainEdge.message,
-          }
-        : null,
-    },
-  };
-}
-
-router.post(
-  "/brands",
-  asyncHandler(async (req, res) => {
-    const { admin, ...input } = brandBodySchema.parse(req.body);
-    // A brand's address is set once at creation; slug and customDomain are locked out of PATCH.
-
-    // Check the admin's email BEFORE creating the brand — otherwise a duplicate
-    // address leaves an orphan tenant behind that the operator has to clean up.
-    if (admin) {
-      const existing = await prisma.user.findUnique({ where: { email: admin.email } });
-      if (existing) {
-        throw badRequest(
-          `${admin.email} already has an account. Use a different address for this brand's admin.`,
-        );
-      }
-    }
-
-    const { brand, payload } = await launchBrand(
-      input,
-      req.user!.sub,
-      admin && {
-        email: admin.email,
-        fullName: admin.fullName,
-        passwordHash: await hashPassword(admin.password),
-        welcome: admin.sendWelcomeEmail
-          ? (b, email) =>
-              sendTemplate("brand_admin_welcome", email, {
-                user_name: admin.fullName,
-                user_email: email,
-                password: admin.password,
-                brand_name: b.name,
-                brand_url: brandLoginUrl(b),
-              })
-          : undefined,
-      },
-    );
-
-    void audit({
-      actorId: req.user!.sub,
-      actorBrandId: req.user!.brandId ?? null,
-      actorEmail: req.user!.email,
-      action: "brand.create",
-      targetType: "brand",
-      targetId: brand.id,
-      metadata: { slug: brand.slug, name: brand.name, adminEmail: payload.admin?.email ?? null },
-      ip: req.ip,
-    });
-
-    res.status(201).json(payload);
-  }),
-);
-
-/**
- * The brand's owner: the first admin account in its own database (the one named
- * at creation). Brands have no owner column, so this is read from the tenant;
- * while the tenant is still being set up (or paused) we fall back to Main's
- * directory mirror, and a brand with no admin yet has no owner.
- */
-async function brandOwner(brandId: string) {
+async function brandOwner(brandId: string, ownerUserId?: string | null) {
   const fromTenant = await tenantFor(brandId)
-    .then((db) => db.user.findFirst({ where: { role: "ADMIN" }, select: adminView, orderBy: { createdAt: "asc" } }))
+    .then((db) =>
+      db.user.findFirst({
+        where: ownerUserId ? { id: ownerUserId } : { role: "ADMIN" },
+        select: adminView,
+        orderBy: { createdAt: "asc" },
+      }),
+    )
     .catch((e: unknown) => {
       if (e instanceof TenantUnavailableError) return undefined;
       throw e;
@@ -534,7 +348,10 @@ async function brandOwner(brandId: string) {
     fromTenant !== undefined
       ? fromTenant
       : await prisma.customerDirectory
-          .findFirst({ where: { brandId, role: "ADMIN" }, orderBy: { createdAt: "asc" } })
+          .findFirst({
+            where: { brandId, ...(ownerUserId ? { userId: ownerUserId } : { role: "ADMIN" }) },
+            orderBy: { createdAt: "asc" },
+          })
           .then((d) => (d ? { id: d.userId, email: d.email, fullName: d.fullName, createdAt: d.createdAt } : null));
   if (!row) return null;
   return { id: row.id, email: row.email, fullName: row.fullName, createdAt: row.createdAt.toISOString() };
@@ -544,7 +361,7 @@ async function brandOwner(brandId: string) {
 async function brandDetail(brand: Brand) {
   const [counts, owner, tenantDb] = await Promise.all([
     brandCounts([brand.id]),
-    brandOwner(brand.id),
+    brandOwner(brand.id, brand.ownerUserId),
     tenantDbSummary(brand.id),
   ]);
   return {
@@ -571,7 +388,6 @@ router.post(
   "/brands/:id/deactivate",
   asyncHandler(async (req, res) => {
     const brand = await deactivateBrand(req.params.id);
-    await cancelBrandBilling(brand.id);
     void audit({
       actorId: req.user!.sub,
       actorBrandId: req.user!.brandId ?? null,
@@ -590,7 +406,6 @@ router.post(
   "/brands/:id/reactivate",
   asyncHandler(async (req, res) => {
     const brand = await reactivateBrand(req.params.id);
-    await restartBrandBilling(brand.id);
     void audit({
       actorId: req.user!.sub,
       actorBrandId: req.user!.brandId ?? null,
@@ -605,15 +420,39 @@ router.post(
   }),
 );
 
-/** What the brand pays the platform: fee, add-ons, card, invoices and this month's usage against its caps. */
-router.get(
-  "/brands/:id/billing",
+/** Turns the brand back into its owner's main-domain customer account (docs/brand-as-customer-plan.md): its domain
+ *  is switched off, the owner signs in on the main domain again, and its other accounts are closed — nothing in its
+ *  database is deleted. The same move the active-customer rule makes on its own; this is the super admin's button. */
+router.post(
+  "/brands/:id/downgrade",
   asyncHandler(async (req, res) => {
-    res.json(await brandBillingView(req.params.id, { invoices: true }));
+    const brand = await brandOr404(req.params.id);
+    if (brand.status === "provisioning" || brand.status === "failed") {
+      throw badRequest("This brand is still being set up — finish or delete it instead.");
+    }
+    // A brand from before owners were recorded: its first admin is the owner the detail page shows, so that's
+    // the account that becomes the platform customer.
+    if (!brand.ownerUserId) {
+      const owner = await brandOwner(brand.id);
+      if (!owner) throw badRequest("This brand has no admin account, so there's no customer to turn it back into.");
+      await setBrandOwner(brand.id, owner.id);
+    }
+    const after = await downgradeToCustomer(brand.id, { reason: "super_admin", actorId: req.user!.sub });
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: req.user!.brandId ?? null,
+      actorEmail: req.user!.email,
+      action: "brand.downgrade",
+      targetType: "brand",
+      targetId: brand.id,
+      metadata: { slug: brand.slug, name: brand.name },
+      ip: req.ip,
+    });
+    res.json({ ok: true, kind: after.kind });
   }),
 );
 
-/** One brand's analytics: daily calls, minutes, customers and revenue, plus usage and billing. */
+/** One brand's analytics: daily calls, minutes, customers and revenue. */
 router.get(
   "/brands/:id/analytics",
   asyncHandler(async (req, res) => {
@@ -639,35 +478,10 @@ router.patch(
   "/brands/:id",
   asyncHandler(async (req, res) => {
     // slug/customDomain are locked after creation — omitted (not ignored) so sneaking them in gets a clear rejection.
-    const body = brandBodySchema.partial().omit({ admin: true, slug: true, customDomain: true }).parse(req.body);
+    const body = brandBodySchema.partial().omit({ slug: true, customDomain: true }).parse(req.body);
     // A plan the brand's customers are on stays offered, whatever the pick says.
     await assertPickKeepsSubscribedPlans(req.params.id, body.planIds);
-    await assertCurrencyChangeable(req.params.id, body.platformFeeCurrency);
-    let brand = await updateBrand(req.params.id, body);
-
-    // Fee, add-on prices, feature access or caps changed: bring Stripe and the hold in line. A Stripe
-    // failure doesn't undo the save — it's reported so the operator can save again.
-    let billingWarning = "";
-    const touchesBilling = (
-      ["platformFeeCents", "platformFeeCurrency", "featurePrices", "modules", "monthlyMinuteLimit", "monthlyAiLimit"] as const
-    ).some((k) => body[k] !== undefined);
-    if (touchesBilling || body.brandPlanId !== undefined) {
-      try {
-        if (body.brandPlanId !== undefined) {
-          await assignBrandPlan(brand.id, body.brandPlanId);
-        } else if (brand.brandPlanId) {
-          // Still on a plan: the plan wins over any hand-set billing that rode along with this save.
-          await applyBrandPlan(brand.id);
-        } else {
-          if (brand.platformFeeCents > 0) await ensureBillingRow(brand.id);
-          await syncBrandSubscription(brand.id);
-        }
-        brand = (await prisma.brand.findUnique({ where: { id: brand.id } })) ?? brand;
-      } catch (e) {
-        console.error(`[brands] billing sync failed for ${brand.id}:`, e);
-        billingWarning = "Saved, but Stripe couldn't be updated to match. Save again to retry.";
-      }
-    }
+    const brand = await updateBrand(req.params.id, body);
     void audit({
       actorId: req.user!.sub,
       actorBrandId: req.user!.brandId ?? null,
@@ -684,7 +498,6 @@ router.patch(
       loginUrl: brandLoginUrl(brand),
       pathUrl: brandPathUrl(brand.slug),
       readiness: brandReadiness(brand, counts.get(brand.id)),
-      billingWarning,
     });
   }),
 );
@@ -695,8 +508,6 @@ router.delete(
     const brand = await prisma.brand.findUnique({ where: { id: req.params.id } });
     if (!brand) throw notFound("Brand not found");
     const members = await prisma.customerDirectory.count({ where: { brandId: brand.id } });
-    // Stop the brand's own subscription first — the row it's mirrored in is about to go.
-    await cancelBrandBilling(brand.id);
     // Immediate and final: the database (with every account in it) goes with the row.
     await destroyBrand(brand);
     void audit({
@@ -832,53 +643,6 @@ router.post(
   }),
 );
 
-// Pricing & wallet, platform-owner view. Unlike brandAdmin.routes.ts, the super admin here isn't subject to the brand's editability or cap.
-
-router.get(
-  "/brands/:id/pricing",
-  asyncHandler(async (req, res) => {
-    const brand = await brandOr404(req.params.id);
-    res.json({
-      rows: await listBrandPricing(brand.id),
-      addonEditable: brand.addonEditable,
-      maxAddonCents: brand.maxAddonCents,
-    });
-  }),
-);
-
-const addonSchema = z.object({ addonCents: z.number().int().min(0).max(10_000_000) });
-
-router.put(
-  "/brands/:id/pricing/:planId",
-  asyncHandler(async (req, res) => {
-    const { addonCents } = addonSchema.parse(req.body);
-    const brand = await brandOr404(req.params.id);
-    const row = await setBrandAddon({
-      brandId: brand.id,
-      planId: req.params.planId,
-      addonCents,
-      asBrand: false,
-      actor: { id: req.user!.sub, email: req.user!.email, ip: req.ip },
-    });
-    res.json(row);
-  }),
-);
-
-/** Move the brand's existing subscribers on a plan onto its current Price. */
-router.post(
-  "/brands/:id/pricing/:planId/apply",
-  asyncHandler(async (req, res) => {
-    const brand = await brandOr404(req.params.id);
-    res.json(
-      await applyBrandPriceToSubscribers({
-        brandId: brand.id,
-        planId: req.params.planId,
-        actor: { id: req.user!.sub, email: req.user!.email, ip: req.ip },
-      }),
-    );
-  }),
-);
-
 /* ----------------------------- Money ------------------------------ */
 
 /** The window a ledger question is asked over: `from`/`to` ISO dates, or the
@@ -918,20 +682,6 @@ router.get(
         brandSlug: nameById.get(b.brandId)?.slug ?? null,
       })),
     });
-  }),
-);
-
-/** One brand's payments: this window's totals and the most recent rows. */
-router.get(
-  "/brands/:id/ledger",
-  asyncHandler(async (req, res) => {
-    const brand = await brandOr404(req.params.id);
-    const { from, to } = ledgerWindow(req.query as Record<string, unknown>);
-    const [summary, rows] = await Promise.all([
-      ledgerSummary({ from, to, brandId: brand.id }),
-      listLedgerRows(brand.id),
-    ]);
-    res.json({ from: from.toISOString(), to: to.toISOString(), totals: summary.totals, rows });
   }),
 );
 
@@ -990,40 +740,6 @@ router.post(
       ip: req.ip,
     });
     res.json({ ok: true });
-  }),
-);
-
-router.get(
-  "/brands/:id/wallet",
-  asyncHandler(async (req, res) => {
-    const brand = await brandOr404(req.params.id);
-    const [balances, entries] = await Promise.all([
-      walletBalances(brand.id),
-      listWalletEntries(brand.id),
-    ]);
-    res.json({ balances, entries });
-  }),
-);
-
-const payoutSchema = z.object({
-  amountCents: z.number().int().positive(),
-  currency: z.string().trim().length(3),
-  reference: z.string().trim().max(120).optional(),
-  note: z.string().trim().max(500).optional(),
-});
-
-/** Record a payout the platform has made to the brand by hand. */
-router.post(
-  "/brands/:id/wallet/payouts",
-  asyncHandler(async (req, res) => {
-    const body = payoutSchema.parse(req.body);
-    const brand = await brandOr404(req.params.id);
-    const entry = await recordPayout({
-      brandId: brand.id,
-      ...body,
-      actor: { id: req.user!.sub, email: req.user!.email, ip: req.ip },
-    });
-    res.status(201).json({ entry, balances: await walletBalances(brand.id) });
   }),
 );
 

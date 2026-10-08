@@ -127,10 +127,11 @@ export default function SupportPage() {
   useActiveTicketThread(selectedId);
 
   const role = useAuthStore((s) => s.user?.role);
+  const brandKind = useAuthStore((s) => s.user?.brandKind);
   // Seeded from the role so the first paint already says "Platform Support" for a brand
   // admin instead of flashing the customer wording; /lane's answer is still the truth.
   const [lane, setLane] = useState<TicketLaneInfo | null>(() =>
-    expectedLaneInfo(expectedRequesterLane(role)),
+    expectedLaneInfo(expectedRequesterLane(role, brandKind)),
   );
   /** Set when the API says this account raises no requests at all (staff, or the
    *  platform owner — there is no tier above them to ask). */

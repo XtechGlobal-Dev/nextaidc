@@ -131,6 +131,13 @@ export async function verifyOtp(email: string, purpose: OtpPurpose, code: string
   return row;
 }
 
+/** Marks a code already checked by verifyOtp as used — one write, and still race-safe: only the first caller's
+ *  update matches, a second gets "already used". */
+export async function markOtpConsumed(id: string): Promise<void> {
+  const { count } = await (await codes()).updateMany({ where: { id, consumedAt: null }, data: { consumedAt: new Date() } });
+  if (!count) throw badRequest("That code has already been used. Please request a new one.");
+}
+
 /** Verify and mark the code used. Returns the row (incl. any pending payload). */
 export async function consumeOtp(email: string, purpose: OtpPurpose, code: string) {
   const row = await verifyOtp(email, purpose, code);

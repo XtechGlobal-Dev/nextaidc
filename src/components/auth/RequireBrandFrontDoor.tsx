@@ -3,7 +3,8 @@ import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { brandDoor } from "@/lib/brandRoute";
-import { frontDoorTarget } from "@/lib/frontDoor";
+import { frontDoorTarget, movedAccountOrigin } from "@/lib/frontDoor";
+import { AccountMovedDialog } from "./AccountMovedDialog";
 
 // Loop guard: the redirect is a full page load, and a brand suspended mid-session (slug stops resolving
 // while the account still names it) would otherwise bounce forever. Give up after one try; /me will 403 soon.
@@ -36,8 +37,20 @@ export function RequireBrandFrontDoor({ children }: { children: ReactNode }) {
   const [gaveUp, setGaveUp] = useState(false);
 
   const door = brandDoor();
-  const target =
+  // An approved Brand Admin still signed in on the platform's own domain: they're told where their account went
+  // and signed out here, rather than quietly moved onto the brand's path on this domain.
+  const moved =
     status === "authed" && !impersonating && typeof window !== "undefined"
+      ? movedAccountOrigin({
+          brandKind: user?.brandKind ?? null,
+          accountOrigin: user?.brandOrigin ?? null,
+          pageSlug: door?.slug ?? null,
+          pageMode: door?.mode ?? "path",
+          pageOrigin: window.location.origin,
+        })
+      : null;
+  const target =
+    !moved && status === "authed" && !impersonating && typeof window !== "undefined"
       ? frontDoorTarget({
           accountSlug: user?.brandSlug ?? null,
           accountOrigin: user?.brandOrigin ?? null,
@@ -58,6 +71,15 @@ export function RequireBrandFrontDoor({ children }: { children: ReactNode }) {
     }
     window.location.replace(target);
   }, [target]);
+
+  if (moved) {
+    return (
+      <>
+        {children}
+        <AccountMovedDialog origin={moved} brandName={user?.brandName ?? null} />
+      </>
+    );
+  }
 
   // Hold the UI while navigating, or the wrong brand's colours flash for a beat.
   if (target !== null && !gaveUp) {

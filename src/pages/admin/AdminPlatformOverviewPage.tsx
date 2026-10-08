@@ -10,8 +10,8 @@ import {
   RefreshCw,
   Search,
   Timer,
+  Receipt,
   Users,
-  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -23,7 +23,7 @@ import { api, ApiError, type DirectoryHit, type PlatformOverview } from "@/lib/a
 import { formatMoney } from "@/lib/currency";
 import { formatDate, formatDateDMY } from "@/lib/utils";
 
-/** Super admin's platform-wide view. Reads Main only (nightly rollup, ledger, wallets, unrouted Stripe) — no brand DB is opened, hence the "computed at" + recompute. */
+/** Super admin's platform-wide view. Reads Main only (nightly rollup, ledger, unrouted Stripe) — no brand DB is opened, hence the "computed at" + recompute. */
 export default function AdminPlatformOverviewPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<PlatformOverview | null>(null);
@@ -91,7 +91,13 @@ export default function AdminPlatformOverviewPage() {
           {/* Headline numbers — the sum of last night's rows. */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <Stat icon={Building2} label="Brands" value={data.brands.total} sub={brandsSub(data.brands)} />
-            <Stat icon={Users} label="Customers" value={data.totals.customers} sub="across all brands" />
+            <Stat icon={Users} label="Customers" value={data.totals.customers} sub="brands' and main-domain" />
+            <Stat
+              icon={Users}
+              label="Platform customers"
+              value={data.platformCustomers.total}
+              sub={`${data.platformCustomers.active.toLocaleString()} paying · ${data.platformCustomers.trialing.toLocaleString()} trialing`}
+            />
             <Stat
               icon={CreditCard}
               label="Active subscriptions"
@@ -104,10 +110,10 @@ export default function AdminPlatformOverviewPage() {
           </div>
 
           {/* Money and health — live from Main, not from the rollup. */}
-          <div className="grid gap-4 lg:grid-cols-3">
+          <div className="grid gap-4 lg:grid-cols-2">
             <Card className="p-5">
               <h3 className="flex items-center gap-2 text-base font-semibold">
-                <Wallet className="size-4 text-primary" /> This month
+                <Receipt className="size-4 text-primary" /> This month
               </h3>
               {data.ledger.totals.length === 0 ? (
                 <p className="mt-3 text-sm text-muted-foreground">No payments yet this month.</p>
@@ -121,24 +127,6 @@ export default function AdminPlatformOverviewPage() {
                         {t.payments} payment{t.payments === 1 ? "" : "s"}
                         {t.refundedCents > 0 && ` · ${formatMoney(t.refundedCents, t.currency)} refunded`}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-
-            <Card className="p-5">
-              <h3 className="flex items-center gap-2 text-base font-semibold">
-                <Wallet className="size-4 text-primary" /> Owed to brands
-              </h3>
-              <p className="mt-1 text-xs text-muted-foreground">Wallet balances across every brand.</p>
-              {data.wallets.length === 0 ? (
-                <p className="mt-3 text-sm text-muted-foreground">Nothing outstanding.</p>
-              ) : (
-                <div className="mt-3 space-y-1">
-                  {data.wallets.map((w) => (
-                    <div key={w.currency} className="text-2xl font-semibold tabular-nums">
-                      {formatMoney(w.balanceCents, w.currency)}
                     </div>
                   ))}
                 </div>

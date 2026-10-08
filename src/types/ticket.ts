@@ -71,9 +71,10 @@ export function expectedHandlerLane(role: RoleLike, brandId: RoleLike): TicketLa
 }
 
 /** Lane this account raises requests in. Mirrors requesterLane on the server: null for
- *  staff (they ask their own admin) and the super admin (nobody above). */
-export function expectedRequesterLane(role: RoleLike): TicketLane | null {
-  if (role === "USER" || role === "RESELLER") return "support";
+ *  staff (they ask their own admin) and the super admin (nobody above). A main-domain
+ *  customer (brandKind "customer") asks the platform directly. */
+export function expectedRequesterLane(role: RoleLike, brandKind?: string | null): TicketLane | null {
+  if (role === "USER" || role === "RESELLER") return brandKind === "customer" ? "brand" : "support";
   if (role === "ADMIN") return "brand";
   return null;
 }

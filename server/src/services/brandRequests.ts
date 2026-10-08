@@ -1,28 +1,27 @@
 import type { BrandRequest } from "@prisma/client";
 import { prisma } from "../prisma.js";
 import { badRequest, notFound } from "../lib/http.js";
-import { hashPassword } from "../lib/password.js";
 import { normalizeSlug, slugProblem } from "../lib/brandTheme.js";
 import { platformSubdomainHost, platformSubdomainUrl } from "../env.js";
 import { sendTemplate } from "./email.js";
-import { notifyAdmins } from "./notifications.js";
+import { notifyPlatformOwners } from "./notifications.js";
 import { assertDomainAvailable, resolveTheme } from "./brands.js";
 import { deleteObject, isStorageConfigured, uploadObject } from "./storage.js";
 import { isStripeConfigured, stripe } from "./stripe.js";
 
-// Brand requests: a prospective brand files its basics from the public "Set up
-// your brand" page; a super admin completes setup (look, settings, permissions)
-// and only then is anything created. See the BrandRequest model.
+// Brand requests: a main-domain customer asks, from inside their dashboard, for their account to become a brand
+// (fileBrandAdminRequest); a super admin completes setup and the same account becomes the Brand Admin
+// (services/brandLifecycle.ts). See the BrandRequest model.
 
 /** Statuses a request can hold (the column is plain text). */
-export type BrandRequestStatus = "pending" | "approving" | "approved" | "declined";
+export type BrandRequestStatus = "pending" | "approving" | "awaiting_domain" | "approved" | "declined";
 
 /** An `approving` claim older than this is treated as abandoned (the operator's
  *  request died mid-create) and may be claimed again. */
 const CLAIM_STALE_MS = 10 * 60 * 1000;
 
-/** Still waiting on a super admin — the statuses that block a second request. */
-const OPEN_STATUSES = ["pending", "approving"];
+/** Still being worked on — the statuses that block a second request (and hold the subdomain asked for). */
+const OPEN_STATUSES = ["pending", "approving", "awaiting_domain"];
 
 export interface BrandRequestView {
   id: string;
@@ -41,16 +40,14 @@ export interface BrandRequestView {
   logoLightUrl: string;
   logoDarkUrl: string;
   faviconUrl: string;
-  /** The brand plan they chose; "" = none. */
-  brandPlanId: string;
-  /** The card they saved (charged only at setup); null = none. */
-  card: { brand: string; last4: string } | null;
   contactName: string;
   email: string;
   phone: string;
   country: string;
   timezone: string;
   notes: string;
+  /** The main-domain account that asked (its own row), when filed from inside the app; null for the old public form. */
+  applicantBrandId: string | null;
   brandId: string | null;
   reviewedAt: string | null;
   declineReason: string;
@@ -73,14 +70,13 @@ export function serializeBrandRequest(r: BrandRequest): BrandRequestView {
     logoLightUrl: r.logoLightUrl,
     logoDarkUrl: r.logoDarkUrl,
     faviconUrl: r.faviconUrl,
-    brandPlanId: r.brandPlanId,
-    card: r.paymentMethodId ? { brand: r.cardBrand, last4: r.cardLast4 } : null,
     contactName: r.contactName,
     email: r.email,
     phone: r.phone,
     country: r.country,
     timezone: r.timezone,
     notes: r.notes,
+    applicantBrandId: r.applicantBrandId,
     brandId: r.brandId,
     reviewedAt: r.reviewedAt?.toISOString() ?? null,
     declineReason: r.declineReason,
@@ -120,29 +116,6 @@ export async function checkRequestSlug(raw: string) {
   };
 }
 
-export interface BrandRequestInput {
-  brandName: string;
-  slug: string;
-  tagline?: string;
-  customDomain?: string;
-  /** A palette + typeface from the brand catalog. Sent together or not at all. */
-  themePreset?: string;
-  primaryColor?: string;
-  accentColor?: string;
-  fontFamily?: string;
-  /** The brand plan chosen. Required while any plan is on offer. */
-  brandPlanId?: string;
-  /** A confirmed SetupIntent from createRequestSetupIntent — the saved card. */
-  setupIntentId?: string;
-  contactName: string;
-  email: string;
-  phone?: string;
-  country?: string;
-  timezone?: string;
-  notes?: string;
-  password: string;
-}
-
 /** An uploaded file, as multer hands it over. */
 export interface RequestUpload {
   buffer: Buffer;
@@ -158,51 +131,6 @@ export const REQUEST_LOGO_SLOTS = {
 } as const;
 export type RequestLogoSlot = keyof typeof REQUEST_LOGO_SLOTS;
 
-/** The payment step's card form: a Stripe customer for the applicant and a SetupIntent on it. The card is
- *  saved, not charged — the first month is charged when a super admin completes the setup. */
-export async function createRequestSetupIntent(input: { email: string; name: string }) {
-  if (!isStripeConfigured()) throw badRequest("Card payments aren't available right now.");
-  const customer = await stripe().customers.create({
-    email: input.email.trim().toLowerCase(),
-    name: input.name.trim(),
-    metadata: { kind: "brand_request" },
-  });
-  const intent = await stripe().setupIntents.create({
-    customer: customer.id,
-    usage: "off_session",
-    payment_method_types: ["card"],
-    metadata: { kind: "brand_request" },
-  });
-  if (!intent.client_secret) throw new Error("Stripe returned no client secret");
-  return { clientSecret: intent.client_secret, setupIntentId: intent.id };
-}
-
-/** A confirmed SetupIntent's customer and card — read from Stripe, never from the browser. */
-async function savedCard(setupIntentId: string, contact: { email: string; name: string }) {
-  let intent;
-  try {
-    intent = await stripe().setupIntents.retrieve(setupIntentId, { expand: ["payment_method"] });
-  } catch {
-    throw badRequest("We couldn't find that card. Please add it again.");
-  }
-  const customerId = typeof intent.customer === "string" ? intent.customer : intent.customer?.id;
-  const pm = intent.payment_method;
-  if (intent.status !== "succeeded" || !customerId || !pm || typeof pm === "string") {
-    throw badRequest("That card wasn't confirmed. Please add it again.");
-  }
-  if (intent.metadata?.kind !== "brand_request") throw badRequest("That card can't be used here.");
-  // The contact may have changed after the card step; the customer should say who it is now.
-  await stripe()
-    .customers.update(customerId, { email: contact.email, name: contact.name })
-    .catch(() => undefined);
-  return {
-    stripeCustomerId: customerId,
-    paymentMethodId: pm.id,
-    cardBrand: pm.card?.brand ?? "",
-    cardLast4: pm.card?.last4 ?? "",
-  };
-}
-
 /** Storage key of a public object URL (everything after the host). */
 function keyOf(url: string): string {
   return url ? url.split("/").slice(3).join("/") : "";
@@ -213,34 +141,38 @@ async function deleteLogos(urls: string[]): Promise<void> {
   await Promise.all(urls.filter(Boolean).map((u) => deleteObject(keyOf(u)).catch(() => undefined)));
 }
 
-/** Files a request. Nothing else is created: the brand, its database and its
- *  admin all wait for a super admin. Logos are stored only once everything else
- *  has passed, so a refused request leaves no files behind. */
-export async function fileBrandRequest(
-  input: BrandRequestInput,
+/** What a main-domain customer fills in to ask to become a Brand Admin. Who they are comes from their account. */
+export interface BrandAdminRequestInput {
+  brandName: string;
+  slug: string;
+  tagline?: string;
+  customDomain?: string;
+  themePreset?: string;
+  primaryColor?: string;
+  accentColor?: string;
+  fontFamily?: string;
+  phone?: string;
+  notes?: string;
+}
+
+/** Files a Brand Admin request from inside a main-domain customer's dashboard. Tied to their own row and account,
+ *  so approval turns THAT account into the brand — no password, plan or card is collected here. */
+export async function fileBrandAdminRequest(
+  applicant: { brandId: string; userId: string; email: string; fullName: string; country?: string; timezone?: string },
+  input: BrandAdminRequestInput,
   logos: Partial<Record<RequestLogoSlot, RequestUpload>> = {},
 ): Promise<BrandRequest> {
-  const email = input.email.trim().toLowerCase();
+  const open = await prisma.brandRequest.findFirst({
+    where: { applicantBrandId: applicant.brandId, status: { in: ["pending", "approving", "awaiting_domain"] } },
+    select: { brandName: true },
+  });
+  if (open) throw badRequest(`Your request for ${open.brandName} is already in review.`);
+
   const slug = normalizeSlug(input.slug || input.brandName);
   const problem = await requestSlugProblem(slug);
   if (problem) throw badRequest(problem);
+  const customDomain = (await assertDomainAvailable(input.customDomain, applicant.brandId)) ?? "";
 
-  const open = await prisma.brandRequest.findFirst({
-    where: { email, status: { in: OPEN_STATUSES } },
-    select: { brandName: true },
-  });
-  if (open) {
-    throw badRequest(
-      `${email} already has a request in review (${open.brandName}). We'll email you as soon as it's set up.`,
-    );
-  }
-
-  // Checked now so a typo or a domain another brand holds is fixed by the one
-  // person who knows the answer. Nothing is claimed until setup.
-  const customDomain = (await assertDomainAvailable(input.customDomain)) ?? "";
-
-  // Same rules as a brand's own theme (catalog preset + font, hex colours), so
-  // whatever was picked here saves unchanged at setup.
   const picked = input.themePreset || input.primaryColor || input.accentColor || input.fontFamily;
   const theme = picked
     ? resolveTheme({
@@ -250,22 +182,6 @@ export async function fileBrandRequest(
         fontFamily: input.fontFamily,
       })
     : null;
-
-  // The plan: required while any is on offer, and it must be one that is.
-  const offered = await prisma.brandPlan.findMany({ where: { active: true }, select: { id: true } });
-  const brandPlanId = (input.brandPlanId ?? "").trim();
-  if (offered.length && !brandPlanId) throw badRequest("Choose a plan for your brand.");
-  if (brandPlanId && !offered.some((p) => p.id === brandPlanId)) {
-    throw badRequest("That plan isn't available any more. Please choose another.");
-  }
-
-  // The card is optional here: without one, the brand's admin pays at first sign-in instead.
-  const card =
-    input.setupIntentId && isStripeConfigured()
-      ? await savedCard(input.setupIntentId, { email, name: input.contactName.trim() })
-      : null;
-
-  const passwordHash = await hashPassword(input.password);
 
   const slots = (Object.keys(REQUEST_LOGO_SLOTS) as RequestLogoSlot[]).filter((s) => logos[s]);
   if (slots.length && !isStorageConfigured()) {
@@ -287,6 +203,8 @@ export async function fileBrandRequest(
   try {
     request = await prisma.brandRequest.create({
       data: {
+        applicantBrandId: applicant.brandId,
+        applicantUserId: applicant.userId,
         brandName: input.brandName.trim(),
         slug,
         tagline: (input.tagline ?? "").trim(),
@@ -300,40 +218,34 @@ export async function fileBrandRequest(
             }
           : {}),
         ...urls,
-        brandPlanId,
-        ...(card ?? {}),
-        contactName: input.contactName.trim(),
-        email,
+        contactName: applicant.fullName.trim() || applicant.email,
+        email: applicant.email.trim().toLowerCase(),
         phone: (input.phone ?? "").trim(),
-        country: (input.country ?? "").trim().toUpperCase(),
-        timezone: (input.timezone ?? "").trim(),
+        country: (applicant.country ?? "").trim().toUpperCase().slice(0, 2),
+        timezone: (applicant.timezone ?? "").trim(),
         notes: (input.notes ?? "").trim(),
-        passwordHash,
       },
     });
   } catch (e) {
-    // The row never landed — its files would be orphans.
     await deleteLogos(Object.values(urls));
     throw e;
   }
 
-  // Both best-effort: the request is filed either way.
   try {
-    await sendTemplate("brand_request_received", email, {
+    await sendTemplate("brand_request_received", request.email, {
       user_name: request.contactName,
       brand_name: request.brandName,
-      brand_host: platformSubdomainUrl(slug).replace(/^https?:\/\//, ""),
+      brand_host: (customDomain || platformSubdomainUrl(slug)).replace(/^https?:\/\//, ""),
     });
   } catch {
     /* the super admin still sees the request */
   }
-  void notifyAdmins({
+  void notifyPlatformOwners({
     type: "system",
-    title: "New brand request",
-    message: `${request.brandName} (${request.email}) is waiting for setup.`,
+    title: "New Brand Admin request",
+    message: `${request.contactName} (${request.email}) wants to launch ${request.brandName}.`,
     link: "/dashboard/admin/brands?tab=requests",
   });
-
   return request;
 }
 
@@ -373,14 +285,6 @@ export async function claimBrandRequest(id: string, actorId: string): Promise<Br
 /** Hands a claim back when creating the brand failed, so the setup can be retried. */
 export async function releaseBrandRequest(id: string): Promise<void> {
   await prisma.brandRequest.updateMany({ where: { id, status: "approving" }, data: { status: "pending" } });
-}
-
-/** The brand exists: link it and drop the password hash, which has done its job. */
-export async function completeBrandRequest(id: string, brandId: string, actorId: string): Promise<BrandRequest> {
-  return prisma.brandRequest.update({
-    where: { id },
-    data: { status: "approved", brandId, reviewedById: actorId, reviewedAt: new Date(), passwordHash: "" },
-  });
 }
 
 export async function declineBrandRequest(

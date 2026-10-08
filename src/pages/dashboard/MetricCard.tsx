@@ -18,7 +18,7 @@ export interface MetricCardProps {
   className?: string;
   /** When provided, the whole card becomes a button that drills down. */
   onClick?: () => void;
-  /** Hex accent that tints the icon chip + top hairline. */
+  /** Accent (hex or CSS colour) that tints the icon chip + top hairline. */
   accent?: string;
   /** Stagger index for the entrance animation. */
   index?: number;
@@ -34,7 +34,7 @@ export function MetricCard({
   icon,
   className,
   onClick,
-  accent = "#2C76ED",
+  accent = "var(--color-primary)",
   index = 0,
 }: MetricCardProps) {
   const showTrend = typeof trend === "number";
@@ -76,8 +76,8 @@ export function MetricCard({
               <span
                 className="flex size-9 items-center justify-center rounded-xl text-white shadow-sm [&_svg]:size-[18px]"
                 style={{
-                  background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
-                  boxShadow: `0 4px 12px -3px ${accent}66`,
+                  background: `linear-gradient(135deg, ${accent}, color-mix(in oklab, ${accent} 80%, transparent))`,
+                  boxShadow: `0 4px 12px -3px color-mix(in oklab, ${accent} 40%, transparent)`,
                 }}
               >
                 {icon}

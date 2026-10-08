@@ -38,7 +38,7 @@ vi.mock("../env.js", () => ({
 }));
 
 vi.mock("../prisma.js", () => ({
-  prisma: { brand: { findMany: h.findMany, update: h.update } },
+  prisma: { brand: { findMany: h.findMany, update: h.update, findUnique: vi.fn(async () => null) } },
 }));
 
 // brands.ts refreshes brand settings on load; none of that matters here.
@@ -108,7 +108,7 @@ beforeEach(() => {
     ...brand(),
     ...data,
   }));
-  // loadBrands() runs after every verification; an empty table is fine.
+  // The brand cache is refreshed after every verification; an empty table is fine.
   h.findMany.mockResolvedValue([]);
 });
 

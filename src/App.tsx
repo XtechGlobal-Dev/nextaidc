@@ -22,10 +22,9 @@ import { ScrollToTop } from "@/components/ScrollToTop";
 import { SeoManager } from "@/components/SeoManager";
 import { useBrandingStore } from "@/stores/useBrandingStore";
 import { OnboardingGate } from "@/components/auth/OnboardingGate";
-import { brandBasename, setActiveBrandSlug, setHostBrand, slugFromPath } from "@/lib/brandRoute";
+import { brandBasename, isLoopbackHost, setActiveBrandSlug, setHostBrand, slugFromPath } from "@/lib/brandRoute";
 
 const LandingPage = lazy(() => import("@/pages/marketing/LandingPage"));
-const BrandSetupPage = lazy(() => import("@/pages/marketing/BrandSetupPage"));
 const OnboardingPage = lazy(() => import("@/pages/onboarding/OnboardingPage"));
 const LoginPage = lazy(() => import("@/pages/auth/LoginPage"));
 const SubscribePage = lazy(() => import("@/pages/subscribe/SubscribePage"));
@@ -37,6 +36,7 @@ const ConnectCrmPage = lazy(() => import("@/pages/crm/ConnectCrmPage"));
 const SettingsPage = lazy(() => import("@/pages/settings/SettingsPage"));
 const NotificationsPage = lazy(() => import("@/pages/notifications/NotificationsPage"));
 const SupportPage = lazy(() => import("@/pages/support/SupportPage"));
+const BrandAdminRequestPage = lazy(() => import("@/pages/brand/BrandAdminRequestPage"));
 const PlansPage = lazy(() => import("@/pages/billing/PlansPage"));
 const CallForwardingPage = lazy(() => import("@/pages/forwarding/CallForwardingPage"));
 const HumanTransferPage = lazy(() => import("@/pages/transfer/HumanTransferPage"));
@@ -47,14 +47,13 @@ const StaffNoAccessPage = lazy(() => import("@/pages/StaffNoAccessPage"));
 
 const AdminOverviewPage = lazy(() => import("@/pages/admin/AdminOverviewPage"));
 const AdminPlatformOverviewPage = lazy(() => import("@/pages/admin/AdminPlatformOverviewPage"));
+const AdminPlatformCustomersPage = lazy(() => import("@/pages/admin/AdminPlatformCustomersPage"));
+const AdminPlatformCustomerDetailPage = lazy(() => import("@/pages/admin/AdminPlatformCustomerDetailPage"));
 const AdminCustomersPage = lazy(() => import("@/pages/admin/AdminCustomersPage"));
 const AdminSubscriptionsPage = lazy(() => import("@/pages/admin/AdminSubscriptionsPage"));
 const AdminPlansPage = lazy(() => import("@/pages/admin/AdminPlansPage"));
 const AdminCouponsPage = lazy(() => import("@/pages/admin/AdminCouponsPage"));
 const AdminResellersPage = lazy(() => import("@/pages/admin/AdminResellersPage"));
-const AdminBrandPricingPage = lazy(() => import("@/pages/admin/AdminBrandPricingPage"));
-const AdminBrandWalletPage = lazy(() => import("@/pages/admin/AdminBrandWalletPage"));
-const AdminBrandBillingPage = lazy(() => import("@/pages/admin/AdminBrandBillingPage"));
 const AdminSettingsPage = lazy(() => import("@/pages/admin/AdminSettingsPage"));
 const AdminVoiceBankPage = lazy(() => import("@/pages/admin/AdminVoiceBankPage"));
 const AdminAuditLogPage = lazy(() => import("@/pages/admin/AdminAuditLogPage"));
@@ -78,10 +77,6 @@ const AdminTicketRatingsPage = lazy(
 
 // Super-admin only: the white-label brand (tenant) panel.
 const AdminBrandsPage = lazy(() => import("@/pages/admin/brands/AdminBrandsPage"));
-const AdminBrandSubscriptionsPage = lazy(
-  () => import("@/pages/admin/brand-subscriptions/AdminBrandSubscriptionsPage"),
-);
-const AdminBrandPlansPage = lazy(() => import("@/pages/admin/brand-subscriptions/AdminBrandPlansPage"));
 const AdminBrandDetailPage = lazy(() => import("@/pages/admin/brands/AdminBrandDetailPage"));
 const AdminBrandCreatePage = lazy(() => import("@/pages/admin/brands/AdminBrandCreatePage"));
 
@@ -127,6 +122,15 @@ function adminRoutes(base: string) {
           path={`${base}/platform`}
           element={<RequireSuperAdmin><AdminPlatformOverviewPage /></RequireSuperAdmin>}
         />
+        {/* Main-domain customers — the platform is their provider (docs/brand-as-customer-plan.md). */}
+        <Route
+          path={`${base}/platform-customers`}
+          element={<RequireSuperAdmin><AdminPlatformCustomersPage /></RequireSuperAdmin>}
+        />
+        <Route
+          path={`${base}/platform-customers/:id`}
+          element={<RequireSuperAdmin><AdminPlatformCustomerDetailPage /></RequireSuperAdmin>}
+        />
         {/* Admin-only */}
         <Route
           path={`${base}/overview`}
@@ -151,20 +155,6 @@ function adminRoutes(base: string) {
         <Route
           path={`${base}/coupons`}
           element={<RequireAdmin><AdminCouponsPage /></RequireAdmin>}
-        />
-        {/* A brand admin's own pricing addons and wallet (brand-scoped). */}
-        <Route
-          path={`${base}/pricing`}
-          element={<RequireAdmin><AdminBrandPricingPage /></RequireAdmin>}
-        />
-        <Route
-          path={`${base}/wallet`}
-          element={<RequireAdmin><AdminBrandWalletPage /></RequireAdmin>}
-        />
-        {/* What the brand pays the PLATFORM: fee, feature add-ons, card. Brand admin only. */}
-        <Route
-          path={`${base}/billing`}
-          element={<RequireAdmin><AdminBrandBillingPage /></RequireAdmin>}
         />
         {/* Support requests. RequireAdmin lets STAFF in as well; which lane
             they get, and what they may do in it, is decided server-side. */}
@@ -200,16 +190,6 @@ function adminRoutes(base: string) {
         <Route
           path={`${base}/brands`}
           element={<RequireSuperAdmin><AdminBrandsPage /></RequireSuperAdmin>}
-        />
-        {/* What BRANDS pay the platform: brand plans, add-ons, every brand's subscription. */}
-        <Route
-          path={`${base}/brand-subscriptions`}
-          element={<RequireSuperAdmin><AdminBrandSubscriptionsPage /></RequireSuperAdmin>}
-        />
-        {/* The brand plan catalog — laid out like Plans, but what brands pay (not what they sell). */}
-        <Route
-          path={`${base}/brand-plans`}
-          element={<RequireSuperAdmin><AdminBrandPlansPage /></RequireSuperAdmin>}
         />
         <Route
           path={`${base}/brands/new`}
@@ -304,8 +284,6 @@ function buildRouter(basename?: string) {
         }
       />
       <Route path="/login" element={<LoginPage />} />
-      {/* Public "Set up your brand" request form — platform door only (the page sends a brand door home). */}
-      <Route path="/brand-setup" element={<BrandSetupPage />} />
       <Route
         path="/subscribe"
         element={
@@ -353,6 +331,8 @@ function buildRouter(basename?: string) {
             platform); staff and the owner raise none and the page says so. */}
         <Route path="/dashboard/support" element={<SupportPage />} />
         <Route path="/dashboard/notifications" element={<NotificationsPage />} />
+        {/* A main-domain customer asks for their account to become a brand (the API refuses everyone else). */}
+        <Route path="/dashboard/brand-admin" element={<RequireCustomer><BrandAdminRequestPage /></RequireCustomer>} />
 
         {/* Staff with no permitted section land here (see StaffNoAccessPage). */}
         <Route
@@ -392,6 +372,13 @@ export function App() {
       setActiveBrandSlug(slug);
       await useBrandingStore.getState().refresh();
       const brand = useBrandingStore.getState().brand;
+      // A brand whose own domain is live is used THERE — leave the main domain's /{slug} path for it. A dev
+      // machine reaches every brand by path, so stay put on loopback.
+      if (brand && brand.slug === slug && brand.liveDomain && !isLoopbackHost(window.location.hostname)) {
+        const rest = window.location.pathname.slice(slug.length + 1) || "/";
+        window.location.replace(`https://${brand.liveDomain}${rest}${window.location.search}${window.location.hash}`);
+        return;
+      }
       if (brand && brand.slug !== slug) {
         // The HOST (subdomain / verified domain) named the brand, resolved from Origin. No basename
         // then — the app lives at plain /dashboard and any path segment stays part of the route.

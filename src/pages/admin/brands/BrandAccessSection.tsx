@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, BRAND_MODULES } from "@/lib/api";
 import { COUNTRIES } from "@/data/countries";
 import { listTimeZones } from "@/lib/timezone";
 import type { SetupDraft } from "./brandSetupDraft";
@@ -141,13 +141,12 @@ export function BrandAccessSection({ value, onChange }: Props) {
   return (
     <div className="space-y-5">
       <Card className="space-y-4 p-5">
-        {/* One editor per state: whether a module is included, sold as an add-on or off is set with its
-            price on the Billing tab, so it lives there alone. */}
         <Head
           icon={LayoutGrid}
           title="Modules"
-          blurb="Which modules this brand's customers get — included, sold to the brand as a paid add-on, or off — is set on the Billing tab, next to their prices. A module that's off (or an add-on not yet bought) disappears from their navigation and its API answers 403."
+          blurb="Which modules this brand's customers get. A module that's off disappears from their navigation and its API answers 403; what each customer can use within the rest still comes from their plan."
         />
+        <BrandModuleSwitches value={value} onChange={onChange} />
       </Card>
 
       <Card className="space-y-4 p-5">
@@ -211,6 +210,27 @@ export function BrandAccessSection({ value, onChange }: Props) {
           )}
         </div>
       </Card>
+    </div>
+  );
+}
+
+/** One on/off switch per optional module. Shared by the brand page and Create brand. */
+export function BrandModuleSwitches({ value, onChange }: Props) {
+  return (
+    <div className="divide-y divide-border rounded-xl border border-border">
+      {BRAND_MODULES.map((m) => (
+        <label key={m.id} htmlFor={`b-module-${m.id}`} className="flex cursor-pointer items-center gap-3 px-3.5 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">{m.label}</p>
+            <p className="text-xs text-muted-foreground">{m.description}</p>
+          </div>
+          <Switch
+            id={`b-module-${m.id}`}
+            checked={value.modules[m.id] !== false}
+            onCheckedChange={(on) => onChange({ modules: { ...value.modules, [m.id]: on } })}
+          />
+        </label>
+      ))}
     </div>
   );
 }

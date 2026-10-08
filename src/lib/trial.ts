@@ -60,16 +60,6 @@ export interface BlockedCopy {
 export function blockedCopy(state: TrialState): BlockedCopy | null {
   if (!state.blocked) return null;
 
-  // The brand paused it (its monthly cap, or its own bill) — no plan the customer buys would help,
-  // so there's no call to action: only the brand can lift it.
-  if (state.brandHold) {
-    return {
-      title: "Service Paused",
-      reason: "Your provider has temporarily paused AI answering. Please contact them",
-      cta: "",
-    };
-  }
-
   // During the post-trial grace window the number is still reserved — lead with
   // the "recharge to keep your number" urgency instead of the generic expiry copy.
   if (state.graceActive) {

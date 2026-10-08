@@ -50,7 +50,7 @@ export default function SmsToCallerPage() {
       <PageHeader
         title={
           <span className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-2xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-[0_6px_16px_-6px_hsl(217_84%_55%/0.7)]">
+            <span className="grid size-11 place-items-center rounded-2xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-[0_6px_16px_-6px_color-mix(in_oklab,var(--color-primary)_70%,transparent)]">
               <MessageSquareText className="size-5" />
             </span>
             SMS to Caller

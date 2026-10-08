@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Building2, ExternalLink, Globe, Inbox, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { Building2, ExternalLink, Globe, Inbox, Pencil, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/card";
@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatMoney } from "@/lib/currency";
 import {
   DataCard,
   DataCardGrid,
@@ -22,7 +21,6 @@ import { api, ApiError, type Brand, type BrandRequest } from "@/lib/api";
 import { StripeUnroutedCard } from "./StripeUnroutedCard";
 import { BrandRequestsTab, type RequestFilter } from "./BrandRequestsTab";
 import { brandStatusLabel, brandStatusVariant } from "./brandStatus";
-import { billingStatusMeta } from "@/lib/brandBilling";
 
 /** Stable stand-in for the pre-load `null`, so paging doesn't re-slice each render. */
 const EMPTY: Brand[] = [];
@@ -146,29 +144,17 @@ export default function AdminBrandsPage() {
     </span>
   );
 
-  // Lifecycle first; then, only when something needs attention, how it stands paying the platform.
-  const renderStatus = (b: Brand) => {
-    const billing = billingStatusMeta(b.billingStatus);
-    const attention = b.billingStatus === "awaiting_card" || b.billingStatus === "past_due" || b.billingStatus === "canceled";
-    return (
-      <span className="flex flex-wrap items-center gap-1.5">
-        <Badge variant={brandStatusVariant(b)}>{brandStatusLabel(b)}</Badge>
-        {attention && <Badge variant={billing.variant}>{billing.label}</Badge>}
-        {b.serviceHold && <Badge variant="danger">AI paused</Badge>}
-      </span>
-    );
-  };
+  const renderStatus = (b: Brand) => (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <Badge variant={brandStatusVariant(b)}>{brandStatusLabel(b)}</Badge>
+    </span>
+  );
 
   return (
     <div>
       <PageHeader
         title="Brands"
-        subtitle="Every white-label tenant: its subdomain, its look, and the senders its customers see."
-        actions={
-          <Button onClick={() => navigate("/dashboard/admin/brands/new")}>
-            <Plus className="size-4" /> New Brand
-          </Button>
-        }
+        subtitle="Every white-label brand — each one a platform customer whose Brand Admin request you approved."
       />
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -224,12 +210,9 @@ export default function AdminBrandsPage() {
           <Building2 className="size-8 text-muted-foreground" />
           <p className="text-sm font-medium">No brands yet</p>
           <p className="max-w-md text-sm text-muted-foreground">
-            A brand is a second front door to this platform — its own subdomain, logo, colours and
-            font, run day to day by its own admin. Their customers never see this platform's name.
+            A brand starts as a platform customer. When you approve their Brand Admin request (Requests tab), their
+            account becomes the brand and shows up here.
           </p>
-          <Button className="mt-2" onClick={() => navigate("/dashboard/admin/brands/new")}>
-            <Plus className="size-4" /> Create the first brand
-          </Button>
         </Card>
       ) : (
         <>
@@ -243,7 +226,6 @@ export default function AdminBrandsPage() {
                     <th className="px-4 py-3 font-medium">Address</th>
                     <th className="px-4 py-3 font-medium">Status</th>
                     <th className="px-4 py-3 font-medium">Accounts</th>
-                    <th className="px-4 py-3 font-medium">Wallet</th>
                     <th className="px-4 py-3 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -272,18 +254,6 @@ export default function AdminBrandsPage() {
                           <Users className="size-4" />
                           <span className="tabular-nums">{b.counts?.total ?? 0}</span>
                         </span>
-                      </td>
-                      <td className="px-4 py-3 tabular-nums">
-                        {/* What the platform owes the brand right now — the
-                            "who needs paying" glance, per currency. */}
-                        {b.walletBalances?.some((w) => w.balanceCents !== 0) ? (
-                          b.walletBalances
-                            .filter((w) => w.balanceCents !== 0)
-                            .map((w) => formatMoney(w.balanceCents, w.currency))
-                            .join(" · ")
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         {renderActions(b)}

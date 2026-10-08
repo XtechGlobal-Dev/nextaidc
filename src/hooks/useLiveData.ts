@@ -74,6 +74,11 @@ export function useLiveData() {
             reason?: string;
             subject?: string;
           };
+          // Their Brand Admin request went live: re-read who they are, which moves them to the brand's address.
+          if (data?.type === "account-moved") {
+            void useAuthStore.getState().loadMe();
+            return;
+          }
           if (data?.type === "ticket-typing" && data.ticketId) {
             useLiveStore.getState().noteTyping(data.ticketId, data.name || "Someone");
             return;

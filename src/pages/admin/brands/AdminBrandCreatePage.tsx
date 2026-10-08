@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Building2,
@@ -14,12 +14,10 @@ import {
   MapPin,
   Moon,
   Phone,
-  Save,
   Sparkles,
   Upload,
   UserCog,
   Users,
-  Wallet,
   Wand2,
   X,
 } from "lucide-react";
@@ -28,7 +26,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PasswordInput } from "@/components/ui/password-input";
 import { Switch } from "@/components/ui/switch";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { MultiSelect } from "@/components/ui/multi-select";
@@ -42,11 +39,9 @@ import {
 import {
   api,
   ApiError,
-  type BrandAddon,
   type BrandCreateResult,
   type BrandFontOption,
   type BrandInput,
-  type BrandPlan,
   type BrandRequest,
   type BrandThemeCatalog,
   type SubscriptionPlan,
@@ -55,7 +50,7 @@ import { formatMoney } from "@/lib/currency";
 import { COUNTRIES } from "@/data/countries";
 import { listTimeZones } from "@/lib/timezone";
 import { cn, timeAgo } from "@/lib/utils";
-import { BLANK_SETUP, setupPayload, type SetupDraft } from "./brandSetupDraft";
+import { BLANK_SETUP, planBlockedBy, plansOnSale, setupPayload, type SetupDraft } from "./brandSetupDraft";
 import {
   BrandMark,
   CatalogSkeleton,
@@ -66,14 +61,12 @@ import {
   useCatalogFonts,
   useObjectUrl,
 } from "@/components/brand/BrandLookPickers";
-import { BrandBillingFields, billingDraftProblem } from "./BrandBillingFields";
-import { BrandPlanPicker } from "@/components/brand/BrandPlanPicker";
+import { BrandModuleSwitches } from "./BrandAccessSection";
 
-// Create one white-label brand in a single form (a brand without address, look and admin isn't usable).
-// Editing lives in AdminBrandDetailPage, where the pieces move independently.
-// With ?request=<id> it's "Complete setup" for a brand request: pre-filled from what the applicant
-// sent, the applicant is the admin (with the password they chose), and the super admin picks the
-// settings and permissions.
+// "Complete Brand Setup" for a Brand Admin request (?request=<id>): pre-filled from what the applicant sent; the
+// super admin picks the address, look, settings and permissions, and the applicant's OWN account becomes the
+// Brand Admin. There is no creating a brand from nothing — a brand only ever comes from an approved request
+// (docs/brand-as-customer-plan.md). Editing lives in AdminBrandDetailPage.
 
 // Same subdomain rules as the server, so the field self-corrects instead of failing on save.
 function slugify(raw: string): string {
@@ -137,30 +130,25 @@ type SlugState = { checking: boolean; available: boolean | null; reason: string;
 type AssetSlot = "logoLight" | "logoDark" | "favicon";
 
 export default function AdminBrandCreatePage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestId = searchParams.get("request");
-  /** The brand request being completed; null for a plain "New brand". */
+  // Only a request can become a brand: without one there's nothing to set up.
+  if (!requestId) return <Navigate to="/dashboard/admin/brands?tab=requests" replace />;
+  return <BrandRequestSetup requestId={requestId} />;
+}
+
+function BrandRequestSetup({ requestId }: { requestId: string }) {
+  const navigate = useNavigate();
+  /** The brand request being completed, once loaded. */
   const [request, setRequest] = useState<BrandRequest | null>(null);
   /** Tell the applicant their brand is live (request mode only). */
   const [notifyApplicant, setNotifyApplicant] = useState(true);
 
   const [catalog, setCatalog] = useState<BrandThemeCatalog | null>(null);
-  /** The brand plan catalog (what brands pay the platform) and its add-ons. */
-  const [brandPlans, setBrandPlans] = useState<BrandPlan[] | null>(null);
-  const [brandAddons, setBrandAddons] = useState<BrandAddon[]>([]);
   const [draft, setDraft] = useState<Draft>(BLANK);
   // Active platform plans, for the "plans this brand sells" pick.
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [saving, setSaving] = useState(false);
-
-  const [admin, setAdmin] = useState({
-    email: "",
-    fullName: "",
-    password: "",
-    sendWelcomeEmail: true,
-  });
-  const [withAdmin, setWithAdmin] = useState(true);
 
   const [files, setFiles] = useState<Record<AssetSlot, File | null>>({
     logoLight: null,
@@ -194,6 +182,20 @@ export default function AdminBrandCreatePage() {
 
   const patch = useCallback((p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p })), []);
 
+  // Plans whose add-ons are all switched on are the only ones on sale; the rest leave the pick.
+  const sellablePlans = plans.filter((p) => planBlockedBy(p, draft.modules).length === 0);
+  const hiddenPlans = plans.filter((p) => planBlockedBy(p, draft.modules).length > 0);
+
+  /** Switching a module off also unpicks the plans that include its add-on, and says which. */
+  function setModules(modules: Draft["modules"]) {
+    const dropped = plans.filter((p) => draft.planIds.includes(p.id) && planBlockedBy(p, modules).length > 0);
+    patch({ modules, planIds: draft.planIds.filter((id) => !dropped.some((p) => p.id === id)) });
+    if (dropped.length) {
+      const names = dropped.map((p) => p.displayName).join(", ");
+      toast.info(`Removed ${names} from the plans on sale — ${dropped.length === 1 ? "it includes" : "they include"} an add-on you switched off.`);
+    }
+  }
+
   useEffect(() => {
     let active = true;
     api.admin.plans
@@ -207,24 +209,6 @@ export default function AdminBrandCreatePage() {
 
   /* ------------------------------ loading ----------------------------- */
 
-  useEffect(() => {
-    let active = true;
-    Promise.all([api.super.brandPlans.list(), api.super.brandAddons.list()])
-      .then(([plans, addons]) => {
-        if (!active) return;
-        setBrandPlans(plans);
-        setBrandAddons(addons);
-        // A new brand starts on the default plan (else the first on offer); Custom stays one click away.
-        // Completing a request keeps the plan the applicant chose instead.
-        const start = plans.find((p) => p.active && p.isDefault) ?? plans.find((p) => p.active);
-        if (!requestId && start) setDraft((d) => ({ ...d, brandPlanId: start.id }));
-      })
-      .catch(() => active && setBrandPlans([]));
-    return () => {
-      active = false;
-    };
-  }, [requestId]);
-
   // Complete setup: start from what the applicant sent. Everything stays editable.
   useEffect(() => {
     if (!requestId) return;
@@ -233,8 +217,12 @@ export default function AdminBrandCreatePage() {
       .get(requestId)
       .then((r) => {
         if (!active) return;
-        if (r.status === "approved" || r.status === "declined") {
-          toast.info(`${r.brandName} has already been ${r.status === "approved" ? "set up" : "declined"}.`);
+        if (r.status === "approved" || r.status === "declined" || r.status === "awaiting_domain") {
+          toast.info(
+            r.status === "awaiting_domain"
+              ? `${r.brandName} is approved — it becomes the brand once its domain is live.`
+              : `${r.brandName} has already been ${r.status === "approved" ? "set up" : "declined"}.`,
+          );
           navigate("/dashboard/admin/brands?tab=requests", { replace: true });
           return;
         }
@@ -256,7 +244,6 @@ export default function AdminBrandCreatePage() {
             ? { themePreset: r.themePreset, primaryColor: r.primaryColor, accentColor: r.accentColor }
             : {}),
           ...(r.fontFamily ? { fontFamily: r.fontFamily } : {}),
-          brandPlanId: r.brandPlanId || null,
         }));
         setExistingAssets({ logoLight: r.logoLightUrl, logoDark: r.logoDarkUrl, favicon: r.faviconUrl });
       })
@@ -358,40 +345,18 @@ export default function AdminBrandCreatePage() {
 
   const logoPreview = useObjectUrl(files.logoLight) || existingAssets.logoLight;
 
-  const adminReady =
-    // A request's admin is the applicant — nothing to type.
-    !!request ||
-    !withAdmin ||
-    (admin.email.trim().length > 3 &&
-      admin.fullName.trim().length > 1 &&
-      admin.password.length >= 8);
-
   const domainInvalid =
     !!draft.customDomain && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(draft.customDomain);
 
   // Subdomain is the permanent address and always required; a custom domain only needs to be well-formed if typed.
   const addressReady = !!draft.slug && slugState.available !== false && !domainInvalid;
 
-  // Every brand pays the platform a monthly fee — its plan's, or one set by hand — so the wizard won't
-  // launch one without it.
-  const billingProblem = billingDraftProblem(draft, { feeRequired: true });
-  const chosenPlan = brandPlans?.find((p) => p.id === draft.brandPlanId) ?? null;
-
-  // The applicant already chose and paid for a plan when they filed their request — the super admin
-  // completing setup can't swap it out for a different one here. (No lock if they applied before any
-  // plan existed, or chose "custom" — there's nothing to lock to in that case.)
-  const planLocked = !!requestId && !!request?.brandPlanId;
-
-  const canSave =
-    draft.name.trim().length >= 2 &&
-    addressReady &&
-    adminReady &&
-    !billingProblem &&
-    (!requestId || !!request);
+  const canSave = draft.name.trim().length >= 2 && addressReady && !!request;
 
   /* -------------------------------- save ------------------------------ */
 
   async function save() {
+    if (!request) return;
     setSaving(true);
     try {
       const brandInput: BrandInput = {
@@ -409,18 +374,13 @@ export default function AdminBrandCreatePage() {
         fontFamily: draft.fontFamily,
         darkModeDefault: draft.darkModeDefault,
         ...setupPayload(draft),
+        planIds: plansOnSale(draft.planIds, draft.modules, plans),
         // A request's logos carry over, unless replaced (the new file uploads below) or removed.
-        ...(request
-          ? {
-              logoLightUrl: files.logoLight ? "" : existingAssets.logoLight,
-              logoDarkUrl: files.logoDark ? "" : existingAssets.logoDark,
-              faviconUrl: files.favicon ? "" : existingAssets.favicon,
-            }
-          : {}),
+        logoLightUrl: files.logoLight ? "" : existingAssets.logoLight,
+        logoDarkUrl: files.logoDark ? "" : existingAssets.logoDark,
+        faviconUrl: files.favicon ? "" : existingAssets.favicon,
       };
-      const res: BrandCreateResult = request
-        ? await api.super.brandRequests.approve(request.id, { ...brandInput, notifyApplicant })
-        : await api.super.brands.create({ ...brandInput, ...(withAdmin ? { admin } : {}) });
+      const res: BrandCreateResult = await api.super.brandRequests.approve(request.id, { ...brandInput, notifyApplicant });
 
       // The marks need a brand to hang off, so they go up now — a failed upload
       // is reported but never unwinds a brand that was created successfully.
@@ -440,19 +400,18 @@ export default function AdminBrandCreatePage() {
       }
 
       if (res.adminError) toast.warning(res.adminError);
-      if (res.billingError) toast.warning(res.billingError);
-      toast.success(
-        res.admin
-          ? `${res.brand.name} ${request ? "is set up" : "created"} — ${res.admin.email} can sign in at ${res.loginUrl}`
-          : `${res.brand.name} ${request ? "is set up" : "created"}`,
-      );
+      if (res.state === "awaiting_domain") {
+        toast.success(`${res.brand.name} is approved — it goes live once ${res.domain?.domain ?? "its domain"} is connected`);
+      } else if (res.state === "brand") {
+        toast.success(`${res.brand.name} is live — the applicant now signs in at ${res.loginUrl}`);
+      } else toast.success(`${res.brand.name} is set up`);
       // A claimed domain is the one thing still waiting on somebody, so land the
       // operator on the records they now have to send the client.
       navigate(`/dashboard/admin/brands/${res.brand.id}${res.domain ? "?tab=domain" : ""}`, {
         replace: true,
       });
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Failed to create the brand");
+      toast.error(e instanceof ApiError ? e.message : "Couldn't complete the setup");
     } finally {
       setSaving(false);
     }
@@ -464,22 +423,18 @@ export default function AdminBrandCreatePage() {
     <div>
       <button
         type="button"
-        onClick={() => navigate(requestId ? "/dashboard/admin/brands?tab=requests" : "/dashboard/admin/brands")}
+        onClick={() => navigate("/dashboard/admin/brands?tab=requests")}
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ArrowLeft className="size-4" /> {requestId ? "Back to Requests" : "Back to Brands"}
+        <ArrowLeft className="size-4" /> Back to Requests
       </button>
 
       <h1 className="text-2xl font-semibold tracking-tight">
-        {requestId ? "Complete Brand Setup" : "Create New Brand"}
+        Complete Brand Setup
       </h1>
 
-      {requestId && (
-        <RequestSummary
-          request={request}
-          planName={brandPlans?.find((p) => p.id === request?.brandPlanId)?.name ?? ""}
-          chosenPlan={chosenPlan}
-        />
+      {(
+        <RequestSummary request={request} />
       )}
 
       {/* ------------------------- Form + live preview --------------------- */}
@@ -787,14 +742,6 @@ export default function AdminBrandCreatePage() {
                 onChange={(darkModeDefault) => patch({ darkModeDefault })}
               />
               <ToggleCard
-                id="b-addon"
-                icon={<Wallet className="size-4" />}
-                title="Admin sets plan add-ons"
-                blurb="Lets this brand's own admin price their add-ons. Off keeps pricing with the platform."
-                checked={draft.addonEditable}
-                onChange={(addonEditable) => patch({ addonEditable })}
-              />
-              <ToggleCard
                 id="b-live"
                 icon={<Sparkles className="size-4" />}
                 title="Brand is live"
@@ -803,59 +750,39 @@ export default function AdminBrandCreatePage() {
                 onChange={(live) => patch({ live })}
               />
             </div>
+          </Section>
+
+          {/* ----------------------- 5 · Modules & plans ------------------- */}
+          <Section
+            n={5}
+            title="Modules & plans"
+            blurb="Which optional modules this brand's customers get, then the plans it sells. Off hides a module from their navigation, and a plan that includes a switched-off module's add-on can't be sold here."
+          >
+            <BrandModuleSwitches value={draft} onChange={({ modules }) => modules && setModules(modules)} />
 
             <Field
               id="b-plans"
               label="Plans this brand sells"
-              hint="Only these show on the brand's Default plans page and its subscribe page. Leave empty to offer every active platform plan."
+              hint={
+                hiddenPlans.length
+                  ? `Only these show on the brand's plans and subscribe pages. Leave empty to offer every plan that fits the modules above. ${hiddenPlans.length} plan${hiddenPlans.length === 1 ? " is" : "s are"} hidden — ${hiddenPlans.length === 1 ? "it includes" : "they include"} an add-on that's switched off.`
+                  : "Only these show on the brand's plans and subscribe pages. Leave empty to offer every active platform plan."
+              }
               className="mt-4"
             >
               <MultiSelect
                 id="b-plans"
                 values={draft.planIds}
                 onChange={(planIds) => patch({ planIds })}
-                options={plans.map((p) => ({
+                options={sellablePlans.map((p) => ({
                   value: p.id,
                   label: p.displayName,
                   hint: `${formatMoney(p.priceCents, p.currency)} / ${p.intervalCount > 1 ? `${p.intervalCount} ` : ""}${p.interval}`,
                 }))}
-                placeholder="Every active plan"
+                placeholder={hiddenPlans.length ? "Every plan that fits" : "Every active plan"}
                 searchPlaceholder="Search plans…"
               />
             </Field>
-          </Section>
-
-          {/* ---------------------- 5 · Billing & limits ------------------- */}
-          <Section
-            n={5}
-            title="Brand Plan"
-            blurb="What this brand pays the platform every month — a brand plan from Brand Subscriptions, or a custom deal set by hand. Not the plans it sells its own customers."
-          >
-            {brandPlans === null ? (
-              <CatalogSkeleton />
-            ) : (
-              <>
-                {brandPlans.length === 0 && !planLocked && (
-                  <p className="mb-3 rounded-xl border border-dashed border-border p-3 text-xs text-muted-foreground">
-                    No brand plans yet — create them under Brand Subscriptions, or set this brand up by hand.
-                  </p>
-                )}
-                <BrandPlanPicker
-                  // Archived plans aren't offered, except the one this brand is already on.
-                  plans={brandPlans.filter((p) => p.active || p.id === draft.brandPlanId)}
-                  addons={brandAddons}
-                  value={draft.brandPlanId}
-                  onChange={(brandPlanId) => patch({ brandPlanId })}
-                  allowCustom={!planLocked}
-                  locked={planLocked}
-                />
-                {draft.brandPlanId === null && !planLocked && (
-                  <div className="mt-5 border-t border-border pt-5">
-                    <BrandBillingFields value={draft} onChange={patch} feeRequired />
-                  </div>
-                )}
-              </>
-            )}
           </Section>
 
           {/* ------------------------- 6 · Look & logos -------------------- */}
@@ -911,12 +838,7 @@ export default function AdminBrandCreatePage() {
           <Section
             n={7}
             title="Brand Administrator"
-            blurb="Who runs this brand. They get full control of their tenant — and no access to platform keys or any other brand."
-            action={
-              request ? undefined : (
-                <Switch checked={withAdmin} onCheckedChange={setWithAdmin} aria-label="Create an admin" />
-              )
-            }
+            blurb="Who runs this brand: the customer who asked. They get full control of their tenant — and no access to platform keys or any other brand."
           >
             {request ? (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -928,7 +850,9 @@ export default function AdminBrandCreatePage() {
                     <p className="truncate text-sm font-medium">{request.contactName}</p>
                     <p className="truncate text-xs text-muted-foreground">{request.email}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Signs in with the password they chose when applying.
+                      {request.applicantBrandId
+                        ? "Existing customer account — becomes the Brand Admin (keeps their password, assistant and number)."
+                        : "Signs in with the password they chose when applying."}
                     </p>
                   </div>
                 </div>
@@ -941,76 +865,15 @@ export default function AdminBrandCreatePage() {
                   onChange={setNotifyApplicant}
                 />
               </div>
-            ) : withAdmin ? (
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field id="b-admin-name" label="Full Name" required>
-                  <InputWithIcon icon={<UserCog className="size-4" />}>
-                    <Input
-                      id="b-admin-name"
-                      value={admin.fullName}
-                      onChange={(e) => setAdmin((a) => ({ ...a, fullName: e.target.value }))}
-                      placeholder="Jordan Blake"
-                      className="pl-10"
-                      maxLength={80}
-                    />
-                  </InputWithIcon>
-                </Field>
-                <Field id="b-admin-email" label="Email" required>
-                  <InputWithIcon icon={<Mail className="size-4" />}>
-                    <Input
-                      id="b-admin-email"
-                      type="email"
-                      autoComplete="off"
-                      value={admin.email}
-                      onChange={(e) => setAdmin((a) => ({ ...a, email: e.target.value }))}
-                      placeholder="admin@brandname.com"
-                      className="pl-10"
-                      maxLength={160}
-                    />
-                  </InputWithIcon>
-                </Field>
-                <Field
-                  id="b-admin-password"
-                  label="Temporary Password"
-                  required
-                  hint="At least 8 characters. They can change it once they're in."
-                >
-                  <PasswordInput
-                    id="b-admin-password"
-                    autoComplete="new-password"
-                    value={admin.password}
-                    onChange={(e) => setAdmin((a) => ({ ...a, password: e.target.value }))}
-                    placeholder="At least 8 characters"
-                  />
-                </Field>
-                <div className="sm:pt-6">
-                  <ToggleCard
-                    id="b-admin-mail"
-                    icon={<Mail className="size-4" />}
-                    title="Email their credentials"
-                    blurb="Sends the address, the temporary password and their sign-in link."
-                    checked={admin.sendWelcomeEmail}
-                    onChange={(sendWelcomeEmail) => setAdmin((a) => ({ ...a, sendWelcomeEmail }))}
-                  />
-                </div>
-              </div>
-            ) : (
-              <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                You can add the brand's admin later from its Team tab. Until then only you can
-                manage it.
-              </p>
-            )}
+            ) : null}
           </Section>
 
           {/* ------------------------------- Actions ----------------------- */}
-          {billingProblem && draft.name.trim().length >= 2 && (
-            <p className="text-right text-xs text-danger">{billingProblem}</p>
-          )}
           <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
             <Button
               variant="outline"
               disabled={saving}
-              onClick={() => navigate("/dashboard/admin/brands")}
+              onClick={() => navigate("/dashboard/admin/brands?tab=requests")}
             >
               Cancel
             </Button>
@@ -1020,14 +883,8 @@ export default function AdminBrandCreatePage() {
               disabled={!canSave || saving}
               onClick={() => void save()}
             >
-              {saving ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : requestId ? (
-                <Wand2 className="size-4" />
-              ) : (
-                <Save className="size-4" />
-              )}
-              {requestId ? "Complete Setup" : "Save Brand"}
+              {saving ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
+              Complete Setup
             </Button>
           </div>
         </div>
@@ -1151,17 +1008,7 @@ const WHY_BRAND = [
 ];
 
 /** What the applicant sent, above the form — the context for every choice below. */
-function RequestSummary({
-  request,
-  planName,
-  chosenPlan,
-}: {
-  request: BrandRequest | null;
-  /** The plan the applicant picked, by name ("" = none or not loaded). */
-  planName: string;
-  /** The plan picked below now — what their card is charged at setup. */
-  chosenPlan: BrandPlan | null;
-}) {
+function RequestSummary({ request }: { request: BrandRequest | null }) {
   if (!request) {
     return <div className="mt-4 h-24 animate-pulse rounded-2xl bg-muted" />;
   }
@@ -1196,27 +1043,9 @@ function RequestSummary({
               {request.notes}
             </p>
           )}
-          {(planName || request.card) && (
-            <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-              {planName && (
-                <span>
-                  <span className="text-muted-foreground">Chose: </span>
-                  <span className="font-medium">{planName}</span>
-                </span>
-              )}
-              {request.card ? (
-                <span className="inline-flex items-center gap-1 capitalize">
-                  <span className="text-muted-foreground normal-case">Card saved: </span>
-                  {request.card.brand} •••• {request.card.last4}
-                  <span className="text-muted-foreground normal-case">
-                    {chosenPlan && chosenPlan.priceCents > 0
-                      ? ` — charged ${formatMoney(chosenPlan.priceCents, chosenPlan.currency)} when you complete setup`
-                      : " — kept for later charges"}
-                  </span>
-                </span>
-              ) : (
-                <span className="text-muted-foreground">No card — their admin pays at first sign-in.</span>
-              )}
+          {request.applicantBrandId && (
+            <p className="mt-2 text-xs font-medium">
+              Existing customer account — becomes the Brand Admin (keeps their password, assistant and number).
             </p>
           )}
           <p className="mt-2 text-xs text-muted-foreground">

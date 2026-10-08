@@ -1,4 +1,4 @@
-import { allTenants, tenantForUser } from "./tenantDb.js";
+import { tenantForUser } from "./tenantDb.js";
 import { getEffective, integrationsStatus, getVapiPromptTemplate } from "./settings.js";
 import { compileMasterPrompt, DEFAULT_AGENT_CONFIG, type AgentConfig } from "../lib/agentConfig.js";
 import { buildChatBody, openAiTokenUnits } from "../lib/openai.js";
@@ -12,32 +12,16 @@ interface ResolvedAgent {
   config: AgentConfig;
 }
 
-/** Which agent answers inbound WhatsApp: an explicit setting, else the most
- *  recently updated approved agent (falling back to any agent). null if none. */
+/** Which agent answers inbound WhatsApp: the one pinned in Platform Settings (`whatsapp.agentUserId`). Nothing pinned
+ *  means no auto-reply — with an account database per brand and per main-domain customer there is no "most recent
+ *  agent" worth guessing at, and scanning them all on every message would grow with every sign-up. */
 export async function resolveWhatsAppAgent(): Promise<ResolvedAgent | null> {
   const pinnedUserId = getEffective("whatsapp.agentUserId").trim();
-  if (pinnedUserId) {
-    const c = await tenantForUser(pinnedUserId)
-      .then((db) => db.conversion.findUnique({ where: { userId: pinnedUserId } }))
-      .catch(() => null);
-    if (c) return { userId: c.userId, config: c.agentConfig as unknown as AgentConfig };
-  }
-
-  // Nothing pinned: the most recently updated approved agent in any brand's
-  // database, else the most recently updated agent at all.
-  let best: { userId: string; agentConfig: unknown; updatedAt: Date; approved: boolean } | null = null;
-  for (const { db } of await allTenants()) {
-    const c =
-      (await db.conversion.findFirst({ where: { status: "approved" }, orderBy: { updatedAt: "desc" } })) ??
-      (await db.conversion.findFirst({ orderBy: { updatedAt: "desc" } }));
-    if (!c) continue;
-    const approved = c.status === "approved";
-    if (!best || (approved && !best.approved) || (approved === best.approved && c.updatedAt > best.updatedAt)) {
-      best = { userId: c.userId, agentConfig: c.agentConfig, updatedAt: c.updatedAt, approved };
-    }
-  }
-  if (!best) return null;
-  return { userId: best.userId, config: best.agentConfig as unknown as AgentConfig };
+  if (!pinnedUserId) return null;
+  const c = await tenantForUser(pinnedUserId)
+    .then((db) => db.conversion.findUnique({ where: { userId: pinnedUserId } }))
+    .catch(() => null);
+  return c ? { userId: c.userId, config: c.agentConfig as unknown as AgentConfig } : null;
 }
 
 export interface ChatTurn {

@@ -23,7 +23,6 @@ import { recordPlanEvent } from "./planHistory.js";
 import { consumeCycle, effectiveIncludedMinutes, healDiscountDrift } from "./coupons.js";
 import { isAdminRole } from "../lib/roles.js";
 import { cachedBrand } from "./brands.js";
-import { brandCallsAllowed, brandServiceHold, type ServiceHold } from "./brandSetup.js";
 import { brandIdForOwner } from "./customerDirectory.js";
 
 /** Tells the user their trial converted to a paid plan. Only on the trial->active transition, not renewals. Best-effort. */
@@ -181,9 +180,6 @@ export interface EntitlementState {
   suspended: boolean;
   /** Admin hard-lock. Unlike `suspended` (billing lapse, self-recoverable), only an admin can lift it. */
   adminSuspended: boolean;
-  /** Set when the account's BRAND is what's blocking it (its monthly cap, or its own bill to the
-   *  platform) — nothing the customer can fix by buying a plan. */
-  brandHold?: ServiceHold;
 }
 
 type EntitlementProfile = {
@@ -242,15 +238,20 @@ function adminEntitlement(): EntitlementState {
   };
 }
 
-/** The user's live entitlement: their own (profile + plan), then their brand's hold on top — a brand
- *  over its monthly cap, or behind on paying the platform, pauses every customer's AI. The hold is read
- *  from the brand cache, so this costs no query. Admins are exempt: they support the product. */
+/** The user's live entitlement, from their own profile and plan. Admins are exempt (they support the product) —
+ *  see `exemptAdmin` for the one admin who isn't. */
 export async function getEntitlement(userId: string, now = new Date()): Promise<EntitlementState> {
-  const own = await profileEntitlement(userId, now);
-  if (own.planName === "Admin") return own;
-  const brand = cachedBrand(await brandIdForOwner(userId));
-  if (brandCallsAllowed(brand)) return own;
-  return { ...own, blocked: true, brandHold: brandServiceHold(brand) };
+  return profileEntitlement(userId, now);
+}
+
+/** Admins aren't customers, so their AI is always on — except a brand's OWNER who joined as a main-domain customer:
+ *  a brand runs on the same customer plans as everyone (docs/brand-as-customer-plan.md), so their own assistant
+ *  follows their own plan. Brands the super admin created directly (createdById set) keep the old exemption. Reads
+ *  the brand cache and the cached directory, so it costs no query. */
+async function exemptAdmin(userId: string, role: string | null | undefined): Promise<boolean> {
+  if (!isAdminRole(role)) return false;
+  const brand = cachedBrand(await brandIdForOwner(userId).catch(() => null));
+  return !(brand && brand.ownerUserId === userId && brand.createdById === null);
 }
 
 /** The account's entitlement from its own profile and plan alone. */
@@ -277,7 +278,7 @@ async function profileEntitlement(userId: string, now: Date): Promise<Entitlemen
       subscriptionPlanId: true, 
       user: { select: { role: true } } } }))) as EntitlementProfile | null;
 
-  if (isAdminRole(profile?.user?.role)) return adminEntitlement();
+  if (await exemptAdmin(userId, profile?.user?.role)) return adminEntitlement();
 
   const sub = profile?.subscriptionStatus ?? "none";
 
@@ -493,7 +494,7 @@ export async function getPlanFeatures(userId: string): Promise<PlanFeatures> {
       cardConfirmedAt: true,
       user: { select: { role: true } },
       subscriptionPlanId: true } }));
-  if (isAdminRole(profile?.user?.role)) return ALL_FEATURES;
+  if (await exemptAdmin(userId, profile?.user?.role)) return ALL_FEATURES;
   // Trial (even card-required, card pending) is wide open: features are a PLAN concern.
   // The card wall lives in getEntitlement, never in quietly stripped features here.
   const status = profile?.subscriptionStatus ?? "none";

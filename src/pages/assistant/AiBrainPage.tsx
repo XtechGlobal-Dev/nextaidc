@@ -307,7 +307,7 @@ export default function AiBrainPage() {
           {/* Icon + heading share one aligned row; the description sits full-width
               below on phones and tucks beside the icon again from sm up. */}
           <div className="flex items-center gap-3">
-            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-primary to-[#1d4ed8] text-primary-foreground shadow-[var(--shadow-soft)] sm:size-12">
+            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-[var(--shadow-soft)] sm:size-12">
               <Brain className="size-5 sm:size-6" />
             </div>
             <h1 className="text-xl font-bold leading-tight">AI Brain</h1>

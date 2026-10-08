@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Copy, CreditCard, Globe, Inbox, Mail, Phone, Wand2, X } from "lucide-react";
+import { ArrowRight, Globe, Inbox, Mail, Phone, UserRound, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -35,9 +35,11 @@ function RequestMark({ r }: { r: BrandRequest }) {
   );
 }
 
-// The Requested tab: brands that asked to be set up from the public "Set up your
-// brand" page. "Complete setup" opens the create wizard pre-filled from the
-// request; the super admin picks the settings, permissions and plans and launches it.
+// The Requested tab: main-domain customers who asked, from "Become a Brand" in their
+// dashboard, for their account to become a brand. "Complete setup" opens the create
+// wizard pre-filled from the request; the super admin picks the settings, permissions
+// and plans and launches it. An approved request still waiting on the applicant's own
+// domain (awaiting_domain) stays under Waiting until that domain is live.
 
 export type RequestFilter = "open" | "approved" | "declined";
 
@@ -66,7 +68,6 @@ export function BrandRequestsTab({
   const navigate = useNavigate();
   const [toDecline, setToDecline] = useState<BrandRequest | null>(null);
 
-  const publicUrl = `${window.location.origin}/brand-setup`;
   const complete = (r: BrandRequest) => navigate(`/dashboard/admin/brands/new?request=${r.id}`);
 
   const renderActions = (r: BrandRequest) =>
@@ -76,9 +77,21 @@ export function BrandRequestsTab({
       </Button>
     ) : r.status === "declined" ? null : (
       <div className="flex items-center justify-end gap-1.5">
-        <Button size="sm" onClick={() => complete(r)}>
-          <Wand2 className="size-3.5" /> Complete setup
-        </Button>
+        {/* Already approved — it becomes the brand by itself once the domain is live; only Decline is left. */}
+        {r.status === "awaiting_domain" ? (
+          <Badge variant="warning" className="whitespace-nowrap text-[10px]">
+            Approved — waiting for domain
+          </Badge>
+        ) : !r.applicantBrandId ? (
+          // From the retired public form: no customer account behind it, so it can't become a brand — decline only.
+          <Badge variant="neutral" className="whitespace-nowrap text-[10px]" title="No customer account behind it — decline it">
+            Old form
+          </Badge>
+        ) : (
+          <Button size="sm" onClick={() => complete(r)}>
+            <Wand2 className="size-3.5" /> Complete setup
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -94,7 +107,7 @@ export function BrandRequestsTab({
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="inline-flex rounded-xl border border-border bg-card p-1">
           {FILTERS.map((f) => (
             <button
@@ -111,20 +124,6 @@ export function BrandRequestsTab({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            void navigator.clipboard?.writeText(publicUrl).then(
-              () => toast.success("Request link copied"),
-              () => toast.error("Couldn't copy the link"),
-            );
-          }}
-          className="inline-flex max-w-full items-center gap-1.5 truncate text-xs text-muted-foreground hover:text-primary"
-          title="Copy the public request link"
-        >
-          <Copy className="size-3.5 shrink-0" />
-          <span className="truncate font-mono">{publicUrl.replace(/^https?:\/\//, "")}</span>
-        </button>
       </div>
 
       {error ? (
@@ -150,8 +149,8 @@ export function BrandRequestsTab({
           </p>
           {filter === "open" && (
             <p className="max-w-md text-sm text-muted-foreground">
-              When someone asks to launch their own brand from the &ldquo;Set up your brand&rdquo; page,
-              their request lands here for you to complete.
+              When a customer asks to turn their account into a brand from &ldquo;Become a Brand&rdquo;
+              in their dashboard, their request lands here for you to complete.
             </p>
           )}
         </Card>
@@ -205,14 +204,17 @@ export function BrandRequestsTab({
                             <Phone className="size-3 shrink-0" /> {r.phone}
                           </p>
                         )}
-                        {r.card && (
-                          <p className="flex items-center gap-1 truncate text-xs text-muted-foreground" title="Charged when you complete setup">
-                            <CreditCard className="size-3 shrink-0" /> Card saved
+                        {r.applicantBrandId && (
+                          <p
+                            className="flex items-center gap-1 truncate text-xs text-muted-foreground"
+                            title="Their own account becomes the Brand Admin"
+                          >
+                            <UserRound className="size-3 shrink-0" /> Existing customer account
                           </p>
                         )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                        {timeAgo(r.status === "pending" || r.status === "approving" ? r.createdAt : (r.reviewedAt ?? r.createdAt))}
+                        {timeAgo(filter === "open" ? r.createdAt : (r.reviewedAt ?? r.createdAt))}
                         {r.status === "approving" && (
                           <Badge variant="warning" className="ml-2 text-[10px]">
                             Setting up
@@ -236,6 +238,11 @@ export function BrandRequestsTab({
                   title={r.brandName}
                   subtitle={r.customDomain ? `${r.slug} · ${r.customDomain}` : r.slug}
                 />
+                {r.status === "awaiting_domain" && (
+                  <Badge variant="warning" className="mt-2 text-[10px]">
+                    Approved — waiting for domain
+                  </Badge>
+                )}
                 <DataCardGrid>
                   <CardField label="Contact">{r.contactName}</CardField>
                   <CardField label="Email">
@@ -245,7 +252,18 @@ export function BrandRequestsTab({
                     {timeAgo(filter === "open" ? r.createdAt : (r.reviewedAt ?? r.createdAt))}
                   </CardField>
                 </DataCardGrid>
-                {r.status !== "declined" && <div className="mt-3 flex justify-end">{renderActions(r)}</div>}
+                {r.status !== "declined" && (
+                  <div className="mt-3 flex justify-end">
+                    {/* The badge already shows above; the card keeps only Decline. */}
+                    {r.status === "awaiting_domain" ? (
+                      <Button variant="outline" size="sm" className="text-danger" onClick={() => setToDecline(r)}>
+                        <X className="size-3.5" /> Decline
+                      </Button>
+                    ) : (
+                      renderActions(r)
+                    )}
+                  </div>
+                )}
               </DataCard>
             ))}
           </div>
@@ -298,8 +316,9 @@ function DeclineDialog({
         <DialogHeader>
           <DialogTitle>Decline {request?.brandName}?</DialogTitle>
           <DialogDescription>
-            Nothing has been created for this request, so there is nothing to clean up. Their
-            password is discarded.
+            {request?.applicantBrandId
+              ? "Their account stays a normal customer account, exactly as it is now."
+              : "Nothing has been created for this request, so there is nothing to clean up. Their password is discarded."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">

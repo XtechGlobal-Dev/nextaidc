@@ -3,10 +3,10 @@ import { prisma } from "../prisma.js";
 import { emailsFor } from "./customerDirectory.js";
 import { tenantFor, tenantForUser } from "./tenantDb.js";
 import { resolveStripeCustomer, type StripeOwner } from "./stripeCustomers.js";
-import { creditWalletFromLedger } from "./brandWallet.js";
 
-// Platform ledger: one payment, one row, split platform/brand. Everything money-shaped
-// reads from here so numbers can't disagree. Idempotent on invoice id across all paid paths.
+// Platform ledger: one payment, one row. Everything money-shaped reads from here so numbers can't disagree.
+// Idempotent on invoice id across all paid paths. Brands no longer add a markup (docs/brand-as-customer-plan.md),
+// so every payment is the platform's: `brandCents` is 0 on new rows (older rows keep what they recorded).
 
 export type LedgerSource = "webhook" | "reconcile" | "renewal" | "go_live";
 
@@ -28,7 +28,7 @@ export interface PaidInvoice {
 
 export interface LedgerOutcome {
   ledger: PlatformLedger | null;
-  /** Cents credited to the brand's wallet by THIS call (0 when already booked). */
+  /** Always 0 now — kept so callers reading it stay valid (brands have no wallet any more). */
   credited: number;
   /** The invoice was already in the ledger; nothing new was written. */
   alreadyBooked: boolean;
@@ -45,7 +45,7 @@ export async function recordPaidInvoice(inv: PaidInvoice): Promise<LedgerOutcome
 
     const existing = await prisma.platformLedger.findUnique({ where: { stripeInvoiceId: inv.invoiceId } });
     if (existing) {
-      return { ledger: existing, credited: await creditWalletFromLedger(existing), alreadyBooked: true, unrouted: false };
+      return { ledger: existing, credited: 0, alreadyBooked: true, unrouted: false };
     }
 
     const owner = await resolveStripeCustomer(inv.customerId);
@@ -69,14 +69,14 @@ export async function recordPaidInvoice(inv: PaidInvoice): Promise<LedgerOutcome
         source: inv.source ?? "webhook",
       },
     });
-    return { ledger, credited: await creditWalletFromLedger(ledger), alreadyBooked: false, unrouted: false };
+    return { ledger, credited: 0, alreadyBooked: false, unrouted: false };
   } catch (e) {
     // P2002: another path booked this invoice between our lookup and our
     // write. Its row is the row.
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       const row = await prisma.platformLedger.findUnique({ where: { stripeInvoiceId: inv.invoiceId } });
       return row
-        ? { ledger: row, credited: await creditWalletFromLedger(row), alreadyBooked: true, unrouted: false }
+        ? { ledger: row, credited: 0, alreadyBooked: true, unrouted: false }
         : NOTHING;
     }
     console.warn("[ledger] could not record paid invoice:", e instanceof Error ? e.message : e);
@@ -84,8 +84,7 @@ export async function recordPaidInvoice(inv: PaidInvoice): Promise<LedgerOutcome
   }
 }
 
-// Brand share is proportional to what was paid, not a flat addon (a 50% coupon
-// halves it). A subscription on the platform's own Price gives the brand nothing.
+/** The plan and currency a payment was for. No brand share: there is no brand markup any more. */
 async function splitFor(
   owner: StripeOwner,
   inv: PaidInvoice,
@@ -94,31 +93,11 @@ async function splitFor(
     where: { userId: owner.userId },
     select: { subscriptionPlanId: true },
   });
-  const addon = inv.priceId
-    ? await prisma.brandPlanAddon.findFirst({
-        where: { brandId: owner.brandId, stripePriceId: inv.priceId },
-        include: { plan: { select: { priceCents: true, currency: true } } },
-      })
-    : profile?.subscriptionPlanId
-      ? await prisma.brandPlanAddon.findUnique({
-          where: { brandId_planId: { brandId: owner.brandId, planId: profile.subscriptionPlanId } },
-          include: { plan: { select: { priceCents: true, currency: true } } },
-        })
-      : null;
-
-  const planId = addon?.planId ?? profile?.subscriptionPlanId ?? null;
-  const plan =
-    addon?.plan ??
-    (planId
-      ? await prisma.subscriptionPlan.findUnique({ where: { id: planId }, select: { priceCents: true, currency: true } })
-      : null);
-  const currency = (inv.currency ?? plan?.currency ?? "usd").toLowerCase();
-
-  if (!addon || addon.addonCents <= 0) return { brandCents: 0, planId, currency };
-  const brandPrice = addon.plan.priceCents + addon.addonCents;
-  if (brandPrice <= 0) return { brandCents: 0, planId, currency };
-  const brandCents = Math.min(inv.amountPaidCents, Math.round((inv.amountPaidCents * addon.addonCents) / brandPrice));
-  return { brandCents: Math.max(0, brandCents), planId, currency };
+  const planId = profile?.subscriptionPlanId ?? null;
+  const plan = planId
+    ? await prisma.subscriptionPlan.findUnique({ where: { id: planId }, select: { currency: true } })
+    : null;
+  return { brandCents: 0, planId, currency: (inv.currency ?? plan?.currency ?? "usd").toLowerCase() };
 }
 
 /** The coupon on this payment, by our id: the Stripe coupon on the invoice

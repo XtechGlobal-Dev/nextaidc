@@ -44,24 +44,42 @@ export async function stampStripeCustomer(stripeCustomerId: string, owner: Strip
   }
 }
 
-/** Whose Stripe customer is this? Index first, then a scan of every brand's profiles (repairing the index). Null means nobody holds it — park the event, don't guess. */
+/** Unknown customers recently asked about, so Stripe's retries of an event nobody holds don't each cost a lookup. */
+const unknownUntil = new Map<string, number>();
+const UNKNOWN_MS = 10 * 60 * 1000;
+
+/** Whose Stripe customer is this? The index first; for one not indexed yet, the owner stamped on the Stripe customer
+ *  itself (one API call), believed only if Main's directory agrees, and indexed on the way out. Never a scan of every
+ *  account database — there is one per brand and per main-domain customer. Null means nobody holds it: park the
+ *  event, don't guess (`backfillStripeCustomerIndex` is the repair tool for customers from before the stamp). */
 export async function resolveStripeCustomer(stripeCustomerId: string | null | undefined): Promise<StripeOwner | null> {
   if (!stripeCustomerId) return null;
   const indexed = await prisma.stripeCustomer.findUnique({ where: { stripeCustomerId } });
   if (indexed) return { brandId: indexed.brandId, userId: indexed.userId };
 
-  // Not indexed: look in each brand's database in turn — a customer created
-  // before the index existed. Repaired on the way out.
-  for (const { brandId, db } of await allTenants()) {
-    const profile = await db.profile.findFirst({
-      where: { OR: [{ stripeCustomerId }, { pendingSwitchCustomerId: stripeCustomerId }] },
-      select: { userId: true },
-    });
-    if (!profile) continue;
-    await indexStripeCustomer(stripeCustomerId, { brandId, userId: profile.userId }).catch(() => {});
-    return { brandId, userId: profile.userId };
+  if ((unknownUntil.get(stripeCustomerId) ?? 0) > Date.now() || !isStripeConfigured()) return null;
+  let stamped: StripeOwner | null = null;
+  try {
+    const customer = await stripe().customers.retrieve(stripeCustomerId);
+    const meta = "deleted" in customer && customer.deleted ? {} : (customer.metadata ?? {});
+    if (meta.brandId && meta.userId) stamped = { brandId: meta.brandId, userId: meta.userId };
+  } catch (e) {
+    console.warn(`[stripe] could not read customer ${stripeCustomerId}:`, e instanceof Error ? e.message : e);
+    return null;
   }
-  return null;
+  const known = stamped
+    ? await prisma.customerDirectory.findUnique({
+        where: { brandId_userId: { brandId: stamped.brandId, userId: stamped.userId } },
+        select: { userId: true },
+      })
+    : null;
+  if (!stamped || !known) {
+    unknownUntil.set(stripeCustomerId, Date.now() + UNKNOWN_MS);
+    if (unknownUntil.size > 10_000) unknownUntil.clear();
+    return null;
+  }
+  await indexStripeCustomer(stripeCustomerId, stamped).catch(() => {});
+  return stamped;
 }
 
 /** Re-indexes every Stripe customer id any brand's profiles hold. Repair tool for suspected gaps; returns how many rows were written. */

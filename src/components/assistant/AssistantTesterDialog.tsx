@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { useUiStore } from "@/stores/useUiStore";
 import { useAgentStore } from "@/stores/useAgentStore";
@@ -675,7 +675,7 @@ export function AssistantTesterDialog() {
                   ? "bg-gradient-to-br from-success to-emerald-600"
                   : state === "ended"
                     ? "bg-gradient-to-br from-muted-foreground/70 to-muted-foreground/50 shadow-none"
-                    : "bg-gradient-to-br from-primary to-[#1d4ed8]",
+                    : "bg-primary",
               )}
             >
               {state === "connecting" ? <Loader2 className="size-9 animate-spin" /> : initial}
@@ -767,22 +767,21 @@ export function AssistantTesterDialog() {
         {mode === "phone" && !live && !trialBlocked && (
           <div className="space-y-2">
             <Label htmlFor="test-call-number">Number to call</Label>
-            <Input
+            {/* The country starts at the caller's own region (or the saved mobile's). */}
+            <PhoneInput
               id="test-call-number"
-              type="tel"
               autoComplete="tel"
-              inputMode="tel"
-              placeholder="+61 412 345 678"
+              placeholder="Mobile number"
               value={toNumber}
-              onChange={(e) => setToNumber(e.target.value)}
+              onChange={setToNumber}
               onKeyDown={(e) => {
                 if (e.key === "Enter") void beginPhone();
               }}
             />
             <p className="text-xs text-muted-foreground">
               {preflight?.ready && preflight.from
-                ? `Include the country code. We'll call you from ${preflight.from}.`
-                : "Include the country code. Your own mobile is the easiest one to test with."}
+                ? `Pick your country, then your number. We'll call you from ${preflight.from}.`
+                : "Pick your country, then your number. Your own mobile is the easiest one to test with."}
             </p>
             {preflight && !preflight.ready && (
               <p className="flex items-start gap-1.5 text-xs text-danger">

@@ -1,15 +1,16 @@
 import type { Brand } from "@prisma/client";
 import { appBaseUrl, canonicalApiBaseUrl, platformDomain, shareLinkBaseUrl } from "../env.js";
-import { brandHostnames, brandOrigin, cachedBrand } from "../services/brands.js";
+import { brandHostnames, brandOrigin, presentedBrand } from "../services/brands.js";
 import { getEffective } from "../services/settings.js";
 import { currentBrandId } from "./brandContext.js";
 
 // Brand-aware links and names for outbound copy — a global base URL leaks the platform domain to
 // white-label customers. Brand comes from async-local context; off-request work must pass one.
 
-/** Resolve the brand to build links for: the one given, else the ambient one. */
+/** Resolve the brand to build links for: the one given, else the ambient one. A main-domain customer's
+ *  own row resolves to null — its copy and links are the platform's. */
 function resolve(brandId?: string | null): Brand | null {
-  return cachedBrand(brandId === undefined ? currentBrandId() : brandId);
+  return presentedBrand(brandId === undefined ? currentBrandId() : brandId);
 }
 
 /** App origin for this brand's customers (no trailing slash). Only a VERIFIED vanity domain is ever

@@ -54,7 +54,7 @@ import {
   type MessageActor,
   withRequester,
 } from "../services/tickets.js";
-import { cachedBrand } from "../services/brands.js";
+import { cachedBrand, isCustomerBrand } from "../services/brands.js";
 
 // "My requests" for both lanes — lane is decided by role (customer → brand's team,
 // brand admin → platform; everyone else 403s). `laneDb` picks the DB (tenant vs Main);
@@ -87,7 +87,7 @@ declare global {
 // Resolve the lane or 403. Deliberately not an empty list — the 403 is how the UI
 // knows to hide the nav item for staff / the platform owner.
 async function requireRequesterLane(req: Request, _res: Response, next: NextFunction) {
-  const lane = requesterLane(req.user!.role);
+  const lane = requesterLane(req.user!.role, isCustomerBrand(cachedBrand(req.user!.brandId)));
   if (!lane) {
     return next(
       forbidden(

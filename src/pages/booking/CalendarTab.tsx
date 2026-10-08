@@ -325,7 +325,7 @@ function MonthView({
                 className={cn(
                   "mb-1.5 flex size-6 items-center justify-center rounded-full text-xs font-medium",
                   isToday
-                    ? "bg-primary font-bold text-primary-foreground shadow-[0_4px_10px_-4px_hsl(217_84%_55%/0.9)]"
+                    ? "bg-primary font-bold text-primary-foreground shadow-[0_4px_10px_-4px_color-mix(in_oklab,var(--color-primary)_90%,transparent)]"
                     : "text-muted-foreground",
                   !inMonth && !isToday && "opacity-45",
                 )}

@@ -6,6 +6,7 @@ import {
   type BrandModules,
   type BrandScripts,
   type SignupMode,
+  type SubscriptionPlan,
 } from "@/lib/api";
 
 // Editable "setup" half of a brand as the form holds it, plus brand → draft and draft → payload.
@@ -30,20 +31,6 @@ export interface SetupDraft {
   cardRequired: boolean | null;
   defaultVoiceId: string;
   scripts: BrandScripts;
-  /** May the brand's own admin set its plan addons? */
-  addonEditable: boolean;
-  /** Cap on the addon per cycle, in cents; null = no cap. */
-  maxAddonCents: number | null;
-  /** What the brand pays the platform each month, in minor units. */
-  platformFeeCents: number;
-  platformFeeCurrency: string;
-  /** Modules sold as feature add-ons → monthly price in minor units. */
-  featurePrices: Partial<Record<BrandModuleId, number>>;
-  /** Monthly caps across the brand's customers; null = no cap. */
-  monthlyMinuteLimit: number | null;
-  monthlyAiLimit: number | null;
-  /** The brand plan it pays the platform on; null = the billing fields above, set by hand. */
-  brandPlanId: string | null;
 }
 
 export const ALL_MODULES_ON = Object.fromEntries(
@@ -69,14 +56,6 @@ export const BLANK_SETUP: SetupDraft = {
   cardRequired: null,
   defaultVoiceId: "",
   scripts: { head: "", body: "", footer: "" },
-  addonEditable: true,
-  maxAddonCents: null,
-  platformFeeCents: 0,
-  platformFeeCurrency: "usd",
-  featurePrices: {},
-  monthlyMinuteLimit: null,
-  monthlyAiLimit: null,
-  brandPlanId: null,
 };
 
 export function setupFrom(b: Brand): SetupDraft {
@@ -99,14 +78,6 @@ export function setupFrom(b: Brand): SetupDraft {
     cardRequired: b.cardRequired ?? null,
     defaultVoiceId: b.defaultVoiceId ?? "",
     scripts: b.scripts ?? { head: "", body: "", footer: "" },
-    addonEditable: b.addonEditable ?? true,
-    maxAddonCents: b.maxAddonCents ?? null,
-    platformFeeCents: b.platformFeeCents ?? 0,
-    platformFeeCurrency: b.platformFeeCurrency ?? "usd",
-    featurePrices: b.featurePrices ?? {},
-    monthlyMinuteLimit: b.monthlyMinuteLimit ?? null,
-    monthlyAiLimit: b.monthlyAiLimit ?? null,
-    brandPlanId: b.brandPlanId ?? null,
   };
 }
 
@@ -132,13 +103,31 @@ export function setupPayload(d: SetupDraft): Partial<BrandInput> {
     cardRequired: d.cardRequired,
     defaultVoiceId: d.defaultVoiceId,
     scripts: d.scripts,
-    addonEditable: d.addonEditable,
-    maxAddonCents: d.maxAddonCents,
-    platformFeeCents: d.platformFeeCents,
-    platformFeeCurrency: d.platformFeeCurrency,
-    featurePrices: d.featurePrices,
-    monthlyMinuteLimit: d.monthlyMinuteLimit,
-    monthlyAiLimit: d.monthlyAiLimit,
-    brandPlanId: d.brandPlanId,
   };
+}
+
+/* ------------------------- Modules ↔ plans on sale ------------------------ */
+
+/** The plan add-on behind each module. A brand doesn't sell a plan whose add-on it has switched off — its customers
+ *  would pay for something hidden from them. Booking has no plan add-on, so it never rules a plan out. */
+const MODULE_PLAN_ADDON: Partial<Record<BrandModuleId, keyof SubscriptionPlan>> = {
+  transfer: "callTransferEnabled",
+  crm: "customCrmEnabled",
+  smsToCaller: "smsToCallerEnabled",
+  whatsapp: "whatsappEnabled",
+};
+
+/** The switched-off modules this plan includes an add-on for (empty = the brand can sell it). */
+export function planBlockedBy(plan: SubscriptionPlan, modules: BrandModules): BrandModuleId[] {
+  return (Object.keys(MODULE_PLAN_ADDON) as BrandModuleId[]).filter(
+    (id) => modules[id] === false && plan[MODULE_PLAN_ADDON[id]!] === true,
+  );
+}
+
+/** What to save as the brand's plans. An empty pick means "every active plan" to the server, so once a module
+ *  rules some plans out, "every plan" is written out as the plans that still fit. */
+export function plansOnSale(planIds: string[], modules: BrandModules, plans: SubscriptionPlan[]): string[] {
+  const fits = plans.filter((p) => planBlockedBy(p, modules).length === 0);
+  if (planIds.length) return planIds.filter((id) => fits.some((p) => p.id === id));
+  return fits.length < plans.length ? fits.map((p) => p.id) : [];
 }
