@@ -3,7 +3,8 @@ import { useId } from "react";
 // Hand-written inline-SVG chart primitives for the Dashboard — no chart library.
 
 export const CHART_COLORS = {
-  primary: "#2C76ED",
+  // The brand's own colour (a CSS variable, so a white-label brand's charts follow its theme).
+  primary: "var(--color-primary)",
   success: "#10B981",
   danger: "#F43F5E",
   warning: "#F59E0B",

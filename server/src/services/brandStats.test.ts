@@ -13,7 +13,12 @@ const h = vi.hoisted(() => ({
       findMany: vi.fn(async (_args?: unknown) => [] as unknown[]),
       groupBy: vi.fn(async (_args?: unknown) => [] as unknown[]),
     },
-    brand: { findMany: vi.fn(async (_args?: unknown) => [] as unknown[]) },
+    brand: {
+      findMany: vi.fn(async (_args?: unknown) => [] as unknown[]),
+      count: vi.fn(async (_args?: unknown) => 0),
+    },
+    // The newest-row-per-brand read (DISTINCT ON, in the database).
+    $queryRaw: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
     brandDatabase: { groupBy: vi.fn(async (_args?: unknown) => [] as unknown[]) },
     stripeUnroutedEvent: { count: vi.fn(async (_args?: unknown) => 0) },
   },
@@ -157,11 +162,14 @@ describe("the overview", () => {
       { id: "b_globex", name: "Globex", slug: "globex", status: "active" },
       { id: "b_new", name: "Newco", slug: "newco", status: "provisioning" },
     ]);
-    h.main.brandStatsDaily.findMany.mockResolvedValue([
+    h.main.brand.count.mockResolvedValue(4);
+    h.main.$queryRaw.mockResolvedValue([
       // Last night's row: fresh.
       { brandId: "b_acme", day: new Date("2026-09-07T00:00:00Z"), computedAt: new Date("2026-09-08T00:15:00Z"), customers: 40, active: 12, trialing: 5, callsTotal: 900, minutesTotal: 120, openTickets: 3, calls: 14, minutes: 10.5 },
       // Three days old: the job skipped this brand — stale, but its numbers still count.
       { brandId: "b_globex", day: new Date("2026-09-05T00:00:00Z"), computedAt: new Date("2026-09-06T00:15:00Z"), customers: 10, active: 2, trialing: 1, callsTotal: 50, minutesTotal: 9, openTickets: 1, calls: 2, minutes: 1 },
+      // A main-domain customer's own row: counted in the platform totals, never listed as a brand.
+      { brandId: "c_jo", day: new Date("2026-09-07T00:00:00Z"), computedAt: new Date("2026-09-08T00:10:00Z"), customers: 1, active: 1, trialing: 0, callsTotal: 7, minutesTotal: 2, openTickets: 0, calls: 1, minutes: 0.5 },
     ]);
     h.main.brandStatsDaily.groupBy.mockResolvedValue([
       { day: new Date("2026-09-06T00:00:00Z"), _sum: { calls: 20, minutes: 15.25 } },
@@ -189,7 +197,9 @@ describe("the overview", () => {
     expect(o.asOf).toBe("2026-09-08T00:15:00.000Z");
     expect(o.brands).toEqual({ total: 3, active: 2, provisioning: 1, failed: 0, suspended: 0 });
     expect(o.tenants).toEqual({ active: 2, provisioning: 1 });
-    expect(o.totals).toEqual({ customers: 50, active: 14, trialing: 6, callsTotal: 950, minutesTotal: 129, openTickets: 4 });
+    expect(o.totals).toEqual({ customers: 51, active: 15, trialing: 6, callsTotal: 957, minutesTotal: 131, openTickets: 4 });
+    expect(o.platformCustomers).toEqual({ total: 4, active: 1, trialing: 0 });
+    expect(h.main.brand.findMany.mock.calls[0][0]).toMatchObject({ where: { kind: "brand" } });
     expect(o.perBrand.map((b) => [b.slug, b.day, b.stale])).toEqual([
       ["acme", "2026-09-07", false],
       ["globex", "2026-09-05", true],
@@ -200,11 +210,7 @@ describe("the overview", () => {
       { day: "2026-09-07", calls: 16, minutes: 11.5 },
     ]);
     expect(o.ledger.from).toBe("2026-09-01T00:00:00.000Z");
-    expect(o.ledger.totals[0]).toMatchObject({ currency: "usd", totalCents: 22500 });
-    expect(o.wallets).toEqual([
-      { currency: "usd", balanceCents: 7500 },
-      { currency: "eur", balanceCents: 100 },
-    ]);
+    expect(o.ledger.totals[0]).toMatchObject({ currency: "usd", totalCents: 22500 });
     expect(o.unroutedEvents).toBe(1);
     // The ledger window is this month, up to now.
     expect(h.ledgerSummary).toHaveBeenCalledWith({ from: new Date("2026-09-01T00:00:00Z"), to: now });

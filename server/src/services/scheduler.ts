@@ -21,7 +21,9 @@ import { allCallDbs, allTenants, type TenantClient } from "./tenantDb.js";
 import { runWithBrand } from "../lib/brandContext.js";
 import { runTenantRetirementSweep } from "./tenantProvisioning.js";
 import { runBrandDeactivationSweep } from "./brandDeactivation.js";
-import { refreshAllServiceHolds } from "./brandUsage.js";
+import { runAbandonedSignupSweep } from "./platformCustomers.js";
+import { refillCustomerPool } from "./customerPool.js";
+import { runBrandEligibilityCheck } from "./brandEligibility.js";
 import { rollupBrandStats, catchUpBrandStats, msUntilNextUtc } from "./brandStats.js";
 import { env } from "../env.js";
 import { scheduleRecurring } from "../lib/jobQueue.js";
@@ -390,9 +392,13 @@ export function startScheduler(): void {
   // A deactivated brand is deleted for good (row and database) 30 days on. Daily, just after the above.
   setTimeout(() => void runBrandDeactivationSweep().catch(logSweepError("brand deactivation")), 25 * 60 * 1000);
   setInterval(() => void runBrandDeactivationSweep().catch(logSweepError("brand deactivation")), DAY_MS);
-  // Brand holds: lifts a monthly cap when the month turns over, pauses a brand whose billing grace ran out.
-  setTimeout(() => void refreshAllServiceHolds().catch(logSweepError("brand holds")), 2 * 60 * 1000);
-  setInterval(() => void refreshAllServiceHolds().catch(logSweepError("brand holds")), HOUR_MS);
+  // A main-domain sign-up that never started a plan or trial is deleted 30 days on. Daily, just after the above.
+  setTimeout(() => void runAbandonedSignupSweep().catch(logSweepError("abandoned sign-up")), 30 * 60 * 1000);
+  setInterval(() => void runAbandonedSignupSweep().catch(logSweepError("abandoned sign-up")), DAY_MS);
+  // Ready-made customer databases, so a main-domain sign-up doesn't wait for one to be created. Topped up a
+  // minute after boot and every 10 minutes (a claim also tops it up straight away).
+  setTimeout(() => void refillCustomerPool().catch(logSweepError("customer pool")), 60 * 1000);
+  setInterval(() => void refillCustomerPool().catch(logSweepError("customer pool")), 10 * 60 * 1000);
 
   // Nightly brand stats rollup into Main. Fixed at 00:15 UTC because the row is a
   // calendar day; a night the process slept through is caught up at boot.
@@ -402,6 +408,13 @@ export function startScheduler(): void {
     setInterval(() => void rollupBrandStats().catch(logSweepError("brand stats")), DAY_MS);
   }, msUntilNextUtc(0, 15));
   console.log("📊 Brand stats rollup scheduled (nightly at 00:15 UTC)");
+
+  // The active-customer rule for brands: warn in the month's last week, downgrade on the 7th. Daily at 09:00 UTC
+  // (office hours across most time zones, so the warning arrives when someone can act on it); brands only.
+  setTimeout(() => {
+    void runBrandEligibilityCheck().catch(logSweepError("brand eligibility"));
+    setInterval(() => void runBrandEligibilityCheck().catch(logSweepError("brand eligibility")), DAY_MS);
+  }, msUntilNextUtc(9, 0));
 }
 
 function logSweepError(what: string) {

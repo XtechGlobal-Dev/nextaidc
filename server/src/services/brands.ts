@@ -23,20 +23,15 @@ import {
 } from "../lib/brandTheme.js";
 import { loadBrandSettings } from "./settings.js";
 import {
-  brandFeaturePrices,
   brandModuleSwitches,
   brandModules,
-  brandPurchasedFeatures,
-  brandServiceHold,
   brandPlanIds,
   brandScripts,
   brandSignupMode,
   resolveSetup,
   type BrandModules,
   type BrandScripts,
-  type BrandModuleId,
   type BrandSetupInput,
-  type ServiceHold,
   type SignupMode,
 } from "./brandSetup.js";
 
@@ -71,6 +66,47 @@ export function brandsReady(): Promise<void> {
  *  leaves the previous snapshot in place rather than blanking every brand.
  *  `retries` is for boot: a flaky first connection would otherwise leave the
  *  cache empty for a whole refresh interval, with every brand door refused. */
+/** Files one row under every key it is found by. */
+function indexBrand(b: Brand, slugs: Map<string, Brand>, domains: Map<string, Brand>, ids: Map<string, Brand>): void {
+  ids.set(b.id, b);
+  // A main-domain customer's row opens no door of its own: it signs in on the platform's domain.
+  if (b.kind === "customer") return;
+  slugs.set(b.slug, b);
+  // Only VERIFIED domains route: this map feeds CORS and the Origin fallback, so an unproven
+  // hostname would admit a page on a domain the tenant merely typed in. Dev-only override via ALLOW_UNVERIFIED_BRAND_DOMAINS.
+  if (b.customDomain && (b.domainStatus === "verified" || allowUnverifiedBrandDomains)) {
+    domains.set(b.customDomain.toLowerCase(), b);
+  }
+}
+
+/** Files a row the caller already holds (e.g. from an UPDATE … RETURNING) — refreshBrand without the read. */
+export function cacheBrandRow(row: Brand): Brand {
+  const prev = byId.get(row.id);
+  if (prev) {
+    if (bySlug.get(prev.slug)?.id === row.id) bySlug.delete(prev.slug);
+    const host = prev.customDomain?.toLowerCase();
+    if (host && byDomain.get(host)?.id === row.id) byDomain.delete(host);
+  }
+  indexBrand(row, bySlug, byDomain, byId);
+  return row;
+}
+
+/** Re-reads ONE brand into the cache — for a change to a single row (a sign-up, an owner stamp, a status flip),
+ *  where reloading every brand would grow with the number of main-domain customers. Other processes catch up on
+ *  their minute refresh, as they do after loadBrands. */
+export async function refreshBrand(id: string): Promise<Brand | null> {
+  const row = await prisma.brand.findUnique({ where: { id } });
+  const prev = byId.get(id);
+  if (prev) {
+    byId.delete(id);
+    if (bySlug.get(prev.slug)?.id === id) bySlug.delete(prev.slug);
+    const host = prev.customDomain?.toLowerCase();
+    if (host && byDomain.get(host)?.id === id) byDomain.delete(host);
+  }
+  if (row) indexBrand(row, bySlug, byDomain, byId);
+  return row;
+}
+
 export async function loadBrands(opts: { retries?: number } = {}): Promise<void> {
   const attempts = 1 + (opts.retries ?? 0);
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -79,15 +115,7 @@ export async function loadBrands(opts: { retries?: number } = {}): Promise<void>
       const slugs = new Map<string, Brand>();
       const domains = new Map<string, Brand>();
       const ids = new Map<string, Brand>();
-      for (const b of rows) {
-        slugs.set(b.slug, b);
-        ids.set(b.id, b);
-        // Only VERIFIED domains route: this map feeds CORS and the Origin fallback, so an unproven
-        // hostname would admit a page on a domain the tenant merely typed in. Dev-only override via ALLOW_UNVERIFIED_BRAND_DOMAINS.
-        if (b.customDomain && (b.domainStatus === "verified" || allowUnverifiedBrandDomains)) {
-          domains.set(b.customDomain.toLowerCase(), b);
-        }
-      }
+      for (const b of rows) indexBrand(b, slugs, domains, ids);
       bySlug = slugs;
       byDomain = domains;
       byId = ids;
@@ -104,6 +132,18 @@ export async function loadBrands(opts: { retries?: number } = {}): Promise<void>
 
 export function cachedBrand(brandId: string | null | undefined): Brand | null {
   return brandId ? (byId.get(brandId) ?? null) : null;
+}
+
+/** A main-domain customer's row (docs/brand-as-customer-plan.md): its own database, the platform's door and look. */
+export function isCustomerBrand(brand: Pick<Brand, "kind"> | null | undefined): boolean {
+  return brand?.kind === "customer";
+}
+
+/** The brand a customer-facing surface wears — name, look, sender, links. A main-domain customer's own row
+ *  wears the platform's, so null, exactly as on the platform door. */
+export function presentedBrand(brandId: string | null | undefined): Brand | null {
+  const brand = cachedBrand(brandId);
+  return brand && !isCustomerBrand(brand) ? brand : null;
 }
 
 /** Brands whose name contains `q`, by id — for a search box over a table that
@@ -158,6 +198,7 @@ export function resolveBrandForHost(host: string | undefined): Brand | null {
 
 /** Every hostname that routes to this brand: platform subdomain always, vanity domain once verified. */
 export function brandHostnames(brand: Brand): string[] {
+  if (isCustomerBrand(brand)) return [];
   const hosts = platformDomains.map((apex) => `${brand.slug}.${apex}`);
   if (brand.customDomain && brand.domainStatus === "verified") {
     hosts.unshift(brand.customDomain.toLowerCase());
@@ -167,7 +208,8 @@ export function brandHostnames(brand: Brand): string[] {
 
 /** Where the brand's users sign in. Gated on "verified" — a claimed-but-unpointed domain would send email login links to a dead host. */
 export function brandOrigin(brand: Brand | null | undefined): string | null {
-  if (!brand) return null;
+  // A main-domain customer signs in on the platform's own domain.
+  if (!brand || isCustomerBrand(brand)) return null;
   if (brand.customDomain && brand.domainStatus === "verified") {
     return `https://${brand.customDomain.toLowerCase()}`;
   }
@@ -240,19 +282,6 @@ export interface BrandView {
   cardRequired: boolean | null;
   defaultVoiceId: string;
   scripts: BrandScripts;
-  addonEditable: boolean;
-  maxAddonCents: number | null;
-  /* ---- what the brand pays the platform: see services/brandBilling.ts ---- */
-  platformFeeCents: number;
-  platformFeeCurrency: string;
-  /** Modules sold as feature add-ons, with their monthly price in cents. */
-  featurePrices: Partial<Record<BrandModuleId, number>>;
-  purchasedFeatures: BrandModuleId[];
-  monthlyMinuteLimit: number | null;
-  monthlyAiLimit: number | null;
-  serviceHold: ServiceHold;
-  /** The brand plan it's on; null = billing set by hand. */
-  brandPlanId: string | null;
   createdAt: string;
   updatedAt: string;
   /** How many accounts sit inside this tenant, split by kind. */
@@ -297,7 +326,6 @@ export function serializeBrand(b: Brand, counts?: BrandView["counts"]): BrandVie
     signupMode: brandSignupMode(b),
     loginHeadline: b.loginHeadline,
     loginBlurb: b.loginBlurb,
-    // The configured switches — the editor saves these back. Add-on locking is its own field.
     modules: brandModuleSwitches(b),
     planIds: brandPlanIds(b),
     trialDays: b.trialDays,
@@ -305,16 +333,6 @@ export function serializeBrand(b: Brand, counts?: BrandView["counts"]): BrandVie
     cardRequired: b.cardRequired,
     defaultVoiceId: b.defaultVoiceId,
     scripts: brandScripts(b),
-    addonEditable: b.addonEditable,
-    maxAddonCents: b.maxAddonCents,
-    platformFeeCents: b.platformFeeCents,
-    platformFeeCurrency: b.platformFeeCurrency,
-    featurePrices: brandFeaturePrices(b),
-    purchasedFeatures: brandPurchasedFeatures(b),
-    monthlyMinuteLimit: b.monthlyMinuteLimit,
-    monthlyAiLimit: b.monthlyAiLimit,
-    serviceHold: brandServiceHold(b),
-    brandPlanId: b.brandPlanId,
     createdAt: b.createdAt.toISOString(),
     updatedAt: b.updatedAt.toISOString(),
     ...(counts ? { counts } : {}),
@@ -359,6 +377,9 @@ export interface PublicBrand {
   loginBlurb: string;
   /** Which optional modules this brand's customers get. */
   modules: BrandModules;
+  /** The brand's own domain once it is live ("" otherwise). Its people sign in there, never through the main
+   *  domain's /{slug} path — the SPA leaves the path door for it. */
+  liveDomain: string;
 }
 
 export function publicBrand(b: Brand): PublicBrand {
@@ -392,6 +413,7 @@ export function publicBrand(b: Brand): PublicBrand {
     loginHeadline: b.loginHeadline,
     loginBlurb: b.loginBlurb,
     modules: brandModules(b),
+    liveDomain: b.customDomain && b.domainStatus === "verified" ? b.customDomain.toLowerCase() : "",
   };
 }
 
@@ -513,41 +535,6 @@ export function newDomainToken(): string {
   return randomBytes(16).toString("hex");
 }
 
-export async function createBrand(input: BrandInput, createdById: string): Promise<Brand> {
-  const name = input.name.trim();
-  if (name.length < 2) throw badRequest("Brand name must be at least 2 characters.");
-  const slug = await assertSlugAvailable(input.slug || name);
-  const customDomain = await assertDomainAvailable(input.customDomain);
-
-  const brand = await prisma.brand.create({
-    data: {
-      name,
-      slug,
-      customDomain,
-      // A domain named at creation starts unproven — the client still has to
-      // publish the records.
-      domainStatus: customDomain ? "pending" : "none",
-      domainToken: customDomain ? newDomainToken() : "",
-      // Not live yet: the brand's own database is set up right after this row
-      // exists (provisionBrand below), and only then does the door open.
-      status: "provisioning",
-      logoLightUrl: (input.logoLightUrl ?? "").trim(),
-      logoDarkUrl: (input.logoDarkUrl ?? "").trim(),
-      faviconUrl: (input.faviconUrl ?? "").trim(),
-      tagline: (input.tagline ?? "").trim(),
-      supportEmail: (input.supportEmail ?? "").trim(),
-      supportPhone: (input.supportPhone ?? "").trim(),
-      createdById,
-      ...resolveTheme(input),
-      ...resolveSetup(input),
-    },
-  });
-  await loadBrands();
-  // Row exists first so a provisioning failure shows as "failed" and is retryable instead of a
-  // vanished create. Provisioning also seeds the tenant's starter support queues.
-  return provisionBrand(brand.id, input.status ?? "active");
-}
-
 /** Sets up (or retries) the brand's database, then sets `thenStatus`; failure marks it "failed" for a retry. Lazy import keeps the Neon/migration code out of the per-request import graph. */
 export async function provisionBrand(
   brandId: string,
@@ -562,7 +549,7 @@ export async function provisionBrand(
     console.error(`[brands] database provisioning failed for brand ${brandId}:`, err);
   }
   const brand = await prisma.brand.update({ where: { id: brandId }, data: { status } });
-  await loadBrands();
+  await refreshBrand(brandId);
   return brand;
 }
 
@@ -640,7 +627,7 @@ export async function updateBrand(id: string, input: Partial<BrandInput>): Promi
   }
 
   const brand = await prisma.brand.update({ where: { id }, data });
-  await loadBrands();
+  await refreshBrand(id);
   return brand;
 }
 
@@ -650,7 +637,7 @@ export async function deleteBrand(id: string): Promise<void> {
   const { destroyBrandDatabase } = await import("./tenantProvisioning.js");
   await destroyBrandDatabase(id);
   await prisma.brand.delete({ where: { id } });
-  await Promise.all([loadBrands(), loadBrandSettings()]);
+  await Promise.all([refreshBrand(id), loadBrandSettings()]);
 }
 
 /** The catalog the brand editor's pickers are built from. */

@@ -14,10 +14,9 @@ import billingRouter from "./billing.routes.js";
 import adminRouter from "./admin.routes.js";
 import adminPhonesRouter from "./adminPhones.routes.js";
 import brandsRouter from "./brands.routes.js";
-import { publicBrandRequestsRouter, superBrandRequestsRouter } from "./brandRequests.routes.js";
-import brandSubscriptionsRouter from "./brandSubscriptions.routes.js";
+import { superBrandRequestsRouter } from "./brandRequests.routes.js";
 import platformViewsRouter from "./platformViews.routes.js";
-import brandAdminRouter from "./brandAdmin.routes.js";
+import brandAdminRequestRouter from "./brandAdminRequest.routes.js";
 import apiCenterRouter from "./apiCenter.routes.js";
 import resellerRouter from "./reseller.routes.js";
 import onboardRouter from "./onboard.routes.js";
@@ -85,8 +84,8 @@ apiRouter.get(
 apiRouter.use("/unsubscribe", unsubscribeRouter);
 apiRouter.use("/events", eventsRouter);
 apiRouter.use("/onboard", onboardRouter);
-// Public "Set up your brand" form. The super admin side mounts under /super below.
-apiRouter.use("/brand-requests", publicBrandRequestsRouter);
+// "Request Brand Admin" from inside a main-domain customer's dashboard (docs/brand-as-customer-plan.md).
+apiRouter.use("/brand-admin-request", brandAdminRequestRouter);
 apiRouter.use("/bookings", bookingRouter);
 // `/booking/ai` (public Vapi dispatcher) mounts before `/booking` so the specific
 // path wins. `/bookings` above is the unrelated marketing demo form.
@@ -121,8 +120,6 @@ apiRouter.use("/webhooks/livekit", livekitWebhookRouter);
 apiRouter.use("/super", brandsRouter);
 // The Requested tab: brands that asked to be set up, and "Complete setup".
 apiRouter.use("/super", superBrandRequestsRouter);
-// Brand Subscriptions: the brand plan catalog, its add-ons, and what every brand pays the platform.
-apiRouter.use("/super", brandSubscriptionsRouter);
 // The super admin's overview, the customer directory, and one brand's inside
 // (its customers, subscriptions, support) — see platformViews.routes.ts.
 apiRouter.use("/super", platformViewsRouter);
@@ -132,8 +129,5 @@ apiRouter.use("/admin/phones", adminPhonesRouter);
 apiRouter.use("/admin/tickets", adminTicketsRouter);
 // Mounted before /admin so the more specific prefix wins.
 apiRouter.use("/admin/api-center", apiCenterRouter);
-// A brand admin's own pricing addons and wallet. Mounted before /admin so the
-// more specific prefix wins; scoped to the caller's brand, never by id.
-apiRouter.use("/admin/brand", brandAdminRouter);
 apiRouter.use("/admin", adminRouter);
 apiRouter.use("/reseller", resellerRouter);

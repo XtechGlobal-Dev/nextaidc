@@ -303,6 +303,9 @@ export interface AuthUser {
   /** Where that tenant's users sign in — its verified domain, else its platform
    *  subdomain. Used to leave a wrong brand HOST; null for platform accounts. */
   brandOrigin?: string | null;
+  /** "customer" = a main-domain customer (own account database, the platform's door and look);
+   *  "brand" = a white-label brand's account; null for the platform's own people. */
+  brandKind?: "customer" | "brand" | null;
   /** Assigned StaffRole's display name (e.g. "Support Agent"); null for admins,
    *  customers, resellers, or a staff member with no role assigned. */
   staffRoleName?: string | null;
@@ -460,23 +463,15 @@ export interface BrandDomain {
 
 /** The optional customer modules a brand may switch off. Mirrors
  *  server/src/services/brandSetup.ts — keep the two lists in step. */
-// `addonEligible: false` = never sold separately — bundled free whenever it's switched on. SMS to Caller and
-// WhatsApp are default/core features, not upsells.
 export const BRAND_MODULES = [
-  { id: "booking", label: "Booking", description: "Website booking module and calendar appointments.", addonEligible: true },
-  { id: "transfer", label: "Call Transfer", description: "Hand a live call over to a human.", addonEligible: true },
-  { id: "crm", label: "Connect CRM", description: "Lead delivery into the customer's own CRM.", addonEligible: true },
-  { id: "smsToCaller", label: "SMS to Caller", description: "The AI texts callers the details they ask for mid-call.", addonEligible: false },
-  { id: "whatsapp", label: "WhatsApp", description: "WhatsApp call summaries and inbound auto-replies.", addonEligible: false },
+  { id: "booking", label: "Booking", description: "Website booking module and calendar appointments." },
+  { id: "transfer", label: "Call Transfer", description: "Hand a live call over to a human." },
+  { id: "crm", label: "Connect CRM", description: "Lead delivery into the customer's own CRM." },
+  { id: "smsToCaller", label: "SMS to Caller", description: "The AI texts callers the details they ask for mid-call." },
+  { id: "whatsapp", label: "WhatsApp", description: "WhatsApp call summaries and inbound auto-replies." },
 ] as const;
 export type BrandModuleId = (typeof BRAND_MODULES)[number]["id"];
 export type BrandModules = Record<BrandModuleId, boolean>;
-
-/** May this module ever be sold as a paid add-on? False for core channels — those are switched on for free
- *  or off, never priced separately. */
-export function isAddonEligible(id: BrandModuleId): boolean {
-  return BRAND_MODULES.find((m) => m.id === id)?.addonEligible !== false;
-}
 export type SignupMode = "public" | "invite";
 export interface BrandScripts {
   head: string;
@@ -498,65 +493,7 @@ export interface BrandReadiness {
   total: number;
 }
 
-/** A plan as a brand sells it: base + addon. The customer pays brandPriceCents to the platform; the addon share is credited to the brand's wallet per paid invoice. */
-export interface BrandPricingRow {
-  planId: string;
-  planName: string;
-  interval: string;
-  intervalCount: number;
-  currency: string;
-  basePriceCents: number;
-  addonCents: number;
-  brandPriceCents: number;
-  /** The brand's own Stripe Price exists for this plan. */
-  stripeLinked: boolean;
-  /** The platform plan has a Stripe product (a brand Price needs one). */
-  planLinked: boolean;
-  active: boolean;
-  /** This brand's customers currently on the plan. */
-  subscribers: number;
-}
-/** Outcome of moving a brand's existing subscribers onto its current Price. */
-export interface ApplyPriceResult {
-  priceId: string;
-  moved: number;
-  alreadyOn: number;
-  skipped: { email: string; reason: string }[];
-}
-export interface BrandPricing {
-  rows: BrandPricingRow[];
-  addonEditable: boolean;
-  maxAddonCents: number | null;
-}
-export type WalletEntryType = "credit" | "payout" | "reversal";
-export interface WalletBalance {
-  currency: string;
-  balanceCents: number;
-  creditedCents: number;
-  paidOutCents: number;
-}
-export interface WalletEntry {
-  id: string;
-  type: WalletEntryType;
-  amountCents: number;
-  currency: string;
-  stripeInvoiceId: string | null;
-  /** On a reversal: the invoice whose credit it undid. */
-  relatedInvoiceId: string | null;
-  customerId: string | null;
-  customerEmail: string | null;
-  planId: string | null;
-  planName: string | null;
-  note: string;
-  reference: string;
-  createdAt: string;
-}
-export interface BrandWallet {
-  balances: WalletBalance[];
-  entries: WalletEntry[];
-}
-
-/** Ledger window totals: what customers paid, split platform (base) vs brand (addon). Per currency, since a brand can sell in several. */
+/** Ledger window totals: what customers paid. Per currency, since a brand's customers can pay in several. */
 export interface LedgerTotals {
   currency: string;
   payments: number;
@@ -569,26 +506,6 @@ export interface LedgerBrandTotals extends LedgerTotals {
   brandId: string;
   brandName: string | null;
   brandSlug: string | null;
-}
-/** One paid invoice as the ledger records it. */
-export interface LedgerRow {
-  id: string;
-  stripeInvoiceId: string;
-  userId: string;
-  customerEmail: string | null;
-  planId: string | null;
-  planName: string | null;
-  couponId: string | null;
-  currency: string;
-  totalCents: number;
-  platformCents: number;
-  brandCents: number;
-  refundedCents: number;
-  periodStart: string | null;
-  periodEnd: string | null;
-  /** webhook | reconcile | renewal | go_live — which path booked it first. */
-  source: string;
-  paidAt: string;
 }
 export interface PlatformLedgerSummary {
   from: string;
@@ -619,15 +536,97 @@ export interface PlatformBrandRow {
   minutes: number;
 }
 
+/** What "Become a Brand" asks for. Who is asking comes from the signed-in account. */
+export interface BrandAdminRequestInput {
+  brandName: string;
+  slug: string;
+  tagline?: string;
+  customDomain?: string;
+  /** The look they picked — catalog ids and hexes; omitted = not chosen. Pre-fills the brand setup. */
+  themePreset?: string;
+  primaryColor?: string;
+  accentColor?: string;
+  fontFamily?: string;
+  phone?: string;
+  notes?: string;
+}
+
+/** Where a main-domain customer stands with becoming a brand. */
+export interface BrandAdminRequestState {
+  /** False until they are on a plan or a trial — a brand is a paying customer first. */
+  eligible: boolean;
+  reason: string;
+  /** ".hello22.ai" — what follows the subdomain they pick. */
+  subdomainSuffix: string;
+  request: {
+    id: string;
+    status: "pending" | "approving" | "awaiting_domain" | "approved" | "declined";
+    brandName: string;
+    slug: string;
+    customDomain: string;
+    declineReason: string;
+    createdAt: string;
+    reviewedAt: string | null;
+    /** While awaiting their own domain: its check status, the last check's message, and the records to add. */
+    domainStatus: string | null;
+    domainError: string;
+    dns: { type: string; fqdn: string; value: string }[];
+  } | null;
+}
+
+/** One main-domain customer, as the super admin's Platform Customers list shows it. */
+export interface PlatformCustomer {
+  id: string;
+  businessName: string;
+  email: string;
+  fullName: string;
+  status: "active" | "suspended";
+  /** As of the last nightly rollup; null before the first one. */
+  plan: "paying" | "trial" | "none" | null;
+  callsTotal: number;
+  statsAsOf: string | null;
+  activatedAt: string | null;
+  /** Set when this account was a brand once and was downgraded back. */
+  downgradedAt: string | null;
+  createdAt: string;
+}
+
+/** One main-domain customer's page: the account row, and the owner's deep dive from their own database. */
+export interface PlatformCustomerDetail {
+  account: {
+    id: string;
+    businessName: string;
+    slug: string;
+    status: BrandStatus;
+    activatedAt: string | null;
+    downgradedAt: string | null;
+    createdAt: string;
+  };
+  /** Approved since — the account is a brand now, and its page is the brand's. */
+  convertedToBrand: boolean;
+  owner: { userId: string; email: string; fullName: string } | null;
+  /** Null when the account has no owner yet or its database couldn't be read (see detailError). */
+  detail: CustomerDetail | null;
+  detailError?: string;
+}
+
+export interface PlatformCustomerPage {
+  page: number;
+  pageSize: number;
+  total: number;
+  customers: PlatformCustomer[];
+}
+
 export interface PlatformOverview {
   asOf: string | null;
   brands: { total: number; active: number; provisioning: number; failed: number; suspended: number };
+  /** Main-domain customers: how many, and how many pay or trial as of last night. */
+  platformCustomers: { total: number; active: number; trialing: number };
   tenants: Record<string, number>;
   totals: { customers: number; active: number; trialing: number; callsTotal: number; minutesTotal: number; openTickets: number };
   perBrand: PlatformBrandRow[];
   series: { day: string; calls: number; minutes: number }[];
   ledger: { from: string; to: string; totals: LedgerTotals[] };
-  wallets: { currency: string; balanceCents: number }[];
   unroutedEvents: number;
 }
 
@@ -713,12 +712,6 @@ export interface BrandTicketsView {
   items: BrandTicketRow[];
 }
 
-export interface BrandLedger {
-  from: string;
-  to: string;
-  totals: LedgerTotals[];
-  rows: LedgerRow[];
-}
 /** A Stripe event no brand could be found for — parked, waiting for the
  *  super admin to fix the customer's account and retry, or dismiss it. */
 export interface UnroutedStripeEvent {
@@ -824,32 +817,9 @@ export interface Brand {
   cardRequired: boolean | null;
   defaultVoiceId: string;
   scripts: BrandScripts;
-  /** May the brand's own admin set its plan addons? */
-  addonEditable: boolean;
-  /** Most a brand may add per cycle, in cents; null = no cap. */
-  maxAddonCents: number | null;
-  /** What the brand pays the platform each month, in minor units; 0 = nothing. */
-  platformFeeCents: number;
-  platformFeeCurrency: string;
-  /** Modules sold as feature add-ons (locked until bought), with their monthly price in cents. */
-  featurePrices: Partial<Record<BrandModuleId, number>>;
-  purchasedFeatures: BrandModuleId[];
-  /** Monthly caps across all the brand's customers; null = no cap. */
-  monthlyMinuteLimit: number | null;
-  monthlyAiLimit: number | null;
-  /** Why the brand's AI is paused right now; "" = it isn't. */
-  serviceHold: BrandServiceHold;
-  /** The brand plan it's on (what it pays the platform); null = billing set by hand. */
-  brandPlanId: string | null;
   createdAt: string;
   updatedAt: string;
   counts?: { admins: number; customers: number; total: number };
-  /** On the list: what the platform currently owes this brand, per currency. */
-  walletBalances?: { currency: string; balanceCents: number }[];
-  /** On the list: how the brand stands paying the platform ("none" = owes nothing). */
-  billingStatus?: BrandBillingStatus;
-  /** After a save that touched billing: Stripe couldn't be brought in line. */
-  billingWarning?: string;
   /**
    * Present on single-brand reads: the brand's owner — the first admin account
    * created in its database. null while it has no admin yet.
@@ -897,6 +867,8 @@ export interface PublicBrand {
   loginBlurb: string;
   /** Which optional modules this brand's customers get. */
   modules: BrandModules;
+  /** The brand's own domain once live ("" otherwise) — its people sign in there, not on the main domain's /{slug} path. */
+  liveDomain?: string;
 }
 
 /** One brand-overridable messaging field (mail / SMS / WhatsApp). */
@@ -967,143 +939,6 @@ export interface BrandInput {
   cardRequired?: boolean | null;
   defaultVoiceId?: string;
   scripts?: Partial<BrandScripts>;
-  addonEditable?: boolean;
-  maxAddonCents?: number | null;
-  platformFeeCents?: number;
-  platformFeeCurrency?: string;
-  featurePrices?: Partial<Record<BrandModuleId, number>>;
-  monthlyMinuteLimit?: number | null;
-  monthlyAiLimit?: number | null;
-  /** A brand plan: sets the fee, features and caps. null = set them by hand. */
-  brandPlanId?: string | null;
-}
-
-/** Why a brand's AI is paused: "minutes" stops calls; "ai" and "billing" stop every AI channel. */
-export type BrandServiceHold = "" | "minutes" | "ai" | "billing";
-export type BrandBillingStatus = "none" | "awaiting_card" | "active" | "past_due" | "canceled";
-
-/** How one module reaches a brand's customers: free with the brand, bought separately, or not at all. */
-export type FeatureAccess = "included" | "addon" | "off";
-
-export interface BrandFeature {
-  id: BrandModuleId;
-  label: string;
-  description: string;
-  access: FeatureAccess;
-  priceCents: number | null;
-  purchased: boolean;
-}
-
-export interface BrandInvoice {
-  id: string;
-  number: string;
-  amountCents: number;
-  currency: string;
-  status: string;
-  created: string;
-  url: string;
-}
-
-export interface BrandUsage {
-  /** "2026-09" (UTC month). */
-  period: string;
-  resetsAt: string;
-  minutes: number;
-  minutesLimit: number | null;
-  aiInteractions: number;
-  aiLimit: number | null;
-  hold: BrandServiceHold;
-}
-
-/** What a brand pays the platform, and where that stands. */
-export interface BrandBilling {
-  stripeReady: boolean;
-  /** The brand plan it's on; null = billing set by hand. */
-  plan: { id: string; name: string } | null;
-  required: boolean;
-  feeCents: number;
-  currency: string;
-  monthlyTotalCents: number;
-  status: BrandBillingStatus;
-  /** The brand's admin panel is limited to Billing until it pays. */
-  locked: boolean;
-  graceDays: number;
-  /** When the AI pauses if nothing is paid by then; null when paid up. */
-  pausesAt: string | null;
-  currentPeriodEnd: string | null;
-  lastPaidAt: string | null;
-  lastPaidCents: number | null;
-  card: { brand: string; last4: string } | null;
-  features: BrandFeature[];
-  usage: BrandUsage;
-  invoices: BrandInvoice[];
-}
-
-/** What a BRAND pays the PLATFORM each month — not a SubscriptionPlan (what a brand sells its customers). */
-export interface BrandPlan {
-  id: string;
-  name: string;
-  description: string;
-  priceCents: number;
-  currency: string;
-  /** Modules included in the price; the rest are add-ons. */
-  features: BrandModuleId[];
-  monthlyMinuteLimit: number | null;
-  monthlyAiLimit: number | null;
-  active: boolean;
-  sortOrder: number;
-  /** Highlighted as "Popular" on the request form. */
-  recommended: boolean;
-  /** Pre-selected on the request form and in the wizard (at most one). */
-  isDefault: boolean;
-  /** Super admin list only. */
-  brandCount?: number;
-}
-
-export type BrandPlanInput = Omit<
-  BrandPlan,
-  "id" | "brandCount" | "active" | "sortOrder" | "recommended" | "isDefault"
-> & {
-  active?: boolean;
-  sortOrder?: number;
-  recommended?: boolean;
-  isDefault?: boolean;
-};
-
-/** One module on the add-on list: its monthly price for brands whose plan doesn't include it. */
-export interface BrandAddon {
-  moduleId: BrandModuleId;
-  label: string;
-  description: string;
-  priceCents: number | null;
-  active: boolean;
-}
-
-/** One brand on the Brand Subscriptions page: what it pays the platform. */
-export interface BrandBillingRow {
-  brandId: string;
-  name: string;
-  slug: string;
-  primaryColor: string;
-  accentColor: string;
-  logoLightUrl: string;
-  brandStatus: BrandStatus;
-  plan: { id: string; name: string; active: boolean } | null;
-  custom: boolean;
-  feeCents: number;
-  currency: string;
-  addOns: { id: BrandModuleId; label: string; priceCents: number }[];
-  monthlyTotalCents: number;
-  billingStatus: BrandBillingStatus;
-  currentPeriodEnd: string | null;
-  lastPaidAt: string | null;
-  card: { brand: string; last4: string } | null;
-  serviceHold: BrandServiceHold;
-}
-
-export interface BrandBillingOverview {
-  rows: BrandBillingRow[];
-  summary: { paying: number; awaiting: number; failing: number; mrr: { currency: string; cents: number }[] };
 }
 
 export interface BrandAnalyticsDay {
@@ -1130,8 +965,6 @@ export interface BrandAnalytics {
     minutesTotal: number;
     asOf: string | null;
   };
-  usageHistory: { period: string; minutes: number; aiInteractions: number }[];
-  billing: BrandBilling;
 }
 
 /** Pass as a field's value to hand that key back to the platform. */
@@ -1139,20 +972,22 @@ export const BRAND_INHERIT = "__inherit__";
 
 /** What creating a brand hands back — from "New brand" and from "Complete setup" on a request alike. */
 export interface BrandCreateResult {
+  /** A main-domain customer's request: "brand" = their account is the brand now; "awaiting_domain" = approved,
+   *  and it becomes the brand by itself once their own domain is live. Absent for a brand created from scratch. */
+  state?: "brand" | "awaiting_domain";
   brand: Brand;
   admin: BrandAdmin | null;
   /** Why no admin was created although one was asked for; empty otherwise. */
   adminError?: string;
-  /** Complete setup only: why the applicant's saved card couldn't be charged; empty otherwise. */
-  billingError?: string;
   loginUrl: string;
   pathUrl: string;
   /** Present only when a vanity domain was named in the same step. */
   domain: BrandDomain | null;
 }
 
-/** pending → approving (a setup in flight) → approved | declined. */
-export type BrandRequestStatus = "pending" | "approving" | "approved" | "declined";
+/** pending → approving (a setup in flight) → approved | declined. An approved request whose applicant named
+ *  their own domain waits in awaiting_domain until that domain is live, then becomes the brand by itself. */
+export type BrandRequestStatus = "pending" | "approving" | "awaiting_domain" | "approved" | "declined";
 
 /** A prospective brand's request to be set up, as the super admin sees it. */
 export interface BrandRequest {
@@ -1172,10 +1007,9 @@ export interface BrandRequest {
   logoLightUrl: string;
   logoDarkUrl: string;
   faviconUrl: string;
-  /** The brand plan they chose; "" = none. */
-  brandPlanId: string;
-  /** The card they saved — charged only at Complete setup; null = none. */
-  card: { brand: string; last4: string } | null;
+  /** Set = filed from inside a main-domain customer's own dashboard: that account (this brand row) becomes
+   *  the Brand Admin, keeping its password, assistant and number. */
+  applicantBrandId: string | null;
   contactName: string;
   email: string;
   phone: string;
@@ -1188,47 +1022,7 @@ export interface BrandRequest {
   createdAt: string;
 }
 
-/** What the public "Set up your brand" form sends. */
-export interface BrandRequestInput {
-  brandName: string;
-  slug: string;
-  tagline?: string;
-  customDomain?: string;
-  /** A palette + typeface from the brand catalog. */
-  themePreset?: string;
-  primaryColor?: string;
-  accentColor?: string;
-  fontFamily?: string;
-  brandPlanId?: string;
-  /** The confirmed SetupIntent from the payment step — the saved card. */
-  setupIntentId?: string;
-  contactName: string;
-  email: string;
-  phone?: string;
-  country?: string;
-  timezone?: string;
-  notes?: string;
-  password: string;
-}
-
 export const api = {
-  /** A brand admin's own pricing addons and wallet — always the caller's brand. */
-  brandAdmin: {
-    pricing: () => get<BrandPricing>("/api/admin/brand/pricing"),
-    setAddon: (planId: string, addonCents: number) =>
-      put<BrandPricingRow>(`/api/admin/brand/pricing/${planId}`, { addonCents }),
-    wallet: () => get<BrandWallet>("/api/admin/brand/wallet"),
-    /** What the brand pays the platform: fee, feature add-ons, card and this month's usage. */
-    billing: {
-      get: () => get<BrandBilling>("/api/admin/brand/billing"),
-      setupIntent: () => post<{ clientSecret: string }>("/api/admin/brand/billing/setup-intent", {}),
-      /** Saves the confirmed card and settles what's owed with it (charged now). */
-      activate: (paymentMethodId: string) =>
-        post<BrandBilling>("/api/admin/brand/billing/activate", { paymentMethodId }),
-      buyFeature: (id: BrandModuleId) => post<BrandBilling>(`/api/admin/brand/billing/features/${id}`, {}),
-      cancelFeature: (id: BrandModuleId) => del<BrandBilling>(`/api/admin/brand/billing/features/${id}`),
-    },
-  },
   /** Resolve a brand by the slug in the URL's first path segment. 404 when the
    *  segment isn't a live brand — the app then paints as the platform. */
   brandBySlug: (slug: string) => get<PublicBrand>(`/api/brand/${encodeURIComponent(slug)}`),
@@ -1244,30 +1038,23 @@ export const api = {
     analyze: (url: string) => post<AnalyzeResult>("/api/onboard/analyze", { url }),
     validate: (url: string) => post<{ reachable: boolean }>("/api/onboard/validate", { url }),
   },
-  /** The platform's public "Set up your brand" form. Refused on a brand's own door. */
-  brandRequests: {
+  /** "Become a Brand": a main-domain customer asks for their own account to become a Brand Admin. */
+  brandAdminRequest: {
+    status: () => get<BrandAdminRequestState>("/api/brand-admin-request"),
     checkSlug: (slug: string) =>
       get<{ slug: string; available: boolean; reason: string; url: string; suffix: string }>(
-        `/api/brand-requests/slug-check${toQuery({ slug })}`,
+        `/api/brand-admin-request/slug-check${toQuery({ slug })}`,
       ),
-    /** The brand plans on offer, their add-ons, and whether a card can be saved on this server. */
-    plans: () =>
-      get<{ plans: BrandPlan[]; addons: BrandAddon[]; paymentsEnabled: boolean }>("/api/brand-requests/plans"),
-    /** Starts the payment step's card form (saves the card; nothing is charged until setup). */
-    setupIntent: (data: { email: string; name: string }) =>
-      post<{ clientSecret: string; setupIntentId: string }>("/api/brand-requests/setup-intent", data),
-    /** The palettes and typefaces to pick from, and whether logos can be uploaded here. */
-    catalog: () => get<BrandThemeCatalog & { uploadsEnabled: boolean }>("/api/brand-requests/catalog"),
+    /** The palettes and typefaces a brand can pick from. */
+    catalog: () => get<BrandThemeCatalog & { uploadsEnabled: boolean }>("/api/brand-admin-request/catalog"),
     /** Files the request; logos ride along as multipart when there are any. */
-    create: (data: BrandRequestInput, logos: Partial<Record<"logoLight" | "logoDark" | "favicon", File>> = {}) => {
+    create: (data: BrandAdminRequestInput, logos: Partial<Record<"logoLight" | "logoDark" | "favicon", File>> = {}) => {
       const files = Object.entries(logos).filter((e): e is [string, File] => !!e[1]);
-      if (!files.length) {
-        return post<{ id: string; brandName: string; slug: string; email: string }>("/api/brand-requests", data);
-      }
+      if (!files.length) return post<{ id: string; status: string; brandName: string }>("/api/brand-admin-request", data);
       const form = new FormData();
       form.append("data", JSON.stringify(data));
       for (const [slot, file] of files) form.append(slot, file);
-      return upload<{ id: string; brandName: string; slug: string; email: string }>("/api/brand-requests", form);
+      return upload<{ id: string; status: string; brandName: string }>("/api/brand-admin-request", form);
     },
   },
   bookings: {
@@ -1715,8 +1502,6 @@ export const api = {
     brands: {
       list: () => get<Brand[]>("/api/super/brands"),
       get: (id: string) => get<Brand>(`/api/super/brands/${id}`),
-      /** What the brand pays the platform, its invoices and this month's usage against its caps. */
-      billing: (id: string) => get<BrandBilling>(`/api/super/brands/${id}/billing`),
       analytics: (id: string, days: 7 | 30 | 90 | 365 = 30) =>
         get<BrandAnalytics>(`/api/super/brands/${id}/analytics${toQuery({ days })}`),
       /** Live customers per plan id — the plans that can't be taken off the brand. */
@@ -1733,12 +1518,6 @@ export const api = {
         ),
       /** Create the brand and, in the same step, its administrator — so a brand
        *  is never left standing with no way in. */
-      create: (
-        data: BrandInput & {
-          admin?: { email: string; fullName: string; password: string; sendWelcomeEmail?: boolean };
-        },
-      ) =>
-        post<BrandCreateResult>("/api/super/brands", data),
       update: (id: string, data: Partial<BrandInput>) =>
         patch<Brand>(`/api/super/brands/${id}`, data),
       /** Immediate and final: the brand's database, and every account in it, goes with the row. */
@@ -1747,6 +1526,8 @@ export const api = {
       /** Off now, deleted (database included) 30 days on unless reactivated. Returns the detail payload. */
       deactivate: (id: string) => post<Brand>(`/api/super/brands/${id}/deactivate`, {}),
       reactivate: (id: string) => post<Brand>(`/api/super/brands/${id}/reactivate`, {}),
+      /** Back to its owner's platform customer account: the brand closes, its database is kept untouched. */
+      downgrade: (id: string) => post<{ ok: true; kind: "customer" | "brand" }>(`/api/super/brands/${id}/downgrade`, {}),
       /** The brand's own database: state, and a Retry for a failed setup. */
       tenantDb: {
         get: (id: string) => get<BrandTenantDb>(`/api/super/brands/${id}/tenant-db`),
@@ -1771,31 +1552,12 @@ export const api = {
       /** Live DNS + edge check. This is what promotes a claim to "verified". */
       verifyDomain: (id: string) =>
         post<BrandDomain>(`/api/super/brands/${id}/domain/verify`, {}),
-      /* ------------------------ Pricing & wallet ----------------------- */
-      pricing: (id: string) => get<BrandPricing>(`/api/super/brands/${id}/pricing`),
-      setAddon: (id: string, planId: string, addonCents: number) =>
-        put<BrandPricingRow>(`/api/super/brands/${id}/pricing/${planId}`, { addonCents }),
-      /** Move the brand's existing subscribers on a plan onto its current Price. */
-      applyPricing: (id: string, planId: string) =>
-        post<ApplyPriceResult>(`/api/super/brands/${id}/pricing/${planId}/apply`, {}),
-      wallet: (id: string) => get<BrandWallet>(`/api/super/brands/${id}/wallet`),
-      /** This brand's payments from the platform ledger: this month's totals and the latest rows. */
-      ledger: (id: string) => get<BrandLedger>(`/api/super/brands/${id}/ledger`),
       // Inside the brand: these read from that tenant's database and nothing else.
       customers: (id: string, opts?: { q?: string; page?: number; pageSize?: number }) =>
         get<BrandCustomersPage>(`/api/super/brands/${id}/customers${opts ? toQuery(opts) : ""}`),
       subscriptions: (id: string) => get<BrandSubscriptionsView>(`/api/super/brands/${id}/subscriptions`),
       tickets: (id: string, status?: string) =>
         get<BrandTicketsView>(`/api/super/brands/${id}/tickets${status ? toQuery({ status }) : ""}`),
-      /** Record a payout the platform made to the brand by hand. */
-      payout: (
-        id: string,
-        data: { amountCents: number; currency: string; reference?: string; note?: string },
-      ) =>
-        post<{ entry: WalletEntry; balances: WalletBalance[] }>(
-          `/api/super/brands/${id}/wallet/payouts`,
-          data,
-        ),
       /** Masked view of what this brand white-labels vs. inherits. */
       integrations: (id: string) =>
         get<BrandIntegrationView[]>(`/api/super/brands/${id}/integrations`),
@@ -1825,29 +1587,15 @@ export const api = {
           del<{ ok: true }>(`/api/super/brands/${id}/ticket-departments/${deptId}`),
       },
     },
-    /** The brand plan catalog: what BRANDS pay the platform (not what they sell their customers). */
-    brandPlans: {
-      list: () => get<BrandPlan[]>("/api/super/brand-plans"),
-      create: (data: BrandPlanInput) => post<BrandPlan>("/api/super/brand-plans", data),
-      update: (id: string, data: Partial<BrandPlanInput>) => patch<BrandPlan>(`/api/super/brand-plans/${id}`, data),
-      remove: (id: string) => del<{ ok: true }>(`/api/super/brand-plans/${id}`),
-    },
-    /** The add-on list: what each module costs a brand whose plan doesn't include it. */
-    brandAddons: {
-      list: () => get<BrandAddon[]>("/api/super/brand-addons"),
-      save: (rows: { moduleId: BrandModuleId; priceCents: number; active: boolean }[]) =>
-        put<BrandAddon[]>("/api/super/brand-addons", rows),
-    },
-    /** Every brand and what it pays the platform. */
-    brandSubscriptions: () => get<BrandBillingOverview>("/api/super/brand-subscriptions"),
-    /** Brands that asked to be set up from the public page — the Requested tab. */
+    /** Main-domain customers who asked for their account to become a brand — the Requested tab. */
     brandRequests: {
       list: (status: "open" | "approved" | "declined" | "all" = "open") =>
         get<{ requests: BrandRequest[]; counts: { open: number; approved: number; declined: number } }>(
           `/api/super/brand-requests${toQuery({ status })}`,
         ),
       get: (id: string) => get<BrandRequest>(`/api/super/brand-requests/${id}`),
-      /** "Complete setup": creates the brand with these settings; the applicant becomes its admin. */
+      /** "Complete setup": turns the applicant's account into the brand with these settings (or parks it in
+       *  awaiting_domain until their own domain is live); the applicant becomes its Brand Admin. */
       approve: (id: string, data: BrandInput & { notifyApplicant?: boolean }) =>
         post<BrandCreateResult>(`/api/super/brand-requests/${id}/approve`, data),
       decline: (id: string, data: { reason?: string; notify?: boolean }) =>
@@ -1870,6 +1618,15 @@ export const api = {
     /** Find a person by email or name, whichever brand they are in. */
     directory: (q: string) =>
       get<{ q: string; hits: DirectoryHit[] }>(`/api/super/directory${toQuery({ q })}`),
+    /** Main-domain customers — the platform is their provider. Plan state is as of the nightly rollup. */
+    platformCustomers: {
+      list: (params: { q?: string; status?: "active" | "suspended" | ""; page?: number; pageSize?: number }) =>
+        get<PlatformCustomerPage>(`/api/super/platform-customers${toQuery(params)}`),
+      get: (id: string) => get<PlatformCustomerDetail>(`/api/super/platform-customers/${id}`),
+      suspend: (id: string) => post<{ ok: true; status: string }>(`/api/super/platform-customers/${id}/suspend`, {}),
+      reactivate: (id: string) =>
+        post<{ ok: true; status: string }>(`/api/super/platform-customers/${id}/reactivate`, {}),
+    },
   },
   admin: {
     overview: () => get<AdminOverview>("/api/admin/overview"),

@@ -27,7 +27,8 @@ import { zonedTile, zonedTime } from "./dateUtils";
 
 /* Accents used for the metric chips — same palette as the Dashboard tiles. */
 const ACCENT = {
-  brand: "#2C76ED",
+  // The brand's own colour, so a white-label brand's tiles aren't the platform's blue.
+  brand: "var(--color-primary)",
   good: "#31C14F",
   warn: "#F5A524",
   off: "#8A8A8A",
@@ -505,8 +506,8 @@ function MetricTile({
           <span
             className="grid size-10 place-items-center rounded-xl text-white [&_svg]:size-5"
             style={{
-              background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
-              boxShadow: `0 4px 12px -3px ${accent}66`,
+              background: `linear-gradient(135deg, ${accent}, color-mix(in oklab, ${accent} 80%, transparent))`,
+              boxShadow: `0 4px 12px -3px color-mix(in oklab, ${accent} 40%, transparent)`,
             }}
           >
             <Icon />

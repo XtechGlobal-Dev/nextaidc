@@ -58,20 +58,10 @@ import { accrueCommissionForInvoice } from "../services/commission.js";
 import { recordPlanEvent } from "../services/planHistory.js";
 import { brandAppUrl } from "../lib/brandUrls.js";
 import { brandPlanIds } from "../services/brandSetup.js";
-import {
-  brandAddonOnPrice,
-  brandAddonsFor,
-  customerPlanPriceCents,
-  livePriceId,
-  stripePriceIdFor,
-} from "../services/brandPricing.js";
-import { reverseCreditForRefund } from "../services/brandWallet.js";
 import { recordPaidInvoice, recordRefund } from "../services/platformLedger.js";
 import { indexStripeCustomer, resolveStripeCustomer } from "../services/stripeCustomers.js";
 import { customerIdOf, isRoutedEventType, parkUnroutedEvent } from "../services/stripeUnrouted.js";
-import { handleBrandBillingEvent } from "../services/brandBilling.js";
 import { runWithBrand } from "../lib/brandContext.js";
-import { brandIdForOwner } from "../services/customerDirectory.js";
 import type Stripe from "stripe";
 
 const router = express.Router();
@@ -94,20 +84,12 @@ router.get(
       ? await prisma.voiceCategory.findMany({ where: { id: { in: catIds } }, select: { id: true, title: true } })
       : [];
     const nameById = new Map(cats.map((c) => [c.id, c.title]));
-    // A brand's customers see the brand's price — base plus its addon — AS the
-    // plan's price. The base rides alongside for anything that wants to say so.
-    const addons = await brandAddonsFor(req.brand?.id, plans.map((p) => p.id));
+    // One price for everyone: a brand's customers pay the plan's own price (docs/brand-as-customer-plan.md).
     res.json(
-      plans.map((p) => {
-        const addonCents = addons.get(p.id) ?? 0;
-        return {
-          ...p,
-          priceCents: p.priceCents + addonCents,
-          basePriceCents: p.priceCents,
-          addonCents,
-          voiceCategoryName: p.voiceCategoryId ? (nameById.get(p.voiceCategoryId) ?? null) : null,
-        };
-      }),
+      plans.map((p) => ({
+        ...p,
+        voiceCategoryName: p.voiceCategoryId ? (nameById.get(p.voiceCategoryId) ?? null) : null,
+      })),
     );
   }),
 );
@@ -179,7 +161,7 @@ router.post(
     if (!plan || !plan.active) throw badRequest("Plan not found or inactive");
     if (!plan.stripePriceId) throw badRequest("This plan isn't linked to Stripe yet");
     // The brand's own Price when this customer's brand adds a charge on top.
-    const priceId = (await stripePriceIdFor(plan, req.user!.brandId)) ?? plan.stripePriceId;
+    const priceId = plan.stripePriceId;
 
     // Re-validate the code. If it no longer applies, FAIL — nobody should reach the card step believing a discount applies when it doesn't.
     let coupon = null;
@@ -678,7 +660,7 @@ export async function processStripeEvent(event: Stripe.Event): Promise<void> {
       }
     }
   } else if (event.type === "charge.refunded") {
-    // Refund undoes the brand share proportionally. amount_refunded is cumulative, so a replayed event books nothing new.
+    // amount_refunded is cumulative, so a replayed event books nothing new.
     const charge = event.data.object as {
       id: string;
       invoice?: string | { id: string } | null;
@@ -688,12 +670,6 @@ export async function processStripeEvent(event: Stripe.Event): Promise<void> {
     const invoiceId =
       typeof charge.invoice === "string" ? charge.invoice : (charge.invoice?.id ?? null);
     if (invoiceId) {
-      await reverseCreditForRefund({
-        invoiceId,
-        chargeId: charge.id,
-        chargeAmountCents: charge.amount,
-        amountRefundedCents: charge.amount_refunded,
-      });
       await recordRefund({
         invoiceId,
         chargeAmountCents: charge.amount,
@@ -746,12 +722,6 @@ router.post(
     }
 
     try {
-      // A brand paying the PLATFORM has no customer account to route to — handle those first, or
-      // they'd be parked as unrouted.
-      if (await handleBrandBillingEvent(event)) {
-        res.json({ received: true });
-        return;
-      }
       // Place the event in its brand first; unplaceable ones are parked for the super admin, never dropped. Stripe gets "received" either way.
       const customerId = customerIdOf(event.data.object);
       if (customerId && isRoutedEventType(event.type)) {
@@ -853,16 +823,7 @@ router.get(
         planId: profile.subscriptionPlanId,
         discount,
         planName: profile.subscriptionPlan?.displayName ?? null,
-        // What THIS customer is billed: base + the brand's addon when their
-        // subscription is on the brand's Price, the base otherwise.
-        priceCents:
-          profile.subscriptionPlan && profile.subscriptionPlanId
-            ? await customerPlanPriceCents({
-                plan: { id: profile.subscriptionPlanId, priceCents: profile.subscriptionPlan.priceCents },
-                brandId: req.user!.brandId,
-                stripeSubscriptionId: profile.stripeSubscriptionId,
-              })
-            : 0,
+        priceCents: profile.subscriptionPlan?.priceCents ?? 0,
         currency: profile.subscriptionPlan?.currency ?? "usd",
         interval: profile.subscriptionPlan?.interval ?? "month",
         intervalCount: profile.subscriptionPlan?.intervalCount ?? 1,
@@ -966,9 +927,7 @@ router.post(
       throw badRequest("You don't have a plan to renew — choose a plan instead.");
     if (!profile.subscriptionPlan.stripePriceId)
       throw badRequest("This plan isn't linked to Stripe yet.");
-    const renewPriceId =
-      (await stripePriceIdFor(profile.subscriptionPlan, req.user!.brandId)) ??
-      profile.subscriptionPlan.stripePriceId;
+    const renewPriceId = profile.subscriptionPlan.stripePriceId;
     // No confirmed card = nothing to renew. Without this, endTrialNow fails and the catch persists "past_due", which once opened the dashboard.
     if (profile.cardRequiredAtSignup && !profile.cardConfirmedAt)
       throw badRequest("Add your card to start your plan.");
@@ -1116,8 +1075,6 @@ async function loadPlanChangeContext(userId: string, targetPlanId: string) {
   if (!profile) throw notFound("Profile not found");
   if (!profile.stripeSubscriptionId || !profile.stripeCustomerId)
     throw badRequest("You don't have an active subscription to change.");
-  // The brand's addon rides on top of the platform price; the brand is the customer's.
-  const brandId = await brandIdForOwner(userId);
 
   const current = profile.subscriptionPlan;
   if (!current) throw badRequest("No current plan to change from.");
@@ -1126,9 +1083,7 @@ async function loadPlanChangeContext(userId: string, targetPlanId: string) {
   const target = await prisma.subscriptionPlan.findUnique({ where: { id: targetPlanId } });
   if (!target || !target.active) throw badRequest("That plan isn't available.");
   if (!target.stripePriceId) throw badRequest("That plan isn't linked to Stripe yet.");
-  // The Price the swap lands on: the brand's own when this customer's brand
-  // adds a charge to the target plan, else the platform's.
-  const targetPriceId = (await stripePriceIdFor(target, brandId)) ?? target.stripePriceId;
+  const targetPriceId = target.stripePriceId;
 
   // Stripe won't swap in a price of another currency. Refused HERE so the preview stops too — it used to fail at the
   // swap AFTER the charge, and $20 AUD vs $20 USD compared as "same price".
@@ -1152,16 +1107,6 @@ async function loadPlanChangeContext(userId: string, targetPlanId: string) {
         ? `${target.displayName} doesn't include Call Transfer, and you have ${departmentCount} transfer department${plural(departmentCount)} set up. Please delete them under Call Transfer before switching to this plan.`
         : `${target.displayName} allows ${targetDepartments} transfer department${plural(targetDepartments)}, and you have ${departmentCount}. Please remove ${departmentCount - targetDepartments} under Call Transfer before switching to this plan.`,
     );
-  }
-
-  // Price as actually billed (base + brand addon where the brand's Price applies) so proration matches Stripe's invoices. Mutated in place.
-  if (brandId) {
-    const [targetAddon, currentAddon] = await Promise.all([
-      brandAddonOnPrice(target.id, brandId, targetPriceId),
-      brandAddonOnPrice(current.id, brandId, await livePriceId(profile.stripeSubscriptionId)),
-    ]);
-    target.priceCents += targetAddon;
-    current.priceCents += currentAddon;
   }
 
   const ent = await getEntitlement(userId);
@@ -1239,7 +1184,7 @@ router.post(
     const { customerId, subscriptionId, clientSecret } = await createCurrencySwitchSubscription({
       email: req.user!.email,
       owner: { brandId: req.user!.brandId, userId },
-      priceId: (await stripePriceIdFor(target, req.user!.brandId)) ?? target.stripePriceId,
+      priceId: target.stripePriceId,
     });
     // Indexed at once, before it has paid anything: the first invoice's
     // webhook must already know whose customer this is.

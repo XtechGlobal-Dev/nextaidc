@@ -21,8 +21,6 @@ import {
   CreditCard,
   Package,
   Ticket,
-  BadgeDollarSign,
-  Wallet,
   ShieldCheck,
   Handshake,
   Activity,
@@ -42,7 +40,6 @@ import {
   ArrowRight,
   Crown,
   Radar,
-  Receipt,
   Building2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -126,13 +123,13 @@ interface NavItem {
   adminOnly?: boolean;
   /** SUPER_ADMIN only: platform API accounts and tenant setup. A brand ADMIN never sees these. */
   superAdminOnly?: boolean;
-  /** A brand's own ADMIN only — never staff, never the super admin (who has no brand to pay for). */
-  brandAdminOnly?: boolean;
   /** What a brand's people see instead of `label` — the same page reads differently from inside a tenant
    *  (the platform's "Plans" are a brand's read-only "Default plans"). */
   brandLabel?: string;
   /** Brand module. Switched off = hidden outright; unlike a plan lock there's nothing to upsell. */
   module?: BrandModuleId;
+  /** A main-domain customer only — the one account that may ask to become a Brand Admin. */
+  platformCustomerOnly?: boolean;
 }
 
 const NAV: NavItem[] = [
@@ -147,6 +144,8 @@ const NAV: NavItem[] = [
   { to: "/dashboard/sms-to-caller", label: "SMS to Caller", icon: MessageSquareText, tourKey: "smsToCaller", premiumWhenLocked: true, module: "smsToCaller" },
   // Support goes to the tier above (brand for a customer, platform for a brand admin). One route, one page.
   { to: "/dashboard/support", label: "Support", icon: LifeBuoy },
+  // A main-domain customer can ask for their account to become a white-label brand.
+  { to: "/dashboard/brand-admin", label: "Become a Brand", icon: Building2, platformCustomerOnly: true },
 ];
 
 // Routes already reachable from the mobile bottom app bar (see BottomNav.tsx).
@@ -162,25 +161,21 @@ const ADMIN_NAV: NavItem[] = [
   // The platform as a whole: every brand's numbers from the nightly rollup.
   // Only the super admin has a "whole platform" to look at.
   { to: "/dashboard/admin/platform", label: "Platform", icon: LayoutGrid, superAdminOnly: true },
+  // Everyone who signed up on the main domain: the platform is their provider.
+  { to: "/dashboard/admin/platform-customers", label: "Platform Customers", icon: Users, superAdminOnly: true },
   { to: "/dashboard/admin/overview", label: "Overview", icon: LayoutGrid, permission: "overview" },
   { to: "/dashboard/admin/customers", label: "Customers", icon: Users, permission: "customers" },
   { to: "/dashboard/admin/subscriptions", label: "Subscriptions", icon: CreditCard, permission: "subscriptions" },
-  // The platform owns the plans; a brand only reads them and sets its addon under Price addon.
+  // The platform owns the plans; a brand only reads them and picks which ones it offers.
   { to: "/dashboard/admin/plans", label: "Plans", brandLabel: "Default plans", icon: Package, permission: "plans" },
   { to: "/dashboard/admin/coupons", label: "Coupons", icon: Ticket, permission: "coupons" },
   // `tickets` is brand-scoped, `brand_tickets` platform-only, so exactly one of these two shows.
   { to: "/dashboard/admin/tickets", label: "Support Tickets", icon: MessagesSquare, permission: "tickets" },
   { to: "/dashboard/admin/tickets", label: "Brand Requests", icon: MessagesSquare, permission: "brand_tickets" },
-  // A brand's own money: brand-scoped sections, so the super admin never sees
-  // them here (they live on the brand's page under Brands instead).
-  { to: "/dashboard/admin/pricing", label: "Price addon", icon: BadgeDollarSign, permission: "pricing" },
-  { to: "/dashboard/admin/wallet", label: "Wallet", icon: Wallet, permission: "wallet" },
-  // What the brand pays the platform (fee + feature add-ons) — money out, so its admin alone.
-  { to: "/dashboard/admin/billing", label: "Billing", icon: CreditCard, brandAdminOnly: true },
   // Platform-only (like Audit): one catalog attached to the platform's plans, so the super admin curates it.
   { to: "/dashboard/admin/voice-bank", label: "Voice Library", icon: Mic, permission: "voice_bank" },
   { to: "/dashboard/admin/phone-numbers", label: "Phone Numbers", icon: Phone, permission: "phone_numbers" },
-  // Brand-scoped like Pricing/Wallet: a brand runs its own reseller programme, so the super admin never sees this.
+  // Brand-scoped: a brand runs its own reseller programme, so the super admin never sees this.
   { to: "/dashboard/admin/resellers", label: "Resellers", icon: Handshake, permission: "resellers" },
   // One API Center entry (its sections are tabs on the page). Holds provider credentials and spend,
   // so SUPER_ADMIN only; the routes enforce the same via requireSuperAdmin.
@@ -200,8 +195,6 @@ const ADMIN_NAV: NavItem[] = [
   // The tenant panel: create a brand, give it a subdomain, a look and its own
   // mail/SMS/WhatsApp senders.
   { to: "/dashboard/admin/brands", label: "Brands", icon: Building2, superAdminOnly: true },
-  // What brands pay the platform — not the customer Subscriptions above, which brands sell.
-  { to: "/dashboard/admin/brand-subscriptions", label: "Brand Subscriptions", icon: Receipt, superAdminOnly: true },
 ];
 
 // Admin-only "User Dashboard" panel: folds the customer modules so the sidebar isn't doubled. Always mounted
@@ -374,19 +367,19 @@ export function Sidebar() {
       collapsed && "justify-center px-0",
     );
 
-  // Customer modules: none for STAFF/SUPER_ADMIN, all for USER, all minus Plans & Billing for ADMIN.
+  // Customer modules: none for STAFF/SUPER_ADMIN, all for USER, all minus Support for ADMIN.
   const visibleUserItems = (isMobile: boolean) =>
     platformOnly
       ? []
       : NAV.filter(
           (item) =>
-            // Admins keep Call Forwarding + Call Transfer in their user nav
-            // (they have a real profile); Plans & Billing is hidden, and so is
-            // Support: a brand admin's requests to the platform live in their
-            // Support Tickets inbox, next to their customers' tickets.
-            !(isAdmin && (item.to === "/dashboard/plans" || item.to === "/dashboard/support")) &&
+            // Admins keep every module, Plans & Billing included — a brand admin pays
+            // their own customer plan. Support is hidden: a brand admin's requests to
+            // the platform live in their Support Tickets inbox, next to their customers'.
+            !(isAdmin && item.to === "/dashboard/support") &&
             // A module the brand switched off is simply not on offer.
             !(item.module && brandModules && brandModules[item.module] === false) &&
+            !(item.platformCustomerOnly && !(user?.role === "USER" && user?.brandKind === "customer")) &&
             // On mobile these live in the bottom app bar, so drop them here.
             !(isMobile && BOTTOM_NAV_ROUTES.has(item.to)),
         );
@@ -545,7 +538,6 @@ export function Sidebar() {
           {isAdminOrStaff && (() => {
             const visibleAdminItems = ADMIN_NAV.filter((item) => {
               if (item.superAdminOnly && !isSuperAdmin) return false;
-              if (item.brandAdminOnly && !(user?.role === "ADMIN" && user?.brandId)) return false;
               if (item.adminOnly && !isAdmin) return false;
               // Brand-scoped sections are refused to the super admin; keyed off the permission so nav and API can't drift.
               if (!canUseSection(user?.role, item.permission, user?.brandId)) return false;
@@ -624,7 +616,7 @@ export function Sidebar() {
                     const qs = useQuickSetupStore.getState();
                     qs.openSetup(); // opens at the Plan step (step 1)
                   }}
-                  className="mx-3 mt-3 block w-[calc(100%-1.5rem)] animate-card-beacon overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-[#1d4ed8] p-3.5 text-left text-white shadow-[var(--shadow-panel)] transition-transform hover:scale-[1.02] motion-reduce:animate-none"
+                  className="mx-3 mt-3 block w-[calc(100%-1.5rem)] animate-card-beacon overflow-hidden rounded-2xl bg-primary p-3.5 text-left text-white shadow-[var(--shadow-panel)] transition-transform hover:scale-[1.02] motion-reduce:animate-none"
                 >
                   <div className="flex items-center gap-2">
                     <span className="relative flex size-7 shrink-0 items-center justify-center rounded-full bg-danger shadow-lg shadow-danger/40">

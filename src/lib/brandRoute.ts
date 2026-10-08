@@ -19,6 +19,12 @@ export const RESERVED_PATH_SEGMENTS = new Set([
   "robots.txt",
 ]);
 
+/** A developer's own machine (`*.localhost` included) — where every brand is reached by path. */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "localhost" || h.endsWith(".localhost") || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+}
+
 /** The candidate brand slug in a pathname, or null when there isn't one. */
 export function slugFromPath(pathname: string): string | null {
   const segment = pathname.split("/").filter(Boolean)[0];

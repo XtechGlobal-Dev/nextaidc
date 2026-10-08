@@ -39,6 +39,8 @@ const db = vi.hoisted(() => {
         if ("in" in c) return (c.in as unknown[]).includes(value);
         if ("notIn" in c) return !(c.notIn as unknown[]).includes(value);
         if ("not" in c) return value !== c.not;
+        // A relation filter (`brand: { kind: "customer" }`): match the joined row.
+        if (value && typeof value === "object" && !(value instanceof Date)) return matches(value as Row, c);
       }
       return value === cond;
     });
@@ -114,7 +116,11 @@ vi.mock("../prisma.js", () => {
       });
       return m;
     })(),
-    customerDirectory: db.model(() => db.state.users.filter((u) => u.brandId).map((u) => ({ ...u, userId: u.id }))),
+    customerDirectory: db.model(() =>
+      db.state.users
+        .filter((u) => u.brandId)
+        .map((u) => ({ ...u, userId: u.id, brand: db.state.brands.find((b) => b.id === u.brandId) })),
+    ),
     brand: db.model(() => db.state.brands),
     platformSetting: db.model(() => db.state.settings),
     brandSetting: db.model(() => db.state.brandSettings),
@@ -279,6 +285,7 @@ beforeAll(async () => {
     slug: "acme",
     customDomain: null,
     status: "active",
+    kind: "brand",
     logoLightUrl: "",
     logoDarkUrl: "",
     faviconUrl: "",
@@ -781,73 +788,13 @@ describe("brand editor endpoints", () => {
     expect((await check("northwind")).available).toBe(true);
   });
 
-  it("creates a brand and its administrator in one call", async () => {
-    const res = await authed(token, "/api/super/brands", {
-      method: "POST",
-      body: JSON.stringify({
-        name: "Northwind Voice",
-        slug: "northwind",
-        themePreset: "violet",
-        fontFamily: "playfair",
-        admin: {
-          email: "owner@northwind.test",
-          fullName: "Dana Reed",
-          password: "Northwind@1",
-          sendWelcomeEmail: false,
-        },
-      }),
-    });
-    expect(res.status).toBe(201);
-    const out = (await res.json()) as {
-      brand: {
-        slug: string;
-        status: string;
-        fontStyle: string;
-        primaryColor: string;
-        domainStatus: string;
-      };
-      admin: { email: string } | null;
-      loginUrl: string;
-      pathUrl: string;
-      domain: unknown;
-    };
-    expect(out.brand.slug).toBe("northwind");
-    // Its database was set up (stubbed above) before the door opened.
-    expect(out.brand.status).toBe("active");
-    // Picking a preset fills both colours; picking a serif sets the family.
-    expect(out.brand.primaryColor).toBe("#7c3aed");
-    expect(out.brand.fontStyle).toBe("classic");
-    expect(out.admin?.email).toBe("owner@northwind.test");
-
-    // Wildcard DNS + cert already cover the subdomain, so a new brand is reachable immediately.
-    expect(out.loginUrl).toBe("https://northwind.hello22.ai");
-    // The path-routed address survives alongside it: it needs no DNS at all, so
-    // it still works while a wildcard propagates or on a preview deployment.
-    expect(out.pathUrl).toMatch(/\/northwind$/);
-    // No vanity domain was named, so there is nothing for a client to publish.
-    expect(out.brand.domainStatus).toBe("none");
-    expect(out.domain).toBeNull();
-
-    // The new admin signs in, lands inside their brand, and is NOT admitted to the panel that created them.
-    const brandId = (out.brand as unknown as { id: string }).id;
-    const theirs = await login({ email: "owner@northwind.test", password: "Northwind@1" });
-    expect(theirs.status).toBe(200);
-    expect((theirs.body.user as unknown as { brandId: string }).brandId).toBe(brandId);
-    expect((await authed(theirs.body.token, "/api/super/brands")).status).toBe(403);
-  });
-
-  it("refuses a duplicate admin email before creating the brand", async () => {
+  it("can't create a brand from nothing — a brand only comes from a customer's approved request", async () => {
     const before = db.state.brands.length;
     const res = await authed(token, "/api/super/brands", {
       method: "POST",
-      body: JSON.stringify({
-        name: "Clashing Brand",
-        slug: "clashing",
-        admin: { email: SUPER.email, fullName: "Someone", password: "Password@1" },
-      }),
+      body: JSON.stringify({ name: "Northwind Voice", slug: "northwind" }),
     });
-    expect(res.status).toBe(400);
-    // The failure must not leave an orphan tenant behind.
+    expect(res.status).toBe(404);
     expect(db.state.brands).toHaveLength(before);
   });
 });
@@ -909,15 +856,16 @@ describe("brand setup policies", () => {
     expect(open.status).toBe(400);
   });
 
-  it("never takes a sign-up on the platform's own door", async () => {
-    // No brand, nowhere for the account to go — refused before the body is read (it used to be filed under the platform).
+  it("takes main-domain sign-ups only through the email code", async () => {
+    // The platform door is open (docs/brand-as-customer-plan.md), but each sign-up gets its own database,
+    // made only once the email is proven — so the code-less shortcut is refused before the body is read.
     const platform = await fetch(`${base}/api/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
     expect(platform.status).toBe(403);
-    expect(((await platform.json()) as { error: string }).error).toMatch(/provider/i);
+    expect(((await platform.json()) as { details?: string }).details).toBe("verify_required");
   });
 
   it("answers 403 for a switched-off module's API on that brand, and not elsewhere", async () => {
@@ -975,73 +923,6 @@ describe("brand setup policies", () => {
       acme().planIds = [];
       await loadBrands();
     }
-  });
-});
-
-/* ------------------------- Brand pricing & wallet ------------------------ */
-
-describe("brand pricing and wallet", () => {
-  const onAcme = { "X-Brand": "acme" };
-
-  it("keeps a brand's pricing and wallet away from the super admin's own panel", async () => {
-    const { body } = await login(SUPER);
-    const res = await authed(body.token, "/api/admin/brand/pricing");
-    expect(res.status).toBe(403);
-    const wallet = await authed(body.token, "/api/admin/brand/wallet");
-    expect(wallet.status).toBe(403);
-  });
-
-  it("lets the brand admin add a charge, which its customers then see as the price", async () => {
-    // The in-memory brand row predates the column; the real default is true.
-    db.state.brands.find((b) => b.id === "b_acme")!.addonEditable = true;
-    const { body } = await login(BRAND_ADMIN);
-    const put = await authed(body.token, "/api/admin/brand/pricing/p_pro", {
-      method: "PUT",
-      body: JSON.stringify({ addonCents: 2000 }),
-    });
-    expect(put.status).toBe(200);
-    const row = (await put.json()) as { basePriceCents: number; brandPriceCents: number };
-    expect(row.basePriceCents).toBe(1000);
-    expect(row.brandPriceCents).toBe(3000);
-
-    const list = await authed(body.token, "/api/admin/brand/pricing");
-    expect(list.status).toBe(200);
-    const pricing = (await list.json()) as { rows: { planId: string; addonCents: number }[] };
-    expect(pricing.rows.find((r) => r.planId === "p_pro")?.addonCents).toBe(2000);
-
-    // Acme's door sells Pro at 30.00; the platform's own door still at 10.00.
-    const onBrand = (await (await fetch(`${base}/api/billing/plans`, { headers: onAcme })).json()) as {
-      id: string;
-      priceCents: number;
-      basePriceCents: number;
-      addonCents: number;
-    }[];
-    const pro = onBrand.find((p) => p.id === "p_pro")!;
-    expect(pro.priceCents).toBe(3000);
-    expect(pro.basePriceCents).toBe(1000);
-    expect(pro.addonCents).toBe(2000);
-    const platform = (await (await fetch(`${base}/api/billing/plans`)).json()) as {
-      id: string;
-      priceCents: number;
-    }[];
-    expect(platform.find((p) => p.id === "p_pro")?.priceCents).toBe(1000);
-  });
-
-  it("shows the brand admin an empty wallet and refuses a payout with nothing to pay", async () => {
-    const admin = await login(BRAND_ADMIN);
-    const wallet = await authed(admin.body.token, "/api/admin/brand/wallet");
-    expect(wallet.status).toBe(200);
-    expect(await wallet.json()).toEqual({ balances: [], entries: [] });
-
-    const superAdmin = await login(SUPER);
-    const view = await authed(superAdmin.body.token, "/api/super/brands/b_acme/wallet");
-    expect(view.status).toBe(200);
-    const payout = await authed(superAdmin.body.token, "/api/super/brands/b_acme/wallet/payouts", {
-      method: "POST",
-      body: JSON.stringify({ amountCents: 500, currency: "usd", reference: "TRF-1" }),
-    });
-    expect(payout.status).toBe(400);
-    expect(((await payout.json()) as { error: string }).error).toMatch(/more than the wallet holds/);
   });
 });
 

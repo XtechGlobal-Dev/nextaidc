@@ -19,7 +19,6 @@ import {
   needsTranslation,
 } from "../services/summary.js";
 import { enforceTrialMinutes } from "../services/billing.js";
-import { meterCall } from "../services/brandUsage.js";
 import { recordUsage, getPlanFeatures, getCallDurationCap } from "../services/trial.js";
 import { scheduleWrapUp, cancelWrapUp } from "../services/callWrapUp.js";
 import { settleAfterCall } from "../services/provisioning.js";
@@ -36,7 +35,8 @@ import { turnsFromVapiMessages } from "../lib/vapiTranscript.js";
 import { brandIdForOwner } from "../services/customerDirectory.js";
 import { brandDisplayName, brandShareOrigin } from "../lib/brandUrls.js";
 import { createCall, updateCall } from "../services/callWrite.js";
-import { callDb, tenantForUser, requestTenant, allTenants } from "../services/tenantDb.js";
+import { callDb, tenantForUser, requestTenant } from "../services/tenantDb.js";
+import { conversionByAssistant, type AssistantHints } from "../services/assistantOwner.js";
 import { CallType, CallOutcome, type Prisma as TenantPrisma } from "@prisma/tenant-client";
 import {
   vapiCallIdOf,
@@ -405,17 +405,15 @@ async function localizeTranscriptForOwner(
   return merged.map((t) => `${t.role === "agent" ? "Agent" : "Caller"}: ${t.text}`).join("\n");
 }
 
-/** The agent behind a Vapi assistant id — in whichever brand's database.
- *  A webhook carries no account, so every brand is asked in turn. */
-async function conversionByAssistant(assistantId: string) {
-  for (const { brandId, db } of await allTenants()) {
-    const conversion = await db.conversion.findFirst({
-      where: { vapiAssistantId: assistantId },
-      select: { id: true, userId: true, agentConfig: true },
-    });
-    if (conversion) return { brandId, db, conversion };
-  }
-  return null;
+/** What a Vapi server message says about who it belongs to, for the targeted owner lookup (services/assistantOwner.ts):
+ *  the owner id we stamp on every assistant / outbound call, and the number the call is on. */
+function assistantHints(message: Record<string, any>, call: Record<string, any>): AssistantHints {
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return {
+    ownerUserId:
+      str(message.assistant?.metadata?.customerId) ?? str(call.assistant?.metadata?.customerId) ?? str(call.metadata?.userId),
+    phoneNumber: str(message.phoneNumber?.number) ?? str(call.phoneNumber?.number),
+  };
 }
 
 /** The agent belonging to a user id stamped on the call's `metadata`.
@@ -601,7 +599,7 @@ function logTransferAction(
 }
 
 /** Schedules the pre-cap wrap-up. The cap is recomputed (Vapi's payload doesn't carry maxDurationSeconds) with the same function that stamped the assistant, so they agree. */
-async function maybeScheduleWrapUp(call: Record<string, any>, status: string): Promise<void> {
+async function maybeScheduleWrapUp(call: Record<string, any>, status: string, hints: AssistantHints): Promise<void> {
   // Vapi reports several statuses per call; only the transition to a live call
   // starts the clock we're racing.
   if (status !== "in-progress") return;
@@ -611,7 +609,7 @@ async function maybeScheduleWrapUp(call: Record<string, any>, status: string): P
 
   const assistantId = typeof call.assistantId === "string" ? call.assistantId : "";
   if (!assistantId) return;
-  const conversion = (await conversionByAssistant(assistantId))?.conversion ?? null;
+  const conversion = (await conversionByAssistant(assistantId, hints))?.conversion ?? null;
   if (!conversion) return;
 
   scheduleWrapUp({
@@ -658,7 +656,7 @@ router.post(
       // Tell a capped call to wrap up a few seconds early so the caller hears a goodbye, not a dead line. Never affects the webhook result.
       if (eventType === "status-update") {
         try {
-          await maybeScheduleWrapUp(call, String(message.status ?? ""));
+          await maybeScheduleWrapUp(call, String(message.status ?? ""), assistantHints(message, call));
         } catch (err) {
           console.error("[call-cap] could not schedule wrap-up:", err);
         }
@@ -681,7 +679,7 @@ router.post(
       {
         const conversion =
           (typeof assistantId === "string" && assistantId
-            ? ((await conversionByAssistant(assistantId))?.conversion ?? null)
+            ? ((await conversionByAssistant(assistantId, assistantHints(message, call)))?.conversion ?? null)
             : null) ??
           (metadataUserId ? ((await conversionByMetadataUser(metadataUserId))?.conversion ?? null) : null);
 
@@ -851,8 +849,6 @@ router.post(
             void recordUsage(conversion.userId, durationSec).then(() =>
               settleAfterCall(conversion.userId),
             );
-            // The brand's monthly counters too (minutes + one AI interaction).
-            void meterCall(conversion.userId, durationSec);
           }
           void enforceTrialMinutes(conversion.userId);
 
@@ -1065,7 +1061,6 @@ router.post(
     if (body.durationSec !== undefined) {
       await recordUsage(req.user!.sub, body.durationSec);
       await settleAfterCall(req.user!.sub);
-      void meterCall(req.user!.sub, body.durationSec);
     }
     await enforceTrialMinutes(req.user!.sub);
 

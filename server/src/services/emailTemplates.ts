@@ -3,7 +3,7 @@ import { escapeHtml } from "../lib/escapeHtml.js";
 import { getEffective } from "./settings.js";
 import { currentBrandId } from "../lib/brandContext.js";
 import { brandDisplayName, brandSupportEmail } from "../lib/brandUrls.js";
-import { cachedBrand } from "./brands.js";
+import { presentedBrand } from "./brands.js";
 
 // System email templates: code-seeded defaults, admin-editable, rendered live.
 // Bodies are plain text with {{variables}}, turned into HTML on send.
@@ -266,7 +266,7 @@ export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
     category: "Brands",
     name: "Brand Request Received",
     description:
-      "Sent to someone who asks to set up their own brand from the public page, confirming the request is in review.",
+      "Sent to a customer who asks to become a Brand Admin from their dashboard, confirming the request is in review.",
     audience: "User",
     alwaysOn: false,
     subject: "We've received your request for {{brand_name}}",
@@ -274,7 +274,7 @@ export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
       "Hi {{user_name}},\n\n" +
       "Thanks for choosing {{app_name}}. Your request to launch {{brand_name}} is with our team.\n\n" +
       "Requested address: {{brand_host}}\n\n" +
-      "We'll finish setting up your brand's settings and permissions, then email you here the moment it's live. You'll sign in with the email and password you chose on the form.",
+      "We'll finish setting up your brand's settings and permissions, then email you here the moment it's live. You'll keep this same account and password.",
     variables: ["user_name", "brand_name", "brand_host"],
   },
   {
@@ -282,7 +282,7 @@ export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
     category: "Brands",
     name: "Brand Request Approved",
     description:
-      "Sent when a super admin completes setup of a requested brand. The applicant is its first administrator.",
+      "Sent when a requested brand goes live. The applicant's own account becomes its Brand Admin and signs in on the brand's domain from now on.",
     audience: "Admin",
     alwaysOn: false,
     subject: "{{brand_name}} is live",
@@ -291,24 +291,57 @@ export const EMAIL_TEMPLATE_DEFS: EmailTemplateDef[] = [
       "Good news: {{brand_name}} is set up and you are its administrator.\n\n" +
       "Sign in at: {{brand_url}}\n" +
       "Email: {{user_email}}\n\n" +
-      "Use the password you chose when you applied. From your admin panel you can manage your customers, plans, phone numbers and team.",
+      "Use your existing password. Your AI assistant and number come with you. From your admin panel you can manage your customers, phone numbers and team.\n\n" +
+      "From now on you sign in at the address above — no longer on {{app_name}}'s main site.",
     variables: ["user_name", "user_email", "brand_name", "brand_url"],
   },
   {
-    key: "brand_service_alert",
+    key: "brand_request_domain_pending",
     category: "Brands",
-    name: "Brand Usage & Billing Alert",
+    name: "Brand Approved — Domain Pending",
     description:
-      "Sent to a brand's admins when it nears or hits a monthly usage cap, a payment to the platform fails, or its AI is paused or restored.",
-    audience: "Admin",
+      "Sent when a super admin approves a Brand Admin request that uses the applicant's own domain. The account becomes a Brand Admin automatically once the domain is live.",
+    audience: "User",
     alwaysOn: true,
-    subject: "{{brand_name}}: {{alert_title}}",
+    subject: "{{brand_name}} is approved — connect {{brand_domain}}",
     body:
       "Hi {{user_name}},\n\n" +
-      "{{alert_message}}\n\n" +
-      "{{usage_line}}\n\n" +
-      "You can see your usage, limits and billing from the Billing page of your admin panel.",
-    variables: ["user_name", "brand_name", "alert_title", "alert_message", "usage_line"],
+      "Your request for {{brand_name}} is approved. One step left: point {{brand_domain}} at us by adding these DNS records with your domain provider:\n\n" +
+      "{{dns_records}}\n\n" +
+      "We check automatically every few minutes. As soon as {{brand_domain}} is live, your account becomes the Brand Admin and you'll sign in there. Until then, keep using {{app_name}} as usual.",
+    variables: ["user_name", "brand_name", "brand_domain", "dns_records"],
+  },
+  {
+    key: "brand_admin_status_warning",
+    category: "Brands",
+    name: "Brand Admin Status Warning",
+    description:
+      "Sent in the last week of the month to a Brand Admin whose brand has no active customer. Without one by the date shown, the brand is downgraded to a normal customer account.",
+    audience: "Admin",
+    alwaysOn: true,
+    subject: "{{brand_name}} needs an active customer by {{deadline}}",
+    body:
+      "Hi {{user_name}},\n\n" +
+      "{{brand_name}} has no active customers this month. To keep your Brand Admin status, a brand needs at least one customer on a paid plan or a trial.\n\n" +
+      "If there is still no active customer on {{deadline}}, {{brand_name}} will be downgraded: your brand's domain is switched off and your account becomes a normal {{app_name}} customer again. Your own AI assistant keeps working.\n\n" +
+      "Manage your customers at: {{brand_url}}",
+    variables: ["user_name", "brand_name", "deadline", "brand_url"],
+  },
+  {
+    key: "brand_admin_downgraded",
+    category: "Brands",
+    name: "Brand Downgraded to Customer",
+    description:
+      "Sent when a brand is downgraded for having no active customers. Its domain is switched off and the owner signs in on the main site again.",
+    audience: "User",
+    alwaysOn: true,
+    subject: "{{brand_name}} is now a customer account",
+    body:
+      "Hi {{user_name}},\n\n" +
+      "{{brand_name}} had no active customers, so it has been downgraded. Its domain is switched off and your account is a normal {{app_name}} customer again.\n\n" +
+      "Your plan, AI assistant and number carry on as before. Sign in at: {{login_url}}\n\n" +
+      "You can ask to become a Brand Admin again from your dashboard at any time.",
+    variables: ["user_name", "brand_name", "login_url"],
   },
   {
     key: "brand_request_declined",
@@ -657,7 +690,7 @@ export interface EmailGlobals {
 
 export function emailGlobals(): EmailGlobals {
   const brandId = currentBrandId();
-  const brand = cachedBrand(brandId);
+  const brand = presentedBrand(brandId);
   return {
     app_name: brandDisplayName(brandId),
     support_email:

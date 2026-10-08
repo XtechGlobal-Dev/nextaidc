@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Phone, PhoneOff, Mic, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { cn, formatDuration, uid } from "@/lib/utils";
 import type { CallLog, TranscriptTurn } from "@/types";
@@ -491,22 +491,21 @@ export default function Step1Call() {
 
         <div className="w-full max-w-sm space-y-2 text-left">
           <Label htmlFor="quicksetup-call-number">Your phone number</Label>
-          <Input
+          {/* The country starts at the caller's own region (or the saved mobile's). */}
+          <PhoneInput
             id="quicksetup-call-number"
-            type="tel"
             autoComplete="tel"
-            inputMode="tel"
-            placeholder="+61 412 345 678"
+            placeholder="Mobile number"
             value={toNumber}
-            onChange={(e) => setToNumber(e.target.value)}
+            onChange={setToNumber}
             onKeyDown={(e) => {
               if (e.key === "Enter") void handlePhoneCall();
             }}
           />
           <p className="text-xs text-muted-foreground">
             {preflight?.ready && preflight.from
-              ? `Include the country code. We'll call you from ${preflight.from}.`
-              : "Include the country code."}
+              ? `Pick your country, then your number. We'll call you from ${preflight.from}.`
+              : "Pick your country, then your number."}
           </p>
           {preflight && !preflight.ready && (
             <p className="text-xs text-danger">{preflight.reason}</p>

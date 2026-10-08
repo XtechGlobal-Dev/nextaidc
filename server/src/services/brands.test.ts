@@ -13,7 +13,8 @@ vi.mock("../prisma.js", () => ({
   prisma: { brand: { findMany: h.findMany }, brandSetting: { findMany: vi.fn(async () => []) } },
 }));
 
-const { loadBrands, resolveBrandForHost, publicBrand, cachedBrand } = await import("./brands.js");
+const { loadBrands, resolveBrandForHost, publicBrand, cachedBrand, brandBySlug, brandOrigin, presentedBrand } =
+  await import("./brands.js");
 const { normalizeSlug, slugProblem, COLOR_PRESETS, FONTS, findFont } = await import(
   "../lib/brandTheme.js"
 );
@@ -118,6 +119,21 @@ describe("resolveBrandForHost", () => {
     expect(resolveBrandForHost("acme.test-platform.example")).toBeNull();
     // …but the record is still cached, so admin screens can still show it.
     expect(cachedBrand("b_acme")?.name).toBe("Acme Voice");
+  });
+
+  it("never opens a door for a main-domain customer's own row", async () => {
+    h.findMany.mockResolvedValue([
+      brand({ kind: "customer", slug: "c-0123456789ab", customDomain: "jo.example.com", domainStatus: "verified" }),
+    ]);
+    await loadBrands();
+    expect(resolveBrandForHost("c-0123456789ab.test-platform.example")).toBeNull();
+    expect(resolveBrandForHost("jo.example.com")).toBeNull();
+    expect(brandBySlug("c-0123456789ab")).toBeNull();
+    // Still known by id: the account's own database is found through it.
+    expect(cachedBrand("b_acme")?.kind).toBe("customer");
+    // It wears the platform's look and links, never its own.
+    expect(presentedBrand("b_acme")).toBeNull();
+    expect(brandOrigin(cachedBrand("b_acme"))).toBeNull();
   });
 
   it("keeps the previous snapshot when the DB read fails", async () => {

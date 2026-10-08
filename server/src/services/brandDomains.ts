@@ -2,7 +2,7 @@ import { Resolver } from "node:dns/promises";
 import type { Brand } from "@prisma/client";
 import { prisma } from "../prisma.js";
 import { domainVerifyName, domainVerifyValuePrefix, env } from "../env.js";
-import { loadBrands, normalizeDomain } from "./brands.js";
+import { normalizeDomain, refreshBrand } from "./brands.js";
 
 // Client-owned brand domains (platform subdomains need none of this — the wildcard covers them).
 // Three checks: TXT ownership nonce, routing record at our edge, and the edge (Vercel) knowing the hostname. Edge is optional without a token.
@@ -409,7 +409,14 @@ export async function verifyBrandDomain(brand: Brand): Promise<DomainCheck> {
       ...(status === "verified" && !brand.domainVerifiedAt ? { domainVerifiedAt: checkedAt } : {}),
     },
   });
-  await loadBrands();
+  await refreshBrand(brand.id);
+  // An approved Brand Admin request waiting on this domain: the account becomes the brand now that it's live.
+  if (status === "verified" && brand.kind === "customer") {
+    const { promoteIfDomainLive } = await import("./brandLifecycle.js");
+    await promoteIfDomainLive(brand.id).catch((e: unknown) =>
+      console.error(`[domains] couldn't promote ${brand.id} after ${domain} went live:`, e),
+    );
+  }
 
   return {
     domain,

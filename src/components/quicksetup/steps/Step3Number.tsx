@@ -594,19 +594,6 @@ export default function Step3Number() {
         </div>
       )}
 
-      <div className="space-y-4">
-        <h3 className="text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          How call forwarding works
-        </h3>
-        <div className="flex items-center justify-center">
-          <FlowNode icon={<User className="size-5" />} label="Customer" />
-          <Connector />
-          <FlowNode icon={<Phone className="size-5" />} label="Your Phone" />
-          <Connector />
-          <FlowNode icon={<BrainCircuit className="size-5" />} label="Your AI" />
-        </div>
-      </div>
-
       <Button
         size="lg"
         className="w-full"
@@ -622,6 +609,19 @@ export default function Step3Number() {
           Select a number above to continue.
         </p>
       )}
+
+      <div className="space-y-4">
+        <h3 className="text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          How call forwarding works
+        </h3>
+        <div className="flex items-center justify-center">
+          <FlowNode icon={<User className="size-5" />} label="Customer" />
+          <Connector />
+          <FlowNode icon={<Phone className="size-5" />} label="Your Phone" />
+          <Connector />
+          <FlowNode icon={<BrainCircuit className="size-5" />} label="Your AI" />
+        </div>
+      </div>
 
       <GoLiveConfirm
         open={confirmOpen}

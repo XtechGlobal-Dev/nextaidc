@@ -82,7 +82,7 @@ describe("Sidebar — the admin's User Dashboard panel", () => {
     expect(link("Customers")).toBeInTheDocument();
   });
 
-  it("opens the panel with every module (minus Plans & Billing) and closes it from its close button", () => {
+  it("opens the panel with every module (Plans & Billing included) and closes it from its close button", () => {
     setup(user("ADMIN"));
 
     fireEvent.click(trigger()!);
@@ -93,8 +93,9 @@ describe("Sidebar — the admin's User Dashboard panel", () => {
     for (const label of CUSTOMER_MODULES) {
       expect(within(dialog!).getByRole("link", { name: label }), label).toBeInTheDocument();
     }
-    // An admin owns no subscription — hidden here exactly as it was inline.
-    expect(within(dialog!).queryByRole("link", { name: "Plans & Billing" })).not.toBeInTheDocument();
+    // A brand admin pays their own customer plan; Support lives in their Support Tickets inbox instead.
+    expect(within(dialog!).getByRole("link", { name: "Plans & Billing" })).toBeInTheDocument();
+    expect(within(dialog!).queryByRole("link", { name: "Support" })).not.toBeInTheDocument();
 
     fireEvent.click(within(dialog!).getByRole("button", { name: "Close User Dashboard" }));
 

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 
-// Platform ledger: one paid invoice → one row split platform/brand, wallet credited
-// FROM that row. Worked example: $50 plan + $25 brand addon → $50 platform, $25 brand.
+// Platform ledger: one paid invoice → one row. Brands add no markup any more (docs/brand-as-customer-plan.md),
+// so every payment is the platform's: a $50 plan paid in full books $50 platform, $0 brand — whichever Stripe
+// Price the invoice billed.
 
 const h = vi.hoisted(() => ({
   ledgerFindUnique: vi.fn(),
@@ -10,13 +11,10 @@ const h = vi.hoisted(() => ({
   ledgerUpdate: vi.fn(),
   ledgerGroupBy: vi.fn(),
   profileFindUnique: vi.fn(),
-  addonFindFirst: vi.fn(),
-  addonFindUnique: vi.fn(),
   planFindUnique: vi.fn(),
   couponFindFirst: vi.fn(),
   redemptionFindUnique: vi.fn(),
   resolve: vi.fn(),
-  credit: vi.fn(),
 }));
 
 vi.mock("../prisma.js", () => ({
@@ -29,7 +27,6 @@ vi.mock("../prisma.js", () => ({
       findMany: vi.fn(async () => []),
     },
     profile: { findUnique: h.profileFindUnique },
-    brandPlanAddon: { findFirst: h.addonFindFirst, findUnique: h.addonFindUnique },
     subscriptionPlan: { findUnique: h.planFindUnique, findMany: vi.fn(async () => []) },
     coupon: { findFirst: h.couponFindFirst },
     couponRedemption: { findUnique: h.redemptionFindUnique },
@@ -50,20 +47,11 @@ vi.mock("./customerDirectory.js", async () => {
   };
 });
 vi.mock("./stripeCustomers.js", () => ({ resolveStripeCustomer: h.resolve }));
-vi.mock("./brandWallet.js", () => ({ creditWalletFromLedger: h.credit }));
 
 const { recordPaidInvoice, recordRefund, ledgerSummary } = await import("./platformLedger.js");
 
-/** bostan&co sells the $50 "Professional" plan for $75. */
+/** A customer of bostan&co on the $50 "Professional" plan. */
 const acmeOwner = { brandId: "b_acme", userId: "u_cust" };
-const proAddon = {
-  id: "a1",
-  brandId: "b_acme",
-  planId: "p_pro",
-  addonCents: 2500,
-  stripePriceId: "price_acme_pro",
-  plan: { priceCents: 5000, currency: "usd" },
-};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -75,26 +63,23 @@ beforeEach(() => {
     paidAt: new Date(),
     ...data,
   }));
-  h.credit.mockImplementation(async (row: { brandCents: number }) => row.brandCents);
+  h.planFindUnique.mockResolvedValue({ currency: "usd" });
   h.profileFindUnique.mockResolvedValue({ subscriptionPlanId: "p_pro", activeCouponRedemptionId: null });
   h.resolve.mockResolvedValue(acmeOwner);
 });
 
-describe("recordPaidInvoice — the $75 example", () => {
-  it("books $50 to the platform and $25 to the brand, and credits the wallet from the row", async () => {
-    h.addonFindFirst.mockResolvedValue(proAddon);
-
+describe("recordPaidInvoice — every payment is the platform's", () => {
+  it("books the whole payment to the platform, nothing to the brand", async () => {
     const out = await recordPaidInvoice({
       invoiceId: "in_1",
       customerId: "cus_1",
-      amountPaidCents: 7500,
-      priceId: "price_acme_pro",
+      amountPaidCents: 5000,
+      priceId: "price_base",
       currency: "usd",
       source: "webhook",
     });
 
-    expect(out.unrouted).toBe(false);
-    expect(out.alreadyBooked).toBe(false);
+    expect(out).toMatchObject({ unrouted: false, alreadyBooked: false, credited: 0 });
     expect(h.ledgerCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         stripeInvoiceId: "in_1",
@@ -103,53 +88,35 @@ describe("recordPaidInvoice — the $75 example", () => {
         userId: "u_cust",
         planId: "p_pro",
         currency: "usd",
-        totalCents: 7500,
+        totalCents: 5000,
         platformCents: 5000,
-        brandCents: 2500,
+        brandCents: 0,
         source: "webhook",
       }),
     });
-    // The wallet is fed from the row that was just written — nothing else.
-    expect(h.credit).toHaveBeenCalledWith(expect.objectContaining({ id: "l1", brandCents: 2500 }));
-    expect(out.credited).toBe(2500);
   });
 
-  it("splits in proportion to what was actually paid — a 50% coupon halves both shares", async () => {
-    h.addonFindFirst.mockResolvedValue(proAddon);
+  it("is still all the platform's on an old marked-up Price, and with a coupon", async () => {
     h.couponFindFirst.mockResolvedValue({ id: "cp_half" });
     await recordPaidInvoice({
       invoiceId: "in_2",
       customerId: "cus_1",
       amountPaidCents: 3750,
-      priceId: "price_acme_pro",
+      priceId: "price_acme_pro_marked_up",
       stripeCouponId: "HALF",
     });
     expect(h.ledgerCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ totalCents: 3750, platformCents: 2500, brandCents: 1250, couponId: "cp_half" }),
+      data: expect.objectContaining({ totalCents: 3750, platformCents: 3750, brandCents: 0, couponId: "cp_half" }),
     });
   });
 
-  it("gives the brand nothing when the invoice billed the platform's own Price", async () => {
-    h.addonFindFirst.mockResolvedValue(null);
-    h.planFindUnique.mockResolvedValue({ priceCents: 5000, currency: "usd" });
-    await recordPaidInvoice({ invoiceId: "in_3", customerId: "cus_1", amountPaidCents: 5000, priceId: "price_base" });
-    expect(h.ledgerCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ totalCents: 5000, platformCents: 5000, brandCents: 0, planId: "p_pro" }),
-    });
-    expect(h.addonFindUnique).not.toHaveBeenCalled();
-  });
-
-  it("falls back to the customer's current plan when no Price is known", async () => {
-    h.addonFindUnique.mockResolvedValue(proAddon);
-    await recordPaidInvoice({ invoiceId: "in_4", customerId: "cus_1", amountPaidCents: 7500 });
-    expect(h.addonFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { brandId_planId: { brandId: "b_acme", planId: "p_pro" } } }),
-    );
-    expect(h.ledgerCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ brandCents: 2500 }) });
+  it("takes the currency from the customer's plan when the invoice doesn't say", async () => {
+    h.planFindUnique.mockResolvedValue({ currency: "aud" });
+    await recordPaidInvoice({ invoiceId: "in_4", customerId: "cus_1", amountPaidCents: 5000 });
+    expect(h.ledgerCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ currency: "aud", planId: "p_pro" }) });
   });
 
   it("names the discount the account holds when the invoice carries no coupon", async () => {
-    h.addonFindFirst.mockResolvedValue(proAddon);
     h.profileFindUnique.mockResolvedValue({ subscriptionPlanId: "p_pro", activeCouponRedemptionId: "r1" });
     h.redemptionFindUnique.mockResolvedValue({ couponId: "cp_welcome" });
     await recordPaidInvoice({ invoiceId: "in_5", customerId: "cus_1", amountPaidCents: 7500, priceId: "price_acme_pro" });
@@ -165,22 +132,18 @@ describe("recordPaidInvoice — placing and repeating", () => {
     const out = await recordPaidInvoice({ invoiceId: "in_9", customerId: "cus_stranger", amountPaidCents: 7500 });
     expect(out).toMatchObject({ unrouted: true, ledger: null, credited: 0 });
     expect(h.ledgerCreate).not.toHaveBeenCalled();
-    expect(h.credit).not.toHaveBeenCalled();
   });
 
-  it("books an invoice once: a second path finds the row and only re-offers the wallet credit", async () => {
-    const existing = { id: "l1", stripeInvoiceId: "in_1", brandId: "b_acme", userId: "u_cust", brandCents: 2500, currency: "usd", planId: "p_pro" };
+  it("books an invoice once: a second path finds the row and writes nothing", async () => {
+    const existing = { id: "l1", stripeInvoiceId: "in_1", brandId: "b_acme", userId: "u_cust", brandCents: 0, currency: "usd", planId: "p_pro" };
     h.ledgerFindUnique.mockResolvedValue(existing);
-    h.credit.mockResolvedValue(0);
     const out = await recordPaidInvoice({ invoiceId: "in_1", customerId: "cus_1", amountPaidCents: 7500 });
     expect(out.alreadyBooked).toBe(true);
     expect(h.ledgerCreate).not.toHaveBeenCalled();
-    expect(h.credit).toHaveBeenCalledWith(existing);
     expect(h.resolve).not.toHaveBeenCalled();
   });
 
   it("settles a race between two paths by the invoice id", async () => {
-    h.addonFindFirst.mockResolvedValue(proAddon);
     h.ledgerCreate.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError("duplicate", { code: "P2002", clientVersion: "5.22.0" }),
     );

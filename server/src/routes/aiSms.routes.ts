@@ -1,5 +1,4 @@
 import express from "express";
-import { aiAllowedFor, meterAiInteraction } from "../services/brandUsage.js";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import { asyncHandler } from "../lib/http.js";
 import { parseToolCalls, toolArgBoolean, toolArgString } from "../lib/vapiToolCalls.js";
@@ -112,10 +111,6 @@ async function runSendInfoSms(
   if (!(await getPlanFeatures(uid)).smsToCaller) {
     return "I can't text that through right now, but I'm happy to give you the details over the phone.";
   }
-  // The brand's monthly AI allowance (or its bill to the platform) can pause this too.
-  if (!(await aiAllowedFor(uid))) {
-    return "I can't text that through right now, but I'm happy to give you the details over the phone.";
-  }
   const config = await getSmsInfoConfig(uid);
   if (!config.enabled) {
     return "I can't text that through right now, but I'm happy to give you the details over the phone.";
@@ -175,7 +170,6 @@ async function runSendInfoSms(
 
   fresh.forEach((e) => state.sent.add(e.item.key));
   state.count += 1;
-  void meterAiInteraction(uid);
   return `Done — I've texted ${spokenLabel(fresh)} to you. It should arrive in a few seconds.`;
 }
 

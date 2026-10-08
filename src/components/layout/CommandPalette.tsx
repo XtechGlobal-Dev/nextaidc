@@ -19,8 +19,6 @@ import {
   Settings,
   UserCog,
   Ticket,
-  BadgeDollarSign,
-  Wallet,
   Mic,
   Radar,
   Building2,
@@ -63,7 +61,7 @@ interface Destination {
   /** Customer-facing module — hidden from roles with no customer workspace
    *  (STAFF, SUPER_ADMIN). */
   customer?: boolean;
-  /** Hidden from ADMINs (they don't own a subscription of their own). */
+  /** Hidden from ADMINs (their requests to the platform live in Support Tickets). */
   hideForAdmin?: boolean;
   /** Crown when the plan lacks this module; the row stays listed (like the sidebar) so the upgrade is discoverable. */
   premiumWhenLocked?: boolean;
@@ -78,7 +76,7 @@ const DESTINATIONS: Destination[] = [
   { to: "/dashboard/calls", label: "Call Inbox", group: "Workspace", icon: Inbox, customer: true, keywords: ["calls", "recordings", "transcripts", "voicemail", "missed", "history", "messages"] },
   { to: "/dashboard/assistant", label: "AI Brain", group: "Workspace", icon: BrainCircuit, customer: true, keywords: ["assistant", "agent", "knowledge", "prompt", "persona", "identity", "rules", "automations", "training", "faqs", "voice"] },
   { to: "/dashboard/crm", label: "Connect CRM", group: "Workspace", icon: Plug, customer: true, module: "crm", keywords: ["integration", "hubspot", "salesforce", "zapier", "leads", "contacts", "sync"] },
-  { to: "/dashboard/plans", label: "Plans & Billing", group: "Workspace", icon: CreditCard, customer: true, hideForAdmin: true, keywords: ["billing", "subscription", "upgrade", "invoice", "payment", "pricing", "renew"] },
+  { to: "/dashboard/plans", label: "Plans & Billing", group: "Workspace", icon: CreditCard, customer: true, keywords: ["billing", "subscription", "upgrade", "invoice", "payment", "pricing", "renew"] },
   { to: "/dashboard/forwarding", label: "Call Forwarding", group: "Workspace", icon: PhoneForwarded, customer: true, keywords: ["forward", "divert", "redirect", "carrier", "activation code", "busy", "unanswered", "receptionist number", "missed calls"] },
   { to: "/dashboard/transfer", label: "Call Transfer", group: "Workspace", icon: PhoneOutgoing, customer: true, module: "transfer", keywords: ["transfer", "human", "handoff", "escalate", "live agent", "team", "ring", "connect to a person"] },
   { to: "/dashboard/booking", label: "Booking", group: "Workspace", icon: CalendarCheck, customer: true, module: "booking", keywords: ["appointments", "calendar", "google calendar", "schedule", "meetings", "slots", "availability", "invite", "reschedule"] },
@@ -92,8 +90,6 @@ const DESTINATIONS: Destination[] = [
   { to: "/dashboard/admin/customers", label: "Customers", group: "Admin", icon: Users, permission: "customers", keywords: ["users", "accounts", "clients", "members"] },
   { to: "/dashboard/admin/subscriptions", label: "Subscriptions", group: "Admin", icon: CreditCard, permission: "subscriptions", keywords: ["billing", "mrr", "revenue", "payments", "invoices", "trial", "active", "past due", "canceled", "onboarding", "under onboarding", "leads", "plan history", "renewals", "win-back"] },
   { to: "/dashboard/admin/plans", label: "Plans", brandLabel: "Default plans", group: "Admin", icon: Package, permission: "plans", keywords: ["default plans", "pricing", "tiers", "packages", "products"] },
-  { to: "/dashboard/admin/pricing", label: "Price addon", group: "Admin", icon: BadgeDollarSign, permission: "pricing", keywords: ["pricing", "addon", "markup", "price", "plans", "brand price", "charges"] },
-  { to: "/dashboard/admin/wallet", label: "Wallet", group: "Admin", icon: Wallet, permission: "wallet", keywords: ["balance", "payout", "earnings", "commission", "credits", "money"] },
   // The handler side. Two entries, one path: only one of the permissions is
   // ever reachable for a given account, so exactly one of these shows up.
   { to: "/dashboard/admin/tickets", label: "Support Tickets", group: "Admin", icon: MessagesSquare, permission: "tickets", keywords: ["helpdesk", "support", "queries", "departments", "chat", "requests", "inbox", "escalation", "ratings"] },
@@ -179,7 +175,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       if (d.customer && platformOnly) return false;
       // A module the brand switched off is not a page anyone here can open.
       if (d.module && brandModules && brandModules[d.module] === false) return false;
-      // Admins hold no subscription of their own (the sidebar hides this too).
+      // An admin's own platform requests live in Support Tickets (the sidebar hides Support too).
       if (d.hideForAdmin && isAdmin) return false;
       return true;
     }).map((d) => (d.brandLabel && !isSuperAdmin ? { ...d, label: d.brandLabel } : d));

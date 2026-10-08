@@ -18,6 +18,7 @@ import {
   isSuperAdminRole,
 } from "../lib/roles.js";
 import { setCurrentBrandId } from "../lib/brandContext.js";
+import { cachedBrand, isCustomerBrand } from "../services/brands.js";
 
 // Augment Express Request with the authenticated user.
 declare global {
@@ -50,6 +51,17 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   try {
     const user = await loadSessionIdentity(payload);
     if (!user) return next(unauthorized("Account no longer exists"));
+    // A downgraded brand's row is a main-domain customer's again: only its owner may use it. Its other accounts
+    // (the brand's customers and staff) are kept, but closed — on every request, from the in-memory cache.
+    if (closedByDowngrade(user.id, user.brandId)) {
+      return next(
+        new HttpError(
+          403,
+          "This account's provider is no longer offering the service here, so the account is closed for now.",
+          "account_suspended",
+        ),
+      );
+    }
     // Live row, not the token: role/email stay fresh and orphaned keys for removed sections can't authorize.
     req.user = {
       sub: user.id,
@@ -73,6 +85,12 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
     next(err);
   }
+}
+
+/** True for an account inside a customer-state row that isn't the row's owner — what a downgrade leaves behind. */
+export function closedByDowngrade(userId: string, brandId: string | null | undefined): boolean {
+  const home = cachedBrand(brandId);
+  return isCustomerBrand(home) && !!home!.ownerUserId && home!.ownerUserId !== userId;
 }
 
 const IDENTITY_SELECT = { id: true, email: true, role: true, permissions: true } as const;

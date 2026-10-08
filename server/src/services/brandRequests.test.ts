@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Brand requests: filing checks the address and the email against what's already
-// open, a claim lets exactly one "Complete setup" through, and a closed request
-// can't be acted on again. The password hash never outlives its purpose.
+// Brand requests: filing (from inside a main-domain customer's dashboard) checks the address against what's already
+// taken and allows one open request per account; a claim lets exactly one "Complete setup" through, and a closed
+// request can't be acted on again. Stripe ids and password hashes on old requests never reach the browser.
 
 const h = vi.hoisted(() => ({
   brandFindUnique: vi.fn(),
@@ -24,7 +24,7 @@ const h = vi.hoisted(() => ({
   })),
   reqUpdateMany: vi.fn(),
   sendTemplate: vi.fn(async (): Promise<boolean> => true),
-  notifyAdmins: vi.fn(async (): Promise<void> => undefined),
+  notifyPlatformOwners: vi.fn(async (): Promise<void> => undefined),
   assertDomain: vi.fn(async (raw: string | null | undefined): Promise<string | null> =>
     raw ? raw.trim().toLowerCase() : null,
   ),
@@ -39,10 +39,7 @@ const h = vi.hoisted(() => ({
       darkModeDefault: false,
     };
   }),
-  planFindMany: vi.fn(async (): Promise<{ id: string }[]> => []),
   stripeOn: vi.fn(() => true),
-  siRetrieve: vi.fn(),
-  customerUpdate: vi.fn(async () => ({})),
   customerDel: vi.fn(async () => ({})),
   storageOn: vi.fn(() => true),
   upload: vi.fn(async (prefix: string) => ({ url: `https://cdn.test/${prefix}/f.png`, key: `${prefix}/f.png` })),
@@ -59,19 +56,14 @@ vi.mock("../prisma.js", () => ({
       update: h.reqUpdate,
       updateMany: h.reqUpdateMany,
     },
-    brandPlan: { findMany: h.planFindMany },
   },
 }));
 vi.mock("./stripe.js", () => ({
   isStripeConfigured: h.stripeOn,
-  stripe: () => ({
-    setupIntents: { retrieve: h.siRetrieve },
-    customers: { update: h.customerUpdate, del: h.customerDel },
-  }),
+  stripe: () => ({ customers: { del: h.customerDel } }),
 }));
-vi.mock("../lib/password.js", () => ({ hashPassword: async (p: string) => `hash(${p})` }));
 vi.mock("./email.js", () => ({ sendTemplate: h.sendTemplate }));
-vi.mock("./notifications.js", () => ({ notifyAdmins: h.notifyAdmins }));
+vi.mock("./notifications.js", () => ({ notifyPlatformOwners: h.notifyPlatformOwners }));
 vi.mock("./brands.js", () => ({ assertDomainAvailable: h.assertDomain, resolveTheme: h.resolveTheme }));
 vi.mock("./storage.js", () => ({
   isStorageConfigured: h.storageOn,
@@ -83,17 +75,14 @@ import {
   checkRequestSlug,
   claimBrandRequest,
   declineBrandRequest,
-  fileBrandRequest,
+  fileBrandAdminRequest,
   serializeBrandRequest,
 } from "./brandRequests.js";
 
-const INPUT = {
-  brandName: "Acme Voice",
-  slug: "",
-  contactName: "Jo Blake",
-  email: "Jo@Acme.com",
-  password: "hunter2hunter2",
-};
+const INPUT = { brandName: "Acme Voice", slug: "" };
+const ME = { brandId: "c1", userId: "u1", email: "Jo@Acme.com", fullName: "Jo Blake" };
+const fileBrandRequest = (input: Parameters<typeof fileBrandAdminRequest>[1], logos = {}) =>
+  fileBrandAdminRequest(ME, input, logos);
 
 const png = { buffer: Buffer.from("png"), mimetype: "image/png", originalname: "logo.png" };
 
@@ -103,24 +92,24 @@ beforeEach(() => {
   h.reqFindFirst.mockResolvedValue(null);
   h.storageOn.mockReturnValue(true);
   h.stripeOn.mockReturnValue(true);
-  h.planFindMany.mockResolvedValue([]);
 });
 
-describe("fileBrandRequest", () => {
-  it("files the request with a derived slug and a hashed password", async () => {
+describe("fileBrandAdminRequest", () => {
+  it("files the request for the signed-in account, with a derived slug and no password", async () => {
     await fileBrandRequest(INPUT);
     const data = h.reqCreate.mock.calls[0][0].data;
+    expect(data).toMatchObject({ applicantBrandId: "c1", applicantUserId: "u1", contactName: "Jo Blake" });
     expect(data.slug).toBe("acme-voice");
     expect(data.email).toBe("jo@acme.com");
-    expect(data.passwordHash).toBe("hash(hunter2hunter2)");
+    expect(data.passwordHash).toBeUndefined();
     expect(data.customDomain).toBe("");
     expect(h.sendTemplate).toHaveBeenCalledWith("brand_request_received", "jo@acme.com", expect.any(Object));
-    expect(h.notifyAdmins).toHaveBeenCalled();
+    expect(h.notifyPlatformOwners).toHaveBeenCalled();
   });
 
   it("keeps the applicant's own domain, checked like a brand's", async () => {
     await fileBrandRequest({ ...INPUT, customDomain: " App.Acme.com " });
-    expect(h.assertDomain).toHaveBeenCalledWith(" App.Acme.com ");
+    expect(h.assertDomain).toHaveBeenCalledWith(" App.Acme.com ", "c1");
     expect(h.reqCreate.mock.calls[0][0].data.customDomain).toBe("app.acme.com");
   });
 
@@ -136,10 +125,11 @@ describe("fileBrandRequest", () => {
     expect(h.reqCreate).not.toHaveBeenCalled();
   });
 
-  it("refuses a second open request from the same email", async () => {
-    // First findFirst is the slug probe, second the email probe.
-    h.reqFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ brandName: "Acme" });
-    await expect(fileBrandRequest(INPUT)).rejects.toThrow(/already has a request in review/);
+  it("refuses a second open request from the same account", async () => {
+    // The account's own open request is looked up first.
+    h.reqFindFirst.mockResolvedValueOnce({ brandName: "Acme" });
+    await expect(fileBrandRequest(INPUT)).rejects.toThrow(/already in review/);
+    expect(h.reqFindFirst.mock.calls[0][0].where).toMatchObject({ applicantBrandId: "c1" });
     expect(h.reqCreate).not.toHaveBeenCalled();
   });
 
@@ -148,7 +138,7 @@ describe("fileBrandRequest", () => {
   });
 });
 
-describe("fileBrandRequest — the look", () => {
+describe("fileBrandAdminRequest — the look", () => {
   it("stores the palette and typeface, validated like a brand's", async () => {
     await fileBrandRequest({ ...INPUT, themePreset: "violet", primaryColor: "#7C3AED", accentColor: "#EC4899", fontFamily: "poppins" });
     expect(h.reqCreate.mock.calls[0][0].data).toMatchObject({
@@ -195,50 +185,6 @@ describe("fileBrandRequest — the look", () => {
   it("says so when logos can't be stored on this server", async () => {
     h.storageOn.mockReturnValue(false);
     await expect(fileBrandRequest(INPUT, { logoLight: png })).rejects.toThrow(/without them/);
-  });
-});
-
-describe("fileBrandRequest — plan and card", () => {
-  const confirmed = {
-    status: "succeeded",
-    customer: "cus_1",
-    metadata: { kind: "brand_request" },
-    payment_method: { id: "pm_1", card: { brand: "visa", last4: "4242" } },
-  };
-
-  it("requires a plan while any is on offer, and only one that is", async () => {
-    h.planFindMany.mockResolvedValue([{ id: "starter" }]);
-    await expect(fileBrandRequest(INPUT)).rejects.toThrow(/Choose a plan/);
-    await expect(fileBrandRequest({ ...INPUT, brandPlanId: "gone" })).rejects.toThrow(/isn't available/);
-    await fileBrandRequest({ ...INPUT, brandPlanId: "starter" });
-    expect(h.reqCreate.mock.calls[0][0].data.brandPlanId).toBe("starter");
-  });
-
-  it("keeps the saved card, read from Stripe rather than the browser", async () => {
-    h.siRetrieve.mockResolvedValue(confirmed);
-    await fileBrandRequest({ ...INPUT, setupIntentId: "seti_1" });
-    expect(h.reqCreate.mock.calls[0][0].data).toMatchObject({
-      stripeCustomerId: "cus_1",
-      paymentMethodId: "pm_1",
-      cardBrand: "visa",
-      cardLast4: "4242",
-    });
-    // The customer follows the contact they ended up giving.
-    expect(h.customerUpdate).toHaveBeenCalledWith("cus_1", { email: "jo@acme.com", name: "Jo Blake" });
-  });
-
-  it("refuses a card that wasn't confirmed, or came from somewhere else", async () => {
-    h.siRetrieve.mockResolvedValueOnce({ ...confirmed, status: "requires_payment_method" });
-    await expect(fileBrandRequest({ ...INPUT, setupIntentId: "seti_1" })).rejects.toThrow(/wasn't confirmed/);
-    h.siRetrieve.mockResolvedValueOnce({ ...confirmed, metadata: { kind: "brand_billing" } });
-    await expect(fileBrandRequest({ ...INPUT, setupIntentId: "seti_1" })).rejects.toThrow(/can't be used here/);
-    expect(h.reqCreate).not.toHaveBeenCalled();
-  });
-
-  it("files without a card — the admin pays at first sign-in instead", async () => {
-    await fileBrandRequest(INPUT);
-    expect(h.siRetrieve).not.toHaveBeenCalled();
-    expect(h.reqCreate.mock.calls[0][0].data.paymentMethodId).toBeUndefined();
   });
 });
 
@@ -334,7 +280,7 @@ describe("serializeBrandRequest", () => {
       logoLightUrl: "",
       logoDarkUrl: "",
       faviconUrl: "",
-      brandPlanId: "starter",
+      brandPlanId: "",
       stripeCustomerId: "cus_1",
       paymentMethodId: "pm_1",
       cardBrand: "visa",
@@ -346,6 +292,8 @@ describe("serializeBrandRequest", () => {
       timezone: "",
       notes: "",
       passwordHash: "secret",
+      applicantBrandId: null,
+      applicantUserId: null,
       brandId: null,
       reviewedById: null,
       reviewedAt: null,
@@ -354,8 +302,7 @@ describe("serializeBrandRequest", () => {
       updatedAt: new Date(),
     });
     expect(JSON.stringify(view)).not.toContain("secret");
-    // The card shows as brand + last 4; the Stripe ids stay on the server.
-    expect(view.card).toEqual({ brand: "visa", last4: "4242" });
+    // Old requests' Stripe ids stay on the server.
     expect(JSON.stringify(view)).not.toContain("cus_1");
     expect(JSON.stringify(view)).not.toContain("pm_1");
   });

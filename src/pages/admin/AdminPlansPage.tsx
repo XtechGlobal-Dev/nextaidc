@@ -134,8 +134,8 @@ export default function AdminPlansPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const isSuperAdmin = useAuthStore((s) => isSuperAdminRole(s.user?.role));
   const canManageSettings = isSuperAdmin;
-  // Plan CRUD is the platform's alone: a brand admin sees the default plans read-only and sets its
-  // markup under Price addon (the routes enforce the same with requireSuperAdmin). Denied buttons
+  // Plan CRUD is the platform's alone: a brand admin sees the default plans read-only, at the same
+  // prices its customers pay (the routes enforce the same with requireSuperAdmin). Denied buttons
   // are omitted from the DOM and handlers no-op.
   const canCreate = isSuperAdmin && hasPermission("plans.create");
   const canEdit = isSuperAdmin && hasPermission("plans.edit");
@@ -452,7 +452,7 @@ export default function AdminPlansPage() {
         subtitle={
           isSuperAdmin
             ? "Create the subscription plans customers choose at signup."
-            : "The platform's subscription plans your customers choose at signup. Set what you add on top under Price addon."
+            : "The platform's subscription plans your customers choose at signup, at these prices."
         }
         actions={
           canCreate || canEdit ? (

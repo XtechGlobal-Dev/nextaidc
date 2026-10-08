@@ -386,7 +386,7 @@ export default function AdminCouponsPage() {
                     // dashboard hero band); dead ones fade to a grey stub.
                     status
                       ? "bg-muted/50"
-                      : "bg-[linear-gradient(120deg,#1E63DD_0%,#2C76ED_55%,#5B93F2_100%)]",
+                      : "bg-primary",
                   )}
                 >
                   <div className="px-5 pt-4">
@@ -601,7 +601,7 @@ export default function AdminCouponsPage() {
           <DialogHeader>
             <div className="flex items-center gap-3">
               {/* Same brand gradient as the dashboard hero band. */}
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#1E63DD_0%,#2C76ED_55%,#5B93F2_100%)] text-white shadow-[var(--shadow-soft)]">
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-[var(--shadow-soft)]">
                 <Ticket className="size-5" />
               </div>
               <div className="min-w-0">
@@ -817,7 +817,7 @@ export default function AdminCouponsPage() {
                           className={cn(
                             "rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all",
                             on
-                              ? "border-primary bg-primary text-primary-foreground shadow-[0_4px_12px_-4px_hsl(217_84%_55%/0.5)]"
+                              ? "border-primary bg-primary text-primary-foreground shadow-[0_4px_12px_-4px_color-mix(in_oklab,var(--color-primary)_50%,transparent)]"
                               : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:bg-primary-tint-soft hover:text-foreground",
                           )}
                         >

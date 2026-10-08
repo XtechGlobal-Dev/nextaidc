@@ -22,8 +22,19 @@ type PhoneInputProps = {
   className?: string;
   /** Native autocomplete hint for the number field, e.g. "off" to suppress autofill. */
   autoComplete?: string;
+  /** Key presses in the number field, e.g. Enter to submit. */
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   "aria-invalid"?: boolean;
 };
+
+/** Split a stored value into its country and the digits after the dial code. A value without "+" is read as a
+ *  national number in `fallback` (the region guess, or the country already picked). */
+function splitValue(value: string, fallback: Country): { country: Country; national: string } {
+  if (!value) return { country: fallback, national: "" };
+  if (!value.startsWith("+")) return { country: fallback, national: nationalDigits(fallback, value) };
+  const country = countryFromValue(value);
+  return { country, national: nationalDigits(country, value.slice(country.dial.length + 1)) };
+}
 
 const Flag = ({ country }: { country: Country }) => (
   <img
@@ -44,17 +55,14 @@ export function PhoneInput({
   placeholder,
   className,
   autoComplete,
+  onKeyDown,
   "aria-invalid": invalid,
 }: PhoneInputProps) {
   // With no number yet, default the dial code to the visitor's own region rather
   // than always US; an existing value derives its country from the digits.
-  const [country, setCountry] = React.useState<Country>(() =>
-    value ? countryFromValue(value) : guessCountry(),
-  );
-  const [national, setNational] = React.useState(() => {
-    const prefix = `+${country.dial}`;
-    return value.startsWith(prefix) ? value.slice(prefix.length) : "";
-  });
+  const [initial] = React.useState(() => splitValue(value, guessCountry()));
+  const [country, setCountry] = React.useState<Country>(initial.country);
+  const [national, setNational] = React.useState(initial.national);
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [active, setActive] = React.useState(0);
@@ -63,7 +71,22 @@ export function PhoneInput({
 
   // Stored value is canonical E.164 — toE164 drops a leading "0" trunk code the user
   // may have typed (India/AU/UK) so the number is valid, while the field keeps it.
-  const emit = (c: Country, digits: string) => onChange(toE164(c, digits));
+  const lastEmitted = React.useRef(value);
+  const emit = (c: Country, digits: string) => {
+    lastEmitted.current = toE164(c, digits);
+    onChange(lastEmitted.current);
+  };
+
+  // The value can also change from outside — e.g. a saved number that arrives after mount. Follow it, but not
+  // the echo of what this field just emitted (that would rewrite a typed leading "0").
+  React.useEffect(() => {
+    if (value === lastEmitted.current) return;
+    lastEmitted.current = value;
+    const next = splitValue(value, country);
+    setCountry(next.country);
+    setNational(next.national);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -155,6 +178,7 @@ export function PhoneInput({
           value={national}
           onChange={onNationalChange}
           onBlur={onBlur}
+          onKeyDown={onKeyDown}
           placeholder={placeholder}
           autoComplete={autoComplete}
           aria-invalid={invalid}

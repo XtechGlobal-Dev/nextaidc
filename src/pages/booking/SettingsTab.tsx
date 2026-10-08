@@ -144,7 +144,7 @@ function SectionHeader({
           "grid size-11 shrink-0 place-items-center rounded-2xl text-white",
           tone === "success"
             ? "bg-gradient-to-br from-success to-success/80 shadow-[0_6px_16px_-6px_hsl(135_59%_49%/0.8)]"
-            : "bg-gradient-to-br from-primary to-primary/80 shadow-[0_6px_16px_-6px_hsl(217_84%_55%/0.7)]",
+            : "bg-gradient-to-br from-primary to-primary/80 shadow-[0_6px_16px_-6px_color-mix(in_oklab,var(--color-primary)_70%,transparent)]",
         )}
       >
         <Icon className="size-5" />

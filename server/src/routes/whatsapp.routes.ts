@@ -3,7 +3,6 @@ import crypto from "node:crypto";
 import { getEffective } from "../services/settings.js";
 import { sendWhatsApp } from "../services/whatsapp.js";
 import { getPlanFeatures } from "../services/trial.js";
-import { aiAllowedFor, meterAiInteraction } from "../services/brandUsage.js";
 import {
   resolveWhatsAppAgent,
   generateAgentReply,
@@ -84,16 +83,12 @@ function extractTextMessages(payload: unknown): { from: string; body: string }[]
 async function handleMessage(from: string, body: string): Promise<void> {
   const agent = await resolveWhatsAppAgent();
   if (!agent) {
-    console.warn("[whatsapp] inbound message but no agent to answer it");
+    console.warn("[whatsapp] inbound message but no agent is pinned to answer it (Platform Settings → WhatsApp)");
     return;
   }
   // Only auto-reply if the answering agent's owner has WhatsApp in their plan.
   if (!(await getPlanFeatures(agent.userId)).whatsapp) {
     console.warn("[whatsapp] inbound message but owner's plan doesn't include WhatsApp");
-    return;
-  }
-  if (!(await aiAllowedFor(agent.userId))) {
-    console.warn("[whatsapp] inbound message but the brand's AI is paused (monthly cap or billing)");
     return;
   }
   const history = threads.get(from) ?? [];
@@ -103,7 +98,6 @@ async function handleMessage(from: string, body: string): Promise<void> {
   remember(from, { role: "assistant", content: reply });
 
   await sendWhatsApp(from, reply);
-  void meterAiInteraction(agent.userId);
 }
 
 // --- Inbound messages ---

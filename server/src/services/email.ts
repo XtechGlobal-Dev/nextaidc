@@ -12,7 +12,7 @@ import { planeOf } from "./tenantDb.js";
 import { signUnsubscribe } from "../lib/jwt.js";
 import { renderEmail, getEmailBranding, isUnsubscribable } from "./emailTemplates.js";
 import { currentBrandId } from "../lib/brandContext.js";
-import { cachedBrand } from "./brands.js";
+import { presentedBrand } from "./brands.js";
 
 // Keyed by SMTP credentials: a brand with its own relay must never send through
 // another brand's server.
@@ -130,7 +130,7 @@ export async function sendTemplate(
   const brandId = currentBrandId();
   let from: string | undefined;
   try {
-    const brandName = cachedBrand(brandId)?.name?.trim();
+    const brandName = presentedBrand(brandId)?.name?.trim();
     const fromName = brandName || (await getEmailBranding()).fromName;
     const addr = fromAddress(brandId).match(/[\w.+-]+@[\w.-]+/)?.[0];
     if (fromName && addr) from = `${fromName} <${addr}>`;

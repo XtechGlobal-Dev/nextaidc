@@ -1,8 +1,7 @@
-import type { BrandStatsDaily } from "@prisma/client";
+import { Prisma, type BrandStatsDaily } from "@prisma/client";
 import { prisma } from "../prisma.js";
 import { allTenants, activeTenantIds, type TenantClient } from "./tenantDb.js";
 import { ledgerSummary, type LedgerTotals } from "./platformLedger.js";
-import { walletBalancesFor } from "./brandWallet.js";
 
 // Brand stats rollup (plan §7). A nightly job writes one row per brand into Main (brand_stats_daily)
 // so the super admin's overview never opens N tenant databases to draw a page. Numbers are "as of last night".
@@ -22,6 +21,15 @@ export function utcDay(d: Date = new Date()): Date {
 /** The UTC day before the one `d` falls in — what "last night" rolled up. */
 export function previousUtcDay(d: Date = new Date()): Date {
   return new Date(utcDay(d).getTime() - DAY_MS);
+}
+
+/** The newest rollup row per brand (optionally just these brands), picked by the database. Prisma's own
+ *  `distinct` dedups in memory after reading every row, which grows with brands × days. */
+export async function latestStatsRows(brandIds?: string[]): Promise<BrandStatsDaily[]> {
+  if (brandIds && brandIds.length === 0) return [];
+  const only = brandIds ? Prisma.sql`WHERE "brandId" IN (${Prisma.join(brandIds)})` : Prisma.empty;
+  return prisma.$queryRaw<BrandStatsDaily[]>`
+    SELECT DISTINCT ON ("brandId") * FROM "brand_stats_daily" ${only} ORDER BY "brandId", "day" DESC`;
 }
 
 export function dayKey(d: Date): string {
@@ -139,13 +147,14 @@ export interface PlatformOverview {
   /** Newest computedAt across the rows shown; null until the first rollup. */
   asOf: string | null;
   brands: { total: number; active: number; provisioning: number; failed: number; suspended: number };
+  /** Main-domain customers (each its own customer-state row): how many, and how many pay or trial as of last night. */
+  platformCustomers: { total: number; active: number; trialing: number };
   tenants: Record<string, number>;
   totals: Omit<BrandDayStats, "calls" | "minutes">;
   perBrand: PlatformBrandRow[];
   /** Per-day platform totals for the last two weeks, oldest first. */
   series: { day: string; calls: number; minutes: number }[];
   ledger: { from: string; to: string; totals: LedgerTotals[] };
-  wallets: { currency: string; balanceCents: number }[];
   unroutedEvents: number;
 }
 
@@ -180,13 +189,16 @@ export async function platformOverview(now: Date = new Date()): Promise<Platform
   const since = new Date(utcDay(now).getTime() - 13 * DAY_MS);
   const yesterday = previousUtcDay(now);
 
-  const [brands, latest, byDay, tenantRows, ledger, unroutedEvents] = await Promise.all([
+  const [brands, customerAccounts, latest, byDay, tenantRows, ledger, unroutedEvents] = await Promise.all([
+    // Brands only — main-domain customers' own rows are counted below, not listed as brands.
     prisma.brand.findMany({
+      where: { kind: "brand" },
       select: { id: true, name: true, slug: true, status: true },
       orderBy: { name: "asc" },
     }),
+    prisma.brand.count({ where: { kind: "customer", poolSpare: false, status: { in: ["active", "suspended"] } } }),
     // Newest row per brand — the snapshot the overview is "as of".
-    prisma.brandStatsDaily.findMany({ distinct: ["brandId"], orderBy: [{ brandId: "asc" }, { day: "desc" }] }),
+    latestStatsRows(),
     prisma.brandStatsDaily.groupBy({
       by: ["day"],
       where: { day: { gte: since } },
@@ -197,7 +209,6 @@ export async function platformOverview(now: Date = new Date()): Promise<Platform
     ledgerSummary({ from: monthStart, to: now }),
     prisma.stripeUnroutedEvent.count({ where: { resolvedAt: null } }),
   ]);
-  const wallets = await walletBalancesFor(brands.map((b) => b.id));
 
   const latestBy = new Map(latest.map((r) => [r.brandId, r]));
   const perBrand: PlatformBrandRow[] = brands.map((b) => {
@@ -214,7 +225,15 @@ export async function platformOverview(now: Date = new Date()): Promise<Platform
     };
   });
 
-  const totals = perBrand.reduce(
+  // Platform-wide totals cover every account database: the brands' AND the main-domain customers'.
+  const brandIds = new Set(brands.map((b) => b.id));
+  const platformCustomers = { total: customerAccounts, active: 0, trialing: 0 };
+  for (const r of latest) {
+    if (brandIds.has(r.brandId)) continue;
+    platformCustomers.active += r.active;
+    platformCustomers.trialing += r.trialing;
+  }
+  const totals = latest.map((r) => statsOf(r)).reduce(
     (acc, r) => ({
       customers: acc.customers + r.customers,
       active: acc.active + r.active,
@@ -231,17 +250,13 @@ export async function platformOverview(now: Date = new Date()): Promise<Platform
     if (b.status in brandCounts) brandCounts[b.status as keyof typeof brandCounts] += 1;
   }
 
-  const walletTotals = new Map<string, number>();
-  for (const balances of wallets.values()) {
-    for (const w of balances) walletTotals.set(w.currency, (walletTotals.get(w.currency) ?? 0) + w.balanceCents);
-  }
-
   let asOf: Date | null = null;
   for (const r of latest) if (!asOf || r.computedAt > asOf) asOf = r.computedAt;
 
   return {
     asOf: asOf ? asOf.toISOString() : null,
     brands: brandCounts,
+    platformCustomers,
     tenants: Object.fromEntries(tenantRows.map((t) => [t.status, t._count._all])),
     totals,
     perBrand,
@@ -251,7 +266,6 @@ export async function platformOverview(now: Date = new Date()): Promise<Platform
       minutes: Math.round((d._sum.minutes ?? 0) * 10) / 10,
     })),
     ledger: { from: monthStart.toISOString(), to: now.toISOString(), totals: ledger.totals },
-    wallets: [...walletTotals].map(([currency, balanceCents]) => ({ currency, balanceCents })),
     unroutedEvents,
   };
 }

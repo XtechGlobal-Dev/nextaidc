@@ -11,6 +11,8 @@ import { DEFAULT_AGENT_CONFIG, clampName, titleCaseName } from "../lib/agentConf
 import {
   createOtp,
   consumeOtp,
+  markOtpConsumed,
+  verifyOtp,
   sendOtpEmail,
   sendOtpSms,
   signupCodeMatches,
@@ -24,10 +26,19 @@ import { escapeHtml } from "../lib/escapeHtml.js";
 import { formatSignupTime, isValidTimeZone, resolveBusinessTimeZone } from "../lib/phoneTimeZone.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 import { notify, notifyBrandAdmins } from "../services/notifications.js";
-import { currentBrandId } from "../lib/brandContext.js";
+import { currentBrandId, runWithBrand } from "../lib/brandContext.js";
 import { brandDisplayName } from "../lib/brandUrls.js";
-import { cachedBrand, brandOrigin } from "../services/brands.js";
+import { appBaseUrl } from "../env.js";
+import { cachedBrand, brandOrigin, isCustomerBrand } from "../services/brands.js";
 import { brandAllowsSignup } from "../services/brandSetup.js";
+import {
+  customerBrandFor,
+  emailOwnsAccount,
+  findPlatformCustomer,
+  newAccountId,
+  platformAccountFor,
+  setBrandOwner,
+} from "../services/platformCustomers.js";
 import { tenantFor, tenantForUser, TenantUnavailableError, planeOf, type TenantClient } from "../services/tenantDb.js";
 
 /** Staff role name, looked up (not joined) in the account's own plane — brand roles live in the brand DB. Missing reads as none. */
@@ -52,7 +63,7 @@ async function loadAccount(id: string, brandId: string | null) {
     ...user,
     profile,
     brandId,
-    brand: brand ? { name: brand.name, slug: brand.slug, status: brand.status } : null,
+    brand: brand ? { name: brand.name, slug: brand.slug, status: brand.status, kind: brand.kind } : null,
   };
 }
 
@@ -78,13 +89,30 @@ async function signupTenant(): Promise<{ brandId: string; db: TenantClient }> {
 
 /** Why a switched-off brand's people can't sign in. Suspended = off for now; deactivated = a super
  *  admin retired it, and it is deleted 30 days on unless they change their mind. */
-function brandOfflineMessage(status: "suspended" | "deactivated"): string {
+function brandOfflineMessage(status: "suspended" | "deactivated", kind?: "customer" | "brand"): string {
+  // A main-domain customer's row is their own account, not a brand they belong to.
+  if (kind === "customer") return "This account is currently suspended. Please contact support if you think this is a mistake.";
   return status === "deactivated"
     ? "This brand has been deactivated. Please contact support if you think this is a mistake."
     : "This brand is currently suspended. Please contact support if you think this is a mistake.";
 }
 
 const router = express.Router();
+
+/** The platform's own name, for copy that sends someone to the main domain. */
+function platformDisplayName(): string {
+  return brandDisplayName(null);
+}
+
+/** Sign-in and sign-up for a brand whose own domain is live happen THERE, never through the main domain's /{slug}
+ *  path. Production only: a dev machine reaches every brand by path. */
+router.use((req, _res, next) => {
+  const live = req.brand?.customDomain && req.brand.domainStatus === "verified" ? req.brand.customDomain : "";
+  if (req.method === "POST" && req.brandDoor === "path" && live && process.env.NODE_ENV === "production") {
+    return next(new HttpError(403, `Sign in to ${req.brand!.name} at https://${live}.`, "wrong_door"));
+  }
+  next();
+});
 
 /** Finds the account for an email ON THIS DOOR: the brand's DB first, then the control plane (platform people only —
  *  they may sign in anywhere). An account behind another door is told where to go instead of "wrong password". */
@@ -112,13 +140,30 @@ async function findAccountOnThisDoor(
   // sign in on any door.
   const own = await prisma.user.findUnique({ where: { email }, select: { id: true, passwordHash: true } });
   if (own) return { ...own, brandId: null };
+  // The platform door's customers each live in their own customer-state brand's database.
+  if (!door) {
+    const mine = await findPlatformCustomer(email);
+    if (mine) {
+      const status = cachedBrand(mine.brandId)?.status;
+      if (status === "suspended" || status === "deactivated") {
+        throw new HttpError(403, "This account is currently suspended. Please contact support.", "account_suspended");
+      }
+      const row = await tenantFor(mine.brandId)
+        .then((db) => db.user.findUnique({ where: { id: mine.userId }, select: { id: true, passwordHash: true } }))
+        .catch(() => null);
+      if (row) return { ...row, brandId: mine.brandId };
+    }
+  }
   // Not here. Main's directory knows which door they belong to — say that, not "wrong password".
   const elsewhere = await prisma.customerDirectory.findFirst({
-    where: { email, ...(door ? { brandId: { not: door } } : {}) },
+    where: { email, ...(door ? { brandId: { not: door } } : { brand: { kind: "brand" } }) },
     select: { brandId: true },
   });
   if (!elsewhere) return null;
   const home = cachedBrand(elsewhere.brandId);
+  if (isCustomerBrand(home)) {
+    throw new HttpError(403, `This account signs in on ${platformDisplayName()} — sign in at ${appBaseUrl}.`, "wrong_door");
+  }
   if (home?.status === "suspended" || home?.status === "deactivated") {
     throw new HttpError(403, brandOfflineMessage(home.status), "account_suspended");
   }
@@ -148,13 +193,16 @@ async function notifyAdminsOfSignup(details: {
   if (!integrationsStatus().email) return;
   // The brand's own admins only — the super admin has no access to any
   // brand's customer panel, so a per-customer signup isn't theirs to act on.
+  // A main-domain customer's provider IS the platform, so its owners hear instead.
   const brandId = currentBrandId();
-  const brandAdmins = brandId
-    ? await tenantFor(brandId)
-        .then((db) => db.user.findMany({ where: { role: "ADMIN" }, select: { email: true } }))
-        .catch(() => [])
-    : [];
-  const admins = brandAdmins;
+  const mainDomain = isCustomerBrand(cachedBrand(brandId));
+  const admins = mainDomain
+    ? await prisma.user.findMany({ where: { role: "SUPER_ADMIN" }, select: { email: true } }).catch(() => [])
+    : brandId
+      ? await tenantFor(brandId)
+          .then((db) => db.user.findMany({ where: { role: "ADMIN" }, select: { email: true } }))
+          .catch(() => [])
+      : [];
   if (!admins.length) return;
 
   const row = (label: string, value?: string) =>
@@ -178,7 +226,7 @@ async function notifyAdminsOfSignup(details: {
       row("Referral code", details.referralCode) +
       `<li><strong>Signed up:</strong> ${escapeHtml(when)}</li>` +
       `</ul>` +
-      `<p>Review them in Admin → Customers.</p>`,
+      `<p>Review them in Admin → ${mainDomain ? "Platform Customers" : "Customers"}.</p>`,
   });
 }
 
@@ -265,6 +313,8 @@ async function assertMobileAvailable(mobile?: string): Promise<void> {
 
 /** Create a fresh user with the default profile/agent/crm records, then a session token. */
 async function createUser(data: {
+  /** Chosen by the caller when the account's id must be known before it exists (a main-domain sign-up). */
+  id?: string;
   email: string;
   passwordHash: string;
   fullName: string;
@@ -320,6 +370,7 @@ async function createUser(data: {
   const { brandId: signupBrandId, db } = await signupTenant();
   const user = await db.user.create({
     data: {
+      ...(data.id ? { id: data.id } : {}),
       email: data.email,
       passwordHash: data.passwordHash,
       fullName: data.fullName,
@@ -365,6 +416,7 @@ async function createUser(data: {
     title: `New signup: ${data.businessName?.trim() || user.fullName}`,
     message: `${user.fullName} just signed up and started their free trial.`,
     link: "/dashboard/admin/customers",
+    platformLink: "/dashboard/admin/platform-customers",
   });
   void notify(user.id, {
     type: "agent",
@@ -435,12 +487,26 @@ const registerSchema = z.object({
     .transform((v) => (isValidTimeZone(v) ? v!.trim() : undefined)),
 });
 
+/** 409 when the email already has an account on this door. On the platform door that is any account the
+ *  email owns — a main-domain customer, or a brand's owner (who signs in on their brand's door). */
+async function assertEmailAvailable(email: string): Promise<void> {
+  if (!currentBrandId()) {
+    if (await emailOwnsAccount(email)) throw new HttpError(409, "Email already registered");
+    return;
+  }
+  const { db } = await signupTenant();
+  const existing = await db.user.findUnique({ where: { email } });
+  if (existing) throw new HttpError(409, "Email already registered");
+}
+
 // Per-IP limiter shared by register/login/OTP. Several users can share one office NAT, so leave
 // headroom for honest retries while still killing brute force.
 const authLimiter = rateLimit({ windowMs: 60_000, max: 30 });
 
-/** Refuses self-serve sign-up on an invite-only brand and on the platform door. Runs before body parsing so it leaks no validation hints. */
+/** Refuses self-serve sign-up on an invite-only brand. The platform door is open: each main-domain sign-up
+ *  gets its own customer-state brand (services/platformCustomers.ts). Runs before body parsing so it leaks no validation hints. */
 function assertSignupOpen(): void {
+  if (!currentBrandId()) return;
   const brand = cachedBrand(currentBrandId());
   if (brandAllowsSignup(brand)) return;
   throw new HttpError(
@@ -457,12 +523,14 @@ router.post(
   authLimiter,
   asyncHandler(async (req, res) => {
     assertSignupOpen();
+    // A main-domain sign-up gets its own database, made only once the email is proven (/register/verify).
+    if (!currentBrandId()) {
+      throw new HttpError(403, "Confirm your email with the code we send to finish signing up.", "verify_required");
+    }
     const { email, password, fullName, businessName, mobile, businessNumber, address, referralCode, viaOnboarding, timezone } =
       registerSchema.parse(req.body);
 
-    const { db } = await signupTenant();
-    const existing = await db.user.findUnique({ where: { email } });
-    if (existing) throw new HttpError(409, "Email already registered");
+    await assertEmailAvailable(email);
     await assertMobileAvailable(mobile);
 
     const passwordHash = await hashPassword(password);
@@ -492,9 +560,7 @@ router.post(
     const { email, password, fullName, businessName, mobile, businessNumber, address, referralCode, viaOnboarding, timezone } =
       registerSchema.parse(req.body);
 
-    const { db } = await signupTenant();
-    const existing = await db.user.findUnique({ where: { email } });
-    if (existing) throw new HttpError(409, "Email already registered");
+    await assertEmailAvailable(email);
     await assertMobileAvailable(mobile);
 
     const passwordHash = await hashPassword(password);
@@ -521,6 +587,46 @@ router.post(
   }),
 );
 
+/** The main-domain end of sign-up: the proven email gets its own customer-state brand and database
+ *  (services/platformCustomers.ts), then the account is created inside it. The code is only consumed once
+ *  the database is ready, so a slow or failed setup can simply be retried with the same code. */
+async function verifyPlatformSignup(email: string, code: string) {
+  // Every read here is a round trip to the database, so the independent ones go together.
+  const [{ mine: existing, ownsAccount }, pending] = await Promise.all([
+    platformAccountFor(email),
+    verifyOtp(email, "signup", code).catch((e: unknown) => e as Error),
+  ]);
+  if (existing) {
+    // Recovery: a prior verify created the account but the response was lost. Same code → re-issue the session.
+    if (!(await signupCodeMatches(email, code))) throw new HttpError(409, "Email already registered");
+    const db = await tenantFor(existing.brandId);
+    const user = await db.user.findUnique({ where: { id: existing.userId }, include: { profile: true } });
+    if (!user) throw new HttpError(409, "Email already registered");
+    if (!existing.ownerSet) await setBrandOwner(existing.brandId, user.id);
+    const token = signToken({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions ?? [],
+      brandId: existing.brandId,
+    });
+    return { token, user: serializeUser({ ...user, brandId: existing.brandId }) };
+  }
+  if (ownsAccount) throw new HttpError(409, "Email already registered");
+  if (pending instanceof Error) throw pending;
+  const payload = pending.payload as SignupPayload | null;
+  if (!payload) throw badRequest("Sign-up details expired. Please sign up again.");
+
+  // The owner's id is chosen first, so the row names its owner in the same write that claims it.
+  const brand = await customerBrandFor(email, payload.businessName || payload.fullName, newAccountId());
+  // A row left by an interrupted attempt keeps the owner id it was given.
+  const userId = brand.ownerUserId ?? newAccountId();
+  await markOtpConsumed(pending.id);
+  const { token, user } = await runWithBrand(brand.id, () => createUser({ id: userId, email, ...payload }));
+  if (brand.ownerUserId !== user.id) await setBrandOwner(brand.id, user.id);
+  return { token, user: serializeUser(user) };
+}
+
 const otpVerifySchema = z.object({
   email: z.string().email(),
   code: z.string().min(4),
@@ -531,6 +637,11 @@ router.post(
   "/register/verify",
   asyncHandler(async (req, res) => {
     const { email, code } = otpVerifySchema.parse(req.body);
+
+    if (!currentBrandId()) {
+      res.json(await verifyPlatformSignup(email, code));
+      return;
+    }
 
     const { brandId: door, db } = await signupTenant();
     const existing = await db.user.findUnique({ where: { email }, include: { profile: true } });
@@ -658,7 +769,7 @@ router.post(
 
     // A switched-off brand's people can't sign in anywhere — otherwise they'd keep working via the platform domain.
     if (user.brand?.status === "suspended" || user.brand?.status === "deactivated") {
-      throw new HttpError(403, brandOfflineMessage(user.brand.status), "account_suspended");
+      throw new HttpError(403, brandOfflineMessage(user.brand.status, user.brand.kind), "account_suspended");
     }
     // A brand still being set up has no database to serve its people from yet.
     if (user.brand && user.brand.status !== "active") {
@@ -701,7 +812,7 @@ router.get(
     }
     // Same, one level up: the whole brand was switched off while they were working.
     if (user.brand?.status === "suspended" || user.brand?.status === "deactivated") {
-      throw new HttpError(403, brandOfflineMessage(user.brand.status), "account_suspended");
+      throw new HttpError(403, brandOfflineMessage(user.brand.status, user.brand.kind), "account_suspended");
     }
     if (user.brand && user.brand.status !== "active") {
       throw new HttpError(403, "This brand is still being set up.", "brand_not_ready");

@@ -528,7 +528,7 @@ export default function DashboardPage() {
       </Sheet>
 
       {/* Hero summary banner */}
-      <div className="animate-rise relative mb-5 flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-card)] bg-[linear-gradient(110deg,#1E63DD_0%,#2C76ED_50%,#5B93F2_100%)] p-6 text-white shadow-[var(--shadow-soft)]">
+      <div className="animate-rise relative mb-5 flex flex-wrap items-center justify-between gap-5 overflow-hidden rounded-[var(--radius-card)] bg-primary p-6 text-white shadow-[var(--shadow-soft)]">
         {/* soft floating glow accents */}
         <span
           aria-hidden
@@ -570,7 +570,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {/* 1. Calling Minutes Used */}
         <MetricCard
-          accent="#2C76ED"
+          accent="var(--color-primary)"
           index={0}
           title={t("dashboard.calling_minutes")}
           icon={<Clock />}

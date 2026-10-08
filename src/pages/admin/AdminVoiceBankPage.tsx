@@ -289,7 +289,7 @@ export default function AdminVoiceBankPage() {
 
       {categories.length === 0 ? (
         <Card className="flex flex-col items-center gap-3 py-16 text-center">
-          <span className="grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-primary to-[#1d4ed8] text-primary-foreground shadow-[var(--shadow-soft)]">
+          <span className="grid size-14 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-[var(--shadow-soft)]">
             <Mic className="size-7" />
           </span>
           <div>
@@ -322,7 +322,7 @@ export default function AdminVoiceBankPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <span className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-primary to-[#1d4ed8] text-primary-foreground shadow-[var(--shadow-soft)]">
+                    <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground shadow-[var(--shadow-soft)]">
                       <Mic className="size-5" />
                     </span>
                     <div className="min-w-0">
