@@ -493,6 +493,58 @@ export interface BrandReadiness {
   total: number;
 }
 
+/** A plan as a brand sells it: base + add-on. The customer pays brandPriceCents to the platform; the add-on share is
+ *  credited to the brand's wallet per paid invoice. Existing subscribers keep the price they joined at. */
+export interface BrandPricingRow {
+  planId: string;
+  planName: string;
+  interval: string;
+  intervalCount: number;
+  currency: string;
+  basePriceCents: number;
+  addonCents: number;
+  brandPriceCents: number;
+  /** The brand's own Stripe Price exists for this plan. */
+  stripeLinked: boolean;
+  /** The platform plan has a Stripe product (a brand Price needs one). */
+  planLinked: boolean;
+  active: boolean;
+  /** This brand's customers currently on the plan. */
+  subscribers: number;
+}
+export interface BrandPricing {
+  rows: BrandPricingRow[];
+  addonEditable: boolean;
+  maxAddonCents: number | null;
+}
+export type WalletEntryType = "credit" | "payout" | "reversal";
+export interface WalletBalance {
+  currency: string;
+  balanceCents: number;
+  creditedCents: number;
+  paidOutCents: number;
+}
+export interface WalletEntry {
+  id: string;
+  type: WalletEntryType;
+  amountCents: number;
+  currency: string;
+  stripeInvoiceId: string | null;
+  /** On a reversal: the invoice whose credit it undid. */
+  relatedInvoiceId: string | null;
+  customerId: string | null;
+  customerEmail: string | null;
+  planId: string | null;
+  planName: string | null;
+  note: string;
+  reference: string;
+  createdAt: string;
+}
+export interface BrandWallet {
+  balances: WalletBalance[];
+  entries: WalletEntry[];
+}
+
 /** Ledger window totals: what customers paid. Per currency, since a brand's customers can pay in several. */
 export interface LedgerTotals {
   currency: string;
@@ -1023,6 +1075,13 @@ export interface BrandRequest {
 }
 
 export const api = {
+  /** A brand admin's own price add-ons and wallet — always the caller's brand. */
+  brandAdmin: {
+    pricing: () => get<BrandPricing>("/api/admin/brand/pricing"),
+    setAddon: (planId: string, addonCents: number) =>
+      put<BrandPricingRow>(`/api/admin/brand/pricing/${planId}`, { addonCents }),
+    wallet: () => get<BrandWallet>("/api/admin/brand/wallet"),
+  },
   /** Resolve a brand by the slug in the URL's first path segment. 404 when the
    *  segment isn't a live brand — the app then paints as the platform. */
   brandBySlug: (slug: string) => get<PublicBrand>(`/api/brand/${encodeURIComponent(slug)}`),
@@ -1552,6 +1611,17 @@ export const api = {
       /** Live DNS + edge check. This is what promotes a claim to "verified". */
       verifyDomain: (id: string) =>
         post<BrandDomain>(`/api/super/brands/${id}/domain/verify`, {}),
+      /* ------------------------ Price add-on & wallet ----------------------- */
+      pricing: (id: string) => get<BrandPricing>(`/api/super/brands/${id}/pricing`),
+      /** May the brand's admin set add-ons, and the cap per cycle (null = none). */
+      setPricingPolicy: (id: string, data: { addonEditable?: boolean; maxAddonCents?: number | null }) =>
+        patch<{ addonEditable: boolean; maxAddonCents: number | null }>(`/api/super/brands/${id}/pricing`, data),
+      setAddon: (id: string, planId: string, addonCents: number) =>
+        put<BrandPricingRow>(`/api/super/brands/${id}/pricing/${planId}`, { addonCents }),
+      wallet: (id: string) => get<BrandWallet>(`/api/super/brands/${id}/wallet`),
+      /** Record a payout the platform made to the brand by hand. */
+      payout: (id: string, data: { amountCents: number; currency: string; reference?: string; note?: string }) =>
+        post<{ entry: WalletEntry; balances: WalletBalance[] }>(`/api/super/brands/${id}/wallet/payouts`, data),
       // Inside the brand: these read from that tenant's database and nothing else.
       customers: (id: string, opts?: { q?: string; page?: number; pageSize?: number }) =>
         get<BrandCustomersPage>(`/api/super/brands/${id}/customers${opts ? toQuery(opts) : ""}`),

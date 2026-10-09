@@ -15,6 +15,8 @@ import {
   CalendarCheck,
   MessageSquareText,
   Handshake,
+  BadgeDollarSign,
+  Wallet,
   ScrollText,
   Settings,
   UserCog,
@@ -93,11 +95,13 @@ const DESTINATIONS: Destination[] = [
   // The handler side. Two entries, one path: only one of the permissions is
   // ever reachable for a given account, so exactly one of these shows up.
   { to: "/dashboard/admin/tickets", label: "Support Tickets", group: "Admin", icon: MessagesSquare, permission: "tickets", keywords: ["helpdesk", "support", "queries", "departments", "chat", "requests", "inbox", "escalation", "ratings"] },
-  { to: "/dashboard/admin/tickets", label: "Brand Requests", group: "Admin", icon: MessagesSquare, permission: "brand_tickets", keywords: ["helpdesk", "brand support", "tenant requests", "queries", "inbox", "escalation", "ratings"] },
+  { to: "/dashboard/admin/tickets", label: "Support Tickets", group: "Admin", icon: MessagesSquare, permission: "brand_tickets", keywords: ["helpdesk", "brand support", "tenant requests", "queries", "inbox", "escalation", "ratings"] },
   { to: "/dashboard/admin/coupons", label: "Coupons", group: "Admin", icon: Ticket, permission: "coupons", keywords: ["discount", "promo", "promo code", "voucher", "offer", "percent off"] },
   { to: "/dashboard/admin/voice-bank", label: "Voice Library", group: "Admin", icon: Mic, permission: "voice_bank", keywords: ["voices", "voice bank", "tts", "accents", "samples", "voice category", "deepgram"] },
   { to: "/dashboard/admin/phone-numbers", label: "Phone Numbers", group: "Admin", icon: Phone, permission: "phone_numbers", keywords: ["numbers", "did", "twilio", "caller id", "provisioning"] },
   { to: "/dashboard/admin/resellers", label: "Resellers", group: "Admin", icon: Handshake, permission: "resellers", keywords: ["partners", "commission", "affiliates", "agency"] },
+  { to: "/dashboard/admin/pricing", label: "Price add-on", group: "Admin", icon: BadgeDollarSign, permission: "pricing", keywords: ["pricing", "addon", "add-on", "markup", "price", "plans", "brand price", "charges"] },
+  { to: "/dashboard/admin/wallet", label: "Wallet", group: "Admin", icon: Wallet, permission: "wallet", keywords: ["balance", "payout", "earnings", "commission", "credits", "money"] },
   { to: "/dashboard/admin/emails", label: "System Emails", group: "Admin", icon: Mail, permission: "emails", keywords: ["templates", "transactional", "notifications", "welcome email", "reminder", "receipt"] },
   { to: "/dashboard/admin/audit", label: "Audit Log", group: "Admin", icon: ScrollText, permission: "audit", keywords: ["logs", "activity", "history", "events", "security"] },
   { to: "/dashboard/admin/api-center", label: "API Center", group: "Admin", icon: Radar, superAdminOnly: true, keywords: ["providers", "api usage", "costs", "spend", "latency", "errors", "quotas", "rate limits", "alerts", "vapi", "openai", "deepgram", "twilio", "logs"] },

@@ -157,7 +157,7 @@ export function OnboardingSettings() {
                     aria-pressed={active}
                     className={cn(
                       "group rounded-xl border p-4 text-left transition-all",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                      "focus-visible:outline-none",
                       active
                         ? "border-primary/50 bg-primary-tint-soft shadow-[var(--shadow-soft)]"
                         : "border-border bg-card hover:border-primary/30 hover:bg-warm/50",

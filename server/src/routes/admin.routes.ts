@@ -29,6 +29,7 @@ import {
 import { withPlan, withPlans } from "../services/planLookup.js";
 import { cachedBrand } from "../services/brands.js";
 import { brandPlanIds } from "../services/brandSetup.js";
+import { refreshBrandPricesForPlan } from "../services/brandPricing.js";
 import type { Prisma as TenantPrisma } from "@prisma/tenant-client";
 import { nextAvailableForBrand } from "../services/phones.js";
 import {
@@ -2132,6 +2133,11 @@ router.patch(
         data: { ...data, ...stripeIds, ...(clearsOwnDefault ? { isDefault: false } : {}) },
       });
     });
+    // A new base means new brand Prices (base + add-on) for new subscribers. Rebuilt in the background — the save
+    // must not hang on N Stripe calls.
+    if (priceChanged) {
+      void refreshBrandPricesForPlan(plan.id).catch(() => undefined);
+    }
     res.json(plan);
   }),
 );

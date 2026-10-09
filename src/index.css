@@ -219,10 +219,10 @@
   }
 }
 
-/* Brand focus ring */
+/* Focus ring — deliberately invisible (owner call): no outline, ring or glow on focus anywhere. Kept as a
+   utility so the components that ask for it stay valid. */
 @utility focus-ring {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-primary);
 }
 
 /* Form fields carry no focus chrome — no outline, ring or glow on any input,
@@ -238,6 +238,24 @@ select:focus-visible,
 [role="combobox"]:focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+/* Nor do buttons, links or anything clickable — no browser focus outline. Their resting shadows are left alone. */
+button:focus,
+button:focus-visible,
+a:focus,
+a:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="switch"]:focus-visible,
+[role="checkbox"]:focus-visible,
+[role="radio"]:focus-visible,
+[role="slider"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="option"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
 }
 
 /* ---- Refined scrollbars (from agentAI) ---- */

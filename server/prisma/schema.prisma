@@ -378,6 +378,8 @@ model SubscriptionPlan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  brandAddons BrandPlanAddon[] @relation("PlanBrandAddons")
+
   @@map("subscription_plans")
 }
 
@@ -738,6 +740,11 @@ model Brand {
   // brand host these REPLACE the platform's, so a tenant's pages never carry
   // the platform's tracking.
   scripts         Json     @default("{}")
+  /// Price add-on (services/brandPricing.ts): may the brand's own admin set its
+  /// add-on on top of a plan's base price, and the most it may add per cycle
+  /// (null = no cap). The super admin is bound by neither.
+  addonEditable   Boolean  @default(true)
+  maxAddonCents   Int?
   /// Who created it (a SUPER_ADMIN user id) — kept as a plain id, not a
   /// relation, so deleting that admin never blocks deleting a brand.
   createdById String?
@@ -765,6 +772,9 @@ model Brand {
   /// the only two things Main knows about what goes on inside the brand.
   statsDaily BrandStatsDaily[]
   directory  CustomerDirectory[]
+
+  planAddons    BrandPlanAddon[]   @relation("BrandPlanAddons")
+  walletEntries BrandWalletEntry[] @relation("BrandWalletEntries")
 
   @@index([kind])
   @@index([poolSpare, status])
@@ -1427,4 +1437,79 @@ model TicketAttachment {
 
   @@index([ticketId, createdAt])
   @@map("ticket_attachments")
+}
+
+/// A brand's own charge on top of a platform plan. The customer pays
+/// (plan price + addon) to the platform through a Stripe Price of the brand's
+/// own, created under the plan's product; the addon share lands in the
+/// brand's wallet when the invoice is paid. Addon 0 = the brand sells the
+/// plan at the platform's price and no brand Price exists. `stripePriceId` is
+/// the CURRENT Price, the one new subscriptions land on; every Price the brand
+/// has ever had is remembered in BrandPlanPrice.
+model BrandPlanAddon {
+  id      String           @id @default(cuid())
+  brandId String
+  brand   Brand            @relation("BrandPlanAddons", fields: [brandId], references: [id], onDelete: Cascade)
+  planId  String
+  plan    SubscriptionPlan @relation("PlanBrandAddons", fields: [planId], references: [id], onDelete: Cascade)
+
+  addonCents    Int    @default(0)
+  /// Stripe Price for (base + addon); "" while addon is 0 or Stripe is unlinked.
+  stripePriceId String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([brandId, planId])
+  @@index([stripePriceId])
+  @@map("brand_plan_addons")
+}
+
+/// Every Stripe Price a brand has ever sold a plan through, with the split it
+/// was created at. Existing subscribers KEEP their Price when the brand changes
+/// its add-on (or the platform its base price), so a renewal can arrive on a
+/// Price that is no longer current — this is how its brand share is still known.
+/// Never deleted. Plain ids: a history row must outlive edits to either side.
+model BrandPlanPrice {
+  stripePriceId String   @id
+  brandId       String
+  planId        String
+  baseCents     Int
+  addonCents    Int
+  currency      String   @default("usd")
+  createdAt     DateTime @default(now())
+
+  @@index([brandId, planId])
+  @@map("brand_plan_prices")
+}
+
+/// The brand's wallet, as a ledger. Balance = sum(amountCents) per currency.
+///   credit   — a customer's paid invoice earned the brand its addon (positive)
+///   payout   — the platform paid the brand, recorded by the super admin (negative)
+///   reversal — a refund undid a credit (negative)
+/// `stripeInvoiceId` is unique so a credit can never be booked twice, whichever
+/// of the invoice-paid paths (webhook, reconcile, go-live) sees it first.
+model BrandWalletEntry {
+  id      String @id @default(cuid())
+  brandId String
+  brand   Brand  @relation("BrandWalletEntries", fields: [brandId], references: [id], onDelete: Cascade)
+
+  type             String
+  amountCents      Int
+  currency         String  @default("usd")
+  stripeInvoiceId  String? @unique
+  /// For a reversal: the invoice whose credit it undoes (not unique — a
+  /// partial refund followed by another produces two reversals).
+  relatedInvoiceId String?
+  customerId       String?
+  planId           String?
+  note             String  @default("")
+  reference        String  @default("")
+  createdById      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([brandId, createdAt])
+  @@index([relatedInvoiceId])
+  @@map("brand_wallet_entries")
 }

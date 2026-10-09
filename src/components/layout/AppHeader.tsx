@@ -135,7 +135,7 @@ export function AppHeader() {
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="hidden h-9 items-center gap-2.5 rounded-full border border-border bg-warm/60 py-1 pl-1 pr-2.5 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary/30 xl:flex"
+                className="hidden h-9 items-center gap-2.5 rounded-full border border-border bg-warm/60 py-1 pl-1 pr-2.5 outline-none transition-colors hover:bg-muted xl:flex"
               >
                 <span className="grid size-7 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
                   {initials(displayName)}

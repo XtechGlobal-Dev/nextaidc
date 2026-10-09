@@ -52,6 +52,8 @@ import { isNeonConfigured, listRegions } from "../services/neonProjects.js";
 import { checkBrandDatabase } from "../services/tenantProvisioning.js";
 import { latestTenantMigration } from "../services/tenantMigrations.js";
 import { assertPickKeepsSubscribedPlans, livePlanSubscribers } from "../services/brandPlans.js";
+import { listBrandPricing, setBrandAddon } from "../services/brandPricing.js";
+import { listWalletEntries, recordPayout, walletBalances } from "../services/brandWallet.js";
 import {
   BRAND_INTEGRATION_IDS,
   brandIntegrationsView,
@@ -740,6 +742,97 @@ router.post(
       ip: req.ip,
     });
     res.json({ ok: true });
+  }),
+);
+
+/* -------------------------- Price add-on & wallet ------------------------- */
+// Platform-owner view. Unlike brandAdmin.routes.ts, the super admin here isn't bound by the brand's editability or cap.
+
+router.get(
+  "/brands/:id/pricing",
+  asyncHandler(async (req, res) => {
+    const brand = await brandOr404(req.params.id);
+    res.json({
+      rows: await listBrandPricing(brand.id),
+      addonEditable: brand.addonEditable,
+      maxAddonCents: brand.maxAddonCents,
+    });
+  }),
+);
+
+const pricingSettingsSchema = z.object({
+  addonEditable: z.boolean().optional(),
+  maxAddonCents: z.number().int().min(0).max(10_000_000).nullable().optional(),
+});
+
+/** May the brand's own admin set add-ons, and the most it may add per cycle (null = no cap). */
+router.patch(
+  "/brands/:id/pricing",
+  asyncHandler(async (req, res) => {
+    const body = pricingSettingsSchema.parse(req.body);
+    const brand = await brandOr404(req.params.id);
+    const updated = await prisma.brand.update({ where: { id: brand.id }, data: body });
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: req.user!.brandId ?? null,
+      actorEmail: req.user!.email,
+      action: "brand.pricing.settings",
+      targetType: "brand",
+      targetId: brand.id,
+      metadata: body,
+      ip: req.ip,
+    });
+    res.json({ addonEditable: updated.addonEditable, maxAddonCents: updated.maxAddonCents });
+  }),
+);
+
+const addonSchema = z.object({ addonCents: z.number().int().min(0).max(10_000_000) });
+
+router.put(
+  "/brands/:id/pricing/:planId",
+  asyncHandler(async (req, res) => {
+    const { addonCents } = addonSchema.parse(req.body);
+    const brand = await brandOr404(req.params.id);
+    res.json(
+      await setBrandAddon({
+        brandId: brand.id,
+        planId: req.params.planId,
+        addonCents,
+        asBrand: false,
+        actor: { id: req.user!.sub, email: req.user!.email, ip: req.ip },
+      }),
+    );
+  }),
+);
+
+router.get(
+  "/brands/:id/wallet",
+  asyncHandler(async (req, res) => {
+    const brand = await brandOr404(req.params.id);
+    const [balances, entries] = await Promise.all([walletBalances(brand.id), listWalletEntries(brand.id)]);
+    res.json({ balances, entries });
+  }),
+);
+
+const payoutSchema = z.object({
+  amountCents: z.number().int().positive(),
+  currency: z.string().trim().length(3),
+  reference: z.string().trim().max(120).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
+/** Record a payout the platform has made to the brand by hand. */
+router.post(
+  "/brands/:id/wallet/payouts",
+  asyncHandler(async (req, res) => {
+    const body = payoutSchema.parse(req.body);
+    const brand = await brandOr404(req.params.id);
+    const entry = await recordPayout({
+      brandId: brand.id,
+      ...body,
+      actor: { id: req.user!.sub, email: req.user!.email, ip: req.ip },
+    });
+    res.status(201).json({ entry, balances: await walletBalances(brand.id) });
   }),
 );
 

@@ -73,7 +73,7 @@ export function StarRating({
             onBlur={() => setHover(null)}
             onClick={() => onChange(star)}
             className={cn(
-              "rounded-full p-0.5 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-60",
+              "rounded-full p-0.5 transition-transform hover:scale-110 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60",
               !disabled && "cursor-pointer",
             )}
           >

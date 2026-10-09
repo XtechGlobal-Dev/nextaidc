@@ -54,6 +54,8 @@ const AdminSubscriptionsPage = lazy(() => import("@/pages/admin/AdminSubscriptio
 const AdminPlansPage = lazy(() => import("@/pages/admin/AdminPlansPage"));
 const AdminCouponsPage = lazy(() => import("@/pages/admin/AdminCouponsPage"));
 const AdminResellersPage = lazy(() => import("@/pages/admin/AdminResellersPage"));
+const AdminBrandPricingPage = lazy(() => import("@/pages/admin/AdminBrandPricingPage"));
+const AdminBrandWalletPage = lazy(() => import("@/pages/admin/AdminBrandWalletPage"));
 const AdminSettingsPage = lazy(() => import("@/pages/admin/AdminSettingsPage"));
 const AdminVoiceBankPage = lazy(() => import("@/pages/admin/AdminVoiceBankPage"));
 const AdminAuditLogPage = lazy(() => import("@/pages/admin/AdminAuditLogPage"));
@@ -177,6 +179,15 @@ function adminRoutes(base: string) {
         <Route
           path={`${base}/resellers`}
           element={<RequireAdmin><AdminResellersPage /></RequireAdmin>}
+        />
+        {/* A brand admin's own price add-ons and wallet (brand-scoped). */}
+        <Route
+          path={`${base}/pricing`}
+          element={<RequireAdmin><AdminBrandPricingPage /></RequireAdmin>}
+        />
+        <Route
+          path={`${base}/wallet`}
+          element={<RequireAdmin><AdminBrandWalletPage /></RequireAdmin>}
         />
         {/* Open to admins minus the Integrations tab — the page hides it and `/admin/integrations*`
             stays on requireSuperAdmin, so credentials are refused either way. */}
