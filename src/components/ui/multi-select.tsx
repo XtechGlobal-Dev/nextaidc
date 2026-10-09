@@ -186,6 +186,7 @@ export function MultiSelect({
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={onKeyDown}
                 placeholder={searchPlaceholder}
+                data-bare
                 className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
