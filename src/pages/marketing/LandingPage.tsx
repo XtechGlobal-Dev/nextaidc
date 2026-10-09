@@ -338,9 +338,9 @@ export default function LandingPage() {
                 className="pointer-events-none absolute -inset-[2px] rounded-[22px] bg-primary/30 opacity-60 blur-[3px] transition-opacity duration-300 group-focus-within:opacity-100"
               />
               <div
-                className="card-glass relative rounded-[20px] border border-border p-3 shadow-[var(--shadow-panel)] transition-shadow focus-within:shadow-xl sm:p-3.5"
+                className="card-glass relative rounded-[20px] border border-border p-3 shadow-[var(--shadow-panel)] sm:p-3.5"
               >
-                <div className="flex items-center gap-2.5 rounded-[14px] border border-border bg-background px-4 transition-colors focus-within:border-primary/60">
+                <div className="flex items-center gap-2.5 rounded-[14px] border border-border bg-background px-4 transition-colors">
                   <Globe className="size-4 shrink-0 text-muted-foreground" />
                   <input
                     ref={urlInputRef}

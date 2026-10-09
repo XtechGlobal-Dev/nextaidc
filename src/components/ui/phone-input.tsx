@@ -154,7 +154,7 @@ export function PhoneInput({
     <div ref={rootRef} className="relative">
       <div
         className={cn(
-          "flex h-10 w-full items-center rounded-xl border border-border bg-background text-sm focus-within:focus-ring",
+          "flex h-10 w-full items-center rounded-xl border border-border bg-background text-sm",
           invalid && "border-danger",
           className,
         )}
@@ -164,7 +164,7 @@ export function PhoneInput({
           onClick={() => (open ? setOpen(false) : openMenu())}
           aria-label="Select country code"
           aria-expanded={open}
-          className="flex h-full items-center gap-1.5 rounded-l-xl pl-3 pr-2 text-foreground hover:bg-muted"
+          className="flex h-full items-center gap-1.5 rounded-l-xl pl-3 pr-2 text-foreground outline-none hover:bg-muted"
         >
           <Flag country={country} />
           <span className="text-muted-foreground">+{country.dial}</span>

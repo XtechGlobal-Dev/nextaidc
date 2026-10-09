@@ -480,7 +480,7 @@ function RoleSelect({
           aria-invalid={invalid}
           className={cn(
             "flex w-full items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2.5 text-left text-sm transition-colors",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+            "focus:outline-none",
             "data-[state=open]:border-primary/60",
             invalid ? "border-danger" : "border-border hover:border-primary/40",
           )}

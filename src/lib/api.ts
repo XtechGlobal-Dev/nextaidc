@@ -1626,6 +1626,9 @@ export const api = {
       suspend: (id: string) => post<{ ok: true; status: string }>(`/api/super/platform-customers/${id}/suspend`, {}),
       reactivate: (id: string) =>
         post<{ ok: true; status: string }>(`/api/super/platform-customers/${id}/reactivate`, {}),
+      /** For good: subscription cancelled, agent and number released, the account and its database removed. */
+      remove: (id: string) =>
+        del<{ ok: true; accountsRemoved: number }>(`/api/super/platform-customers/${id}`),
     },
   },
   admin: {

@@ -10,6 +10,9 @@ import { tenantFor, type TenantClient } from "../services/tenantDb.js";
 import { latestStatsRows, platformOverview, rollupBrandStats, utcDay, ACTIVE_SUB_STATUSES } from "../services/brandStats.js";
 import { searchDirectory } from "../services/customerDirectory.js";
 import { customerDetailFor } from "./admin.routes.js";
+import { destroyBrand } from "../services/brandDeactivation.js";
+import { deprovisionAgentForUser } from "../services/provisioning.js";
+import { cancelSubscription, isStripeConfigured } from "../services/stripe.js";
 
 // Super-admin platform views. Platform-wide screens read Main only (rollup, ledger,
 // directory); one brand's inside reads that brand's tenant DB and nothing else.
@@ -248,6 +251,53 @@ router.post(
       ip: req.ip,
     });
     res.json({ ok: true, status: suspend ? "suspended" : "active" });
+  }),
+);
+
+/** Deletes a main-domain customer for good: paid subscriptions are cancelled and agents/numbers released first,
+ *  then the row and its database go (destroyBrand also hands any pending vanity domain back to the edge). */
+router.delete(
+  "/platform-customers/:id",
+  asyncHandler(async (req, res) => {
+    const row = await prisma.brand.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, name: true, slug: true, kind: true, status: true, poolSpare: true, customDomain: true },
+    });
+    if (!row || row.poolSpare || row.kind !== "customer") throw notFound("Customer not found");
+
+    // A database that never came up holds no subscription or agent. A live one that won't open must stop the
+    // delete — skipping it would leave a card being charged for an account that no longer exists.
+    let accounts = 0;
+    if (row.status !== "provisioning" && row.status !== "failed") {
+      const db = await tenantFor(row.id);
+      const users = await db.user.findMany({
+        select: { id: true, profile: { select: { stripeSubscriptionId: true } } },
+      });
+      accounts = users.length;
+      for (const u of users) {
+        if (u.profile?.stripeSubscriptionId && isStripeConfigured()) {
+          await cancelSubscription(u.profile.stripeSubscriptionId);
+        }
+        await deprovisionAgentForUser(u.id);
+      }
+    }
+    await destroyBrand(row);
+    // An open Brand Admin request from this account has no one left to approve.
+    await prisma.brandRequest.updateMany({
+      where: { applicantBrandId: row.id, status: { in: ["pending", "awaiting_domain"] } },
+      data: { status: "declined", declineReason: "The account was deleted." },
+    });
+    void audit({
+      actorId: req.user!.sub,
+      actorBrandId: req.user!.brandId ?? null,
+      actorEmail: req.user!.email,
+      action: "platform_customer.delete",
+      targetType: "brand",
+      targetId: row.id,
+      metadata: { slug: row.slug, name: row.name, accountsRemoved: accounts },
+      ip: req.ip,
+    });
+    res.json({ ok: true, accountsRemoved: accounts });
   }),
 );
 

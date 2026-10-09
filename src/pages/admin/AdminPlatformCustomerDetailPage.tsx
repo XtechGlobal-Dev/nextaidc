@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Ban, RotateCcw, UserX } from "lucide-react";
+import { ArrowLeft, Ban, RotateCcw, Trash2, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { PageHeaderSkeleton, CardSkeleton, TableSkeleton } from "@/components/ui/skeleton";
 import { api, ApiError, type PlatformCustomerDetail } from "@/lib/api";
 import { useLiveTick } from "@/hooks/useLiveData";
@@ -23,6 +24,7 @@ export default function AdminPlatformCustomerDetailPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<PlatformCustomerDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function load(silent = false) {
     try {
@@ -90,6 +92,13 @@ export default function AdminPlatformCustomerDetailPage() {
     }
   };
 
+  // Throws on failure so ConfirmDeleteDialog surfaces the error and stays open.
+  const destroy = async () => {
+    await api.super.platformCustomers.remove(account.id);
+    toast.success(`${name} deleted, along with its database`);
+    navigate(LIST, { replace: true });
+  };
+
   return (
     <div>
       <button
@@ -104,18 +113,33 @@ export default function AdminPlatformCustomerDetailPage() {
           title={name}
           subtitle={owner ? [owner.fullName !== name ? owner.fullName : "", owner.email].filter(Boolean).join(" · ") : undefined}
         />
-        {(account.status === "active" || account.status === "suspended") && (
-          <Button
-            variant={account.status === "active" ? "danger" : "primary"}
-            className="w-full sm:w-auto"
-            disabled={busy}
-            onClick={() => void toggle()}
-          >
-            {account.status === "active" ? <Ban className="size-4" /> : <RotateCcw className="size-4" />}
-            {account.status === "active" ? "Suspend account" : "Restore account"}
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          {(account.status === "active" || account.status === "suspended") && (
+            <Button
+              variant={account.status === "active" ? "danger" : "primary"}
+              className="w-full sm:w-auto"
+              disabled={busy}
+              onClick={() => void toggle()}
+            >
+              {account.status === "active" ? <Ban className="size-4" /> : <RotateCcw className="size-4" />}
+              {account.status === "active" ? "Suspend account" : "Restore account"}
+            </Button>
+          )}
+          <Button variant="outline" className="w-full text-danger sm:w-auto" disabled={busy} onClick={() => setDeleting(true)}>
+            <Trash2 className="size-4" /> Delete account
           </Button>
-        )}
+        </div>
       </div>
+
+      <ConfirmDeleteDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        resourceType="customer"
+        resourceName={name}
+        title="Delete account"
+        description="Their subscription is cancelled, their AI agent and phone number are released, and the account is removed with its database. They can sign up again with the same email afterwards."
+        onConfirm={destroy}
+      />
 
       <Card className="mt-5 p-5 sm:mt-0">
         <h3 className="mb-4 border-b border-border/60 pb-2.5 text-base font-semibold">Account</h3>

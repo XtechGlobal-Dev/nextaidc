@@ -225,6 +225,21 @@
   box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-primary);
 }
 
+/* Form fields carry no focus chrome — no outline, ring or glow on any input,
+   textarea, select or select trigger. Unlayered, so it outranks any focus
+   utility a page puts on a field. */
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible,
+[role="combobox"]:focus,
+[role="combobox"]:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 /* ---- Refined scrollbars (from agentAI) ---- */
 * {
   scrollbar-width: thin;

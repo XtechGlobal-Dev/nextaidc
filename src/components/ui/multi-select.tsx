@@ -128,7 +128,7 @@ export function MultiSelect({
         aria-expanded={open}
         className={cn(
           "flex min-h-10 w-full items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-left text-sm",
-          "focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60",
+          "focus:outline-none disabled:cursor-not-allowed disabled:opacity-60",
         )}
       >
         {chips.length === 0 ? (

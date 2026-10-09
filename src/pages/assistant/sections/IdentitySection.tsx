@@ -539,7 +539,7 @@ export function IdentitySection() {
             <button
               type="button"
               onClick={toggleOpen}
-              className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="flex h-10 w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none"
             >
               <span className={cn(voices === null && "text-muted-foreground")}>{triggerLabel}</span>
               <ChevronDown

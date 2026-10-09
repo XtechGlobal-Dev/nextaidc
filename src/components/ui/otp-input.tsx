@@ -98,7 +98,7 @@ export function OtpInput({
           aria-label={`Digit ${i + 1}`}
           className={cn(
             "h-12 w-full min-w-0 rounded-xl border bg-background text-center text-lg font-semibold",
-            "outline-none focus-visible:focus-ring",
+            "outline-none",
             invalid ? "border-danger" : "border-border",
             disabled && "cursor-not-allowed border-border bg-muted/50 text-muted-foreground",
           )}
