@@ -122,7 +122,7 @@ export function SearchableSelect({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 text-left text-sm focus:outline-none"
       >
         <span className={cn("truncate", !value && "text-muted-foreground")}>
           {value || placeholder}

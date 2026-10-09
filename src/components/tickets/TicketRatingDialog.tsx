@@ -110,7 +110,7 @@ export function TicketRatingDialog({
                 ? "What went wrong, or what would have helped?"
                 : "Anything that worked especially well?"
             }
-            className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus:border-primary/60"
+            className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
           />
           {poor && (
             <p className="text-xs text-muted-foreground">

@@ -241,7 +241,7 @@ export function SavedRepliesDialog({
                   placeholder={
                     "Hi {{requester_first_name}}, thanks for getting in touch about {{subject}}. We're looking into it and will be back with you shortly.\n\n{{agent_name}}"
                   }
-                  className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus:border-primary/60"
+                  className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
                 />
                 <div className="flex flex-wrap items-center gap-1.5 pt-1">
                   <span className="text-[11px] text-muted-foreground">Insert a blank:</span>

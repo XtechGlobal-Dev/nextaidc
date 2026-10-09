@@ -50,7 +50,6 @@ export function AssistantTesterDialog() {
   const configDirty = useAgentStore((s) => s.dirty);
   const trial = useTrialStore((s) => s.trial);
   const subscriptionStatus = useAuthStore((s) => s.user?.profile?.subscriptionStatus);
-  const savedMobile = useAuthStore((s) => s.user?.profile?.mobile ?? "");
   const navigate = useNavigate();
 
   /** How the test call is placed. A real phone call is the default: a browser call
@@ -162,14 +161,6 @@ export function AssistantTesterDialog() {
     // Keyed on open/mode only: re-warming per keystroke would fire a summarization per edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode]);
-
-  // Prefill the number to ring from the account's own mobile, so the common case is one click.
-  useEffect(() => {
-    if (!open) return;
-    setToNumber((n) => n || savedMobile);
-    // Keyed on `open` only — a profile edit mid-call must not rewrite what was typed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
 
   // Reset on reopen after a finished call. close() leaves transcript/timer intact so the save effect
   // can persist them, so the clearing has to happen here. Never touches a live call.
@@ -767,10 +758,10 @@ export function AssistantTesterDialog() {
         {mode === "phone" && !live && !trialBlocked && (
           <div className="space-y-2">
             <Label htmlFor="test-call-number">Number to call</Label>
-            {/* The country starts at the caller's own region (or the saved mobile's). */}
+            {/* Starts empty (no saved mobile, no browser autofill): the caller types the number to ring. */}
             <PhoneInput
               id="test-call-number"
-              autoComplete="tel"
+              autoComplete="off"
               placeholder="Mobile number"
               value={toNumber}
               onChange={setToNumber}

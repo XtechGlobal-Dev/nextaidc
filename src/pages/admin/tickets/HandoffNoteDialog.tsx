@@ -76,7 +76,7 @@ export function HandoffNoteDialog({
                 void confirm();
               }
             }}
-            className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus:border-primary/60"
+            className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
           />
           <p className="text-xs text-muted-foreground">
             Goes out with the email and notification, and stays on the request as a note only the

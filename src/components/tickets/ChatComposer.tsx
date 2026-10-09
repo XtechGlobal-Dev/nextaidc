@@ -724,7 +724,7 @@ export function ChatComposer({
           <div className={cn(!stacked && "flex items-end gap-2")}>
             <div
               className={cn(
-                "rounded-xl border border-border bg-card transition-colors focus-within:border-primary/60",
+                "rounded-xl border border-border bg-card transition-colors",
                 // Controls flank a one-line reply but sit under a tall description, or they squeeze the text into a ribbon.
                 stacked
                   ? "px-3 py-2.5"
