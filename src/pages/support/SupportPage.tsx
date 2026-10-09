@@ -995,7 +995,7 @@ export default function SupportPage() {
                           }
                         }}
                         className={cn(
-                          "flex cursor-pointer items-center gap-4 rounded-xl border bg-card px-4 py-3.5 transition-colors hover:border-primary/40 hover:bg-primary-tint-soft focus-visible:border-primary focus-visible:outline-none",
+                          "flex cursor-pointer items-center gap-4 rounded-xl border bg-card px-4 py-3.5 transition-colors hover:border-primary/40 hover:bg-primary-tint-soft focus-visible:outline-none",
                           t.status === "pending" ? "border-warning/40" : "border-border",
                         )}
                       >

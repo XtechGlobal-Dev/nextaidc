@@ -19,6 +19,7 @@ import {
   UserCog,
   UserRound,
   Users,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -44,6 +45,7 @@ import { BLANK_SETUP, setupFrom, setupPayload, type SetupDraft } from "./brandSe
 import { BrandDomainSection } from "./BrandDomainSection";
 import { BrandInsideTab } from "./BrandInsideTab";
 import { BrandAnalyticsTab } from "./BrandAnalyticsTab";
+import { BrandPricingTab } from "./BrandPricingTab";
 import { ConfirmDeleteDialog } from "@/components/ui/ConfirmDeleteDialog";
 import { BrandRetireDialog } from "./BrandRetireDialog";
 import { brandStatusLabel, brandStatusVariant, formatDeletesAt } from "./brandStatus";
@@ -600,6 +602,11 @@ export default function AdminBrandDetailPage() {
               <UserCog className="size-4" /> Team
             </TabsTrigger>
             {brand && (
+              <TabsTrigger value="pricing">
+                <Wallet className="size-4" /> Pricing &amp; wallet
+              </TabsTrigger>
+            )}
+            {brand && (
               <TabsTrigger value="analytics">
                 <BarChart3 className="size-4" /> Analytics
               </TabsTrigger>
@@ -649,6 +656,10 @@ export default function AdminBrandDetailPage() {
           <TabsContent value="team" className="space-y-5">
             {brand && <BrandAdminsSection brand={brand} />}
             {brand && <BrandDepartmentsSection brand={brand} />}
+          </TabsContent>
+
+          <TabsContent value="pricing" className="space-y-5">
+            {brand && <BrandPricingTab brand={brand} />}
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-5">

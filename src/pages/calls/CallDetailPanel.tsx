@@ -76,7 +76,7 @@ function IntentPicker({ call }: { call: CallLog }) {
         <button
           type="button"
           aria-label="Change call category"
-          className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          className="rounded-full outline-none"
         >
           <Badge
             variant={current?.variant ?? "outline"}

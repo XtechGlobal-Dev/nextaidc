@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 
-// Platform ledger: one paid invoice → one row. Brands add no markup any more (docs/brand-as-customer-plan.md),
-// so every payment is the platform's: a $50 plan paid in full books $50 platform, $0 brand — whichever Stripe
-// Price the invoice billed.
+// Platform ledger: one paid invoice → one row, split platform/brand. A brand selling the $50 plan with a $25 add-on
+// charges $75 through its own Price: paid in full that books $50 platform, $25 brand — and the brand's share comes
+// from the split the billed Price was SOLD at, so a subscriber kept on an older Price earns that Price's add-on.
 
 const h = vi.hoisted(() => ({
   ledgerFindUnique: vi.fn(),
@@ -15,7 +15,17 @@ const h = vi.hoisted(() => ({
   couponFindFirst: vi.fn(),
   redemptionFindUnique: vi.fn(),
   resolve: vi.fn(),
+  livePriceId: vi.fn(),
+  credit: vi.fn(),
 }));
+
+/** Every brand Price ever sold, as BrandPlanPrice records it. */
+const SOLD: Record<string, { brandId: string; planId: string; baseCents: number; addonCents: number; currency: string }> = {
+  price_acme_pro: { brandId: "b_acme", planId: "p_pro", baseCents: 5000, addonCents: 2500, currency: "usd" },
+  // The add-on was 1000 when this customer joined; the brand has raised it since.
+  price_acme_pro_2025: { brandId: "b_acme", planId: "p_pro", baseCents: 5000, addonCents: 1000, currency: "usd" },
+  price_globex_pro: { brandId: "b_globex", planId: "p_pro", baseCents: 5000, addonCents: 5000, currency: "usd" },
+};
 
 vi.mock("../prisma.js", () => ({
   prisma: {
@@ -47,6 +57,11 @@ vi.mock("./customerDirectory.js", async () => {
   };
 });
 vi.mock("./stripeCustomers.js", () => ({ resolveStripeCustomer: h.resolve }));
+vi.mock("./brandPricing.js", () => ({
+  brandPriceSplit: async (id: string | null | undefined) => (id ? (SOLD[id] ?? null) : null),
+  livePriceId: h.livePriceId,
+}));
+vi.mock("./brandWallet.js", () => ({ creditWalletFromLedger: h.credit }));
 
 const { recordPaidInvoice, recordRefund, ledgerSummary } = await import("./platformLedger.js");
 
@@ -66,10 +81,12 @@ beforeEach(() => {
   h.planFindUnique.mockResolvedValue({ currency: "usd" });
   h.profileFindUnique.mockResolvedValue({ subscriptionPlanId: "p_pro", activeCouponRedemptionId: null });
   h.resolve.mockResolvedValue(acmeOwner);
+  h.livePriceId.mockResolvedValue(null);
+  h.credit.mockImplementation(async (row: { brandCents: number }) => row.brandCents);
 });
 
-describe("recordPaidInvoice — every payment is the platform's", () => {
-  it("books the whole payment to the platform, nothing to the brand", async () => {
+describe("recordPaidInvoice — the split", () => {
+  it("books a payment on the platform's own Price wholly to the platform", async () => {
     const out = await recordPaidInvoice({
       invoiceId: "in_1",
       customerId: "cus_1",
@@ -96,18 +113,40 @@ describe("recordPaidInvoice — every payment is the platform's", () => {
     });
   });
 
-  it("is still all the platform's on an old marked-up Price, and with a coupon", async () => {
-    h.couponFindFirst.mockResolvedValue({ id: "cp_half" });
-    await recordPaidInvoice({
-      invoiceId: "in_2",
-      customerId: "cus_1",
-      amountPaidCents: 3750,
-      priceId: "price_acme_pro_marked_up",
-      stripeCouponId: "HALF",
-    });
+  it("gives the brand its add-on on its own Price, and credits the wallet", async () => {
+    const out = await recordPaidInvoice({ invoiceId: "in_2", customerId: "cus_1", amountPaidCents: 7500, priceId: "price_acme_pro" });
     expect(h.ledgerCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ totalCents: 3750, platformCents: 3750, brandCents: 0, couponId: "cp_half" }),
+      data: expect.objectContaining({ totalCents: 7500, platformCents: 5000, brandCents: 2500, planId: "p_pro" }),
     });
+    expect(out.credited).toBe(2500);
+  });
+
+  it("splits in proportion to what was paid — a 50% coupon halves both shares", async () => {
+    h.couponFindFirst.mockResolvedValue({ id: "cp_half" });
+    await recordPaidInvoice({ invoiceId: "in_3", customerId: "cus_1", amountPaidCents: 3750, priceId: "price_acme_pro", stripeCouponId: "HALF" });
+    expect(h.ledgerCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ totalCents: 3750, platformCents: 2500, brandCents: 1250, couponId: "cp_half" }),
+    });
+  });
+
+  it("credits a grandfathered subscriber's renewal at the add-on their Price was sold with", async () => {
+    await recordPaidInvoice({ invoiceId: "in_6", customerId: "cus_1", amountPaidCents: 6000, priceId: "price_acme_pro_2025" });
+    expect(h.ledgerCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ totalCents: 6000, platformCents: 5000, brandCents: 1000 }),
+    });
+  });
+
+  it("reads the live subscription's Price when the invoice doesn't name one", async () => {
+    h.profileFindUnique.mockResolvedValue({ subscriptionPlanId: "p_pro", stripeSubscriptionId: "sub_1", activeCouponRedemptionId: null });
+    h.livePriceId.mockResolvedValue("price_acme_pro_2025");
+    await recordPaidInvoice({ invoiceId: "in_7", customerId: "cus_1", amountPaidCents: 6000 });
+    expect(h.livePriceId).toHaveBeenCalledWith("sub_1");
+    expect(h.ledgerCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ brandCents: 1000 }) });
+  });
+
+  it("never pays one brand from another brand's Price", async () => {
+    await recordPaidInvoice({ invoiceId: "in_8", customerId: "cus_1", amountPaidCents: 10000, priceId: "price_globex_pro" });
+    expect(h.ledgerCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ platformCents: 10000, brandCents: 0 }) });
   });
 
   it("takes the currency from the customer's plan when the invoice doesn't say", async () => {

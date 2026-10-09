@@ -23,6 +23,8 @@ import {
   Ticket,
   ShieldCheck,
   Handshake,
+  BadgeDollarSign,
+  Wallet,
   Activity,
   Webhook,
   FileBarChart,
@@ -171,12 +173,16 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/dashboard/admin/coupons", label: "Coupons", icon: Ticket, permission: "coupons" },
   // `tickets` is brand-scoped, `brand_tickets` platform-only, so exactly one of these two shows.
   { to: "/dashboard/admin/tickets", label: "Support Tickets", icon: MessagesSquare, permission: "tickets" },
-  { to: "/dashboard/admin/tickets", label: "Brand Requests", icon: MessagesSquare, permission: "brand_tickets" },
+  { to: "/dashboard/admin/tickets", label: "Support Tickets", icon: MessagesSquare, permission: "brand_tickets" },
   // Platform-only (like Audit): one catalog attached to the platform's plans, so the super admin curates it.
   { to: "/dashboard/admin/voice-bank", label: "Voice Library", icon: Mic, permission: "voice_bank" },
   { to: "/dashboard/admin/phone-numbers", label: "Phone Numbers", icon: Phone, permission: "phone_numbers" },
   // Brand-scoped: a brand runs its own reseller programme, so the super admin never sees this.
   { to: "/dashboard/admin/resellers", label: "Resellers", icon: Handshake, permission: "resellers" },
+  // A brand's own money: brand-scoped sections, so the super admin never sees them here (they live on the brand's
+  // page under Brands instead).
+  { to: "/dashboard/admin/pricing", label: "Price add-on", icon: BadgeDollarSign, permission: "pricing" },
+  { to: "/dashboard/admin/wallet", label: "Wallet", icon: Wallet, permission: "wallet" },
   // One API Center entry (its sections are tabs on the page). Holds provider credentials and spend,
   // so SUPER_ADMIN only; the routes enforce the same via requireSuperAdmin.
   { to: "/dashboard/admin/api-center", label: "API Center", icon: Radar, superAdminOnly: true },

@@ -17,6 +17,7 @@ import brandsRouter from "./brands.routes.js";
 import { superBrandRequestsRouter } from "./brandRequests.routes.js";
 import platformViewsRouter from "./platformViews.routes.js";
 import brandAdminRequestRouter from "./brandAdminRequest.routes.js";
+import brandAdminRouter from "./brandAdmin.routes.js";
 import apiCenterRouter from "./apiCenter.routes.js";
 import resellerRouter from "./reseller.routes.js";
 import onboardRouter from "./onboard.routes.js";
@@ -123,6 +124,9 @@ apiRouter.use("/super", superBrandRequestsRouter);
 // The super admin's overview, the customer directory, and one brand's inside
 // (its customers, subscriptions, support) — see platformViews.routes.ts.
 apiRouter.use("/super", platformViewsRouter);
+// A brand admin's own price add-ons and wallet. Mounted before /admin so the
+// more specific prefix wins; scoped to the caller's brand, never by id.
+apiRouter.use("/admin/brand", brandAdminRouter);
 apiRouter.use("/admin/phones", adminPhonesRouter);
 // The handler side of the same two lanes — a brand admin's customer inbox, or
 // the super admin's brand-request inbox.
