@@ -20,7 +20,7 @@
     "tenant:migrate": "tsx scripts/tenantMigrate.ts",
     "db:sync": "prisma db push --accept-data-loss",
     "schema-drift": "node scripts/schemaDrift.mjs",
-    "brand-billing:report": "tsx scripts/brandBillingReport.ts",
+    "cutover:brand-as-customer": "tsx scripts/brandAsCustomerCutover.ts",
     "migrate-baseline": "tsx scripts/migrateBaseline.ts",
     "render:build": "npm run prisma:generate && prisma db push --accept-data-loss && npm run tenant:migrate && tsc -p tsconfig.json && npm run ensure-admin",
     "prisma:seed": "tsx prisma/seed.ts",

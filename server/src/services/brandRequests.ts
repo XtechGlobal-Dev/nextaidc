@@ -7,7 +7,6 @@ import { sendTemplate } from "./email.js";
 import { notifyPlatformOwners } from "./notifications.js";
 import { assertDomainAvailable, resolveTheme } from "./brands.js";
 import { deleteObject, isStorageConfigured, uploadObject } from "./storage.js";
-import { isStripeConfigured, stripe } from "./stripe.js";
 
 // Brand requests: a main-domain customer asks, from inside their dashboard, for their account to become a brand
 // (fileBrandAdminRequest); a super admin completes setup and the same account becomes the Brand Admin
@@ -306,15 +305,9 @@ export async function declineBrandRequest(
       logoLightUrl: "",
       logoDarkUrl: "",
       faviconUrl: "",
-      stripeCustomerId: "",
-      paymentMethodId: "",
     },
   });
   await deleteLogos([existing.logoLightUrl, existing.logoDarkUrl, existing.faviconUrl]);
-  // The card was only ever saved, never charged — delete the customer so nothing of theirs stays on file.
-  if (existing.stripeCustomerId && isStripeConfigured()) {
-    await stripe().customers.del(existing.stripeCustomerId).catch(() => undefined);
-  }
   if (opts.notify) {
     try {
       await sendTemplate("brand_request_declined", request.email, {

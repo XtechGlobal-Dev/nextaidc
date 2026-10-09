@@ -10,6 +10,7 @@ dist-ssr
 .vite
 server/node_modules
 server/.env
+server/backups/
 
 # All Markdown files (notes, docs drafts, local logs) — kept on disk, out of the repo
 *.md

@@ -39,8 +39,6 @@ const h = vi.hoisted(() => ({
       darkModeDefault: false,
     };
   }),
-  stripeOn: vi.fn(() => true),
-  customerDel: vi.fn(async () => ({})),
   storageOn: vi.fn(() => true),
   upload: vi.fn(async (prefix: string) => ({ url: `https://cdn.test/${prefix}/f.png`, key: `${prefix}/f.png` })),
   deleteObject: vi.fn(async (): Promise<void> => undefined),
@@ -57,10 +55,6 @@ vi.mock("../prisma.js", () => ({
       updateMany: h.reqUpdateMany,
     },
   },
-}));
-vi.mock("./stripe.js", () => ({
-  isStripeConfigured: h.stripeOn,
-  stripe: () => ({ customers: { del: h.customerDel } }),
 }));
 vi.mock("./email.js", () => ({ sendTemplate: h.sendTemplate }));
 vi.mock("./notifications.js", () => ({ notifyPlatformOwners: h.notifyPlatformOwners }));
@@ -91,7 +85,6 @@ beforeEach(() => {
   h.brandFindUnique.mockResolvedValue(null);
   h.reqFindFirst.mockResolvedValue(null);
   h.storageOn.mockReturnValue(true);
-  h.stripeOn.mockReturnValue(true);
 });
 
 describe("fileBrandAdminRequest", () => {
@@ -237,13 +230,6 @@ describe("declineBrandRequest", () => {
     expect(h.deleteObject).toHaveBeenCalledTimes(2);
   });
 
-  it("deletes the saved card's Stripe customer", async () => {
-    h.reqFindUnique.mockResolvedValue({ id: "r1", status: "pending", updatedAt: new Date(), stripeCustomerId: "cus_1" });
-    await declineBrandRequest("r1", { reason: "", actorId: "admin1", notify: false });
-    expect(h.customerDel).toHaveBeenCalledWith("cus_1");
-    expect(h.reqUpdate.mock.calls[0][0].data).toMatchObject({ stripeCustomerId: "", paymentMethodId: "" });
-  });
-
   it("declines, drops the password hash and emails the reason", async () => {
     h.reqFindUnique.mockResolvedValue({ id: "r1", status: "pending", updatedAt: new Date() });
     await declineBrandRequest("r1", { reason: " Not a fit ", actorId: "admin1", notify: true });
@@ -280,11 +266,6 @@ describe("serializeBrandRequest", () => {
       logoLightUrl: "",
       logoDarkUrl: "",
       faviconUrl: "",
-      brandPlanId: "",
-      stripeCustomerId: "cus_1",
-      paymentMethodId: "pm_1",
-      cardBrand: "visa",
-      cardLast4: "4242",
       contactName: "Jo",
       email: "jo@acme.com",
       phone: "",
