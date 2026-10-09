@@ -270,6 +270,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search pages, jump to…"
+            data-bare
             className="h-14 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
           />
           <kbd className="hidden rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">

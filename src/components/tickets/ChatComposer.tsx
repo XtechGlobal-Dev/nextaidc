@@ -724,7 +724,7 @@ export function ChatComposer({
           <div className={cn(!stacked && "flex items-end gap-2")}>
             <div
               className={cn(
-                "rounded-xl border border-border bg-card transition-colors",
+                "rounded-xl border border-border bg-card transition-colors has-[textarea:focus]:focus-ring",
                 // Controls flank a one-line reply but sit under a tall description, or they squeeze the text into a ribbon.
                 stacked
                   ? "px-3 py-2.5"
@@ -766,6 +766,7 @@ export function ChatComposer({
                 }}
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
+                data-bare
                 maxLength={maxLength}
                 rows={1}
                 style={{ minHeight: minHeight ? `${minHeight}px` : undefined }}

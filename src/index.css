@@ -219,31 +219,41 @@
   }
 }
 
-/* Focus ring — deliberately invisible (owner call): no outline, ring or glow on focus anywhere. Kept as a
-   utility so the components that ask for it stay valid. */
+/* Focus highlight — one slim 1px primary edge, no ring or glow (owner call). An outline, not a box-shadow, so it
+   follows the corner radius and never replaces an element's resting shadow. Form fields opt out below. */
 @utility focus-ring {
-  outline: none;
+  outline: 1px solid var(--color-primary);
+  outline-offset: 0;
 }
 
-/* Form fields carry no focus chrome — no outline, ring or glow on any input,
-   textarea, select or select trigger. Unlayered, so it outranks any focus
-   utility a page puts on a field. */
-input:focus,
-input:focus-visible,
-textarea:focus,
-textarea:focus-visible,
-select:focus,
-select:focus-visible,
-[role="combobox"]:focus,
-[role="combobox"]:focus-visible {
+/* Form fields get the same slim 1px primary edge while focused — no ring or glow. Unlayered, so it outranks any
+   focus utility (or outline-none) a page puts on a field. A field drawn INSIDE its own bordered box (phone number,
+   chat composer, a dropdown's search row) is marked `data-bare`: it stays clean and its box highlights instead.
+   Checkboxes, radios and sliders show it for keyboard focus only. */
+input:not([data-bare]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+textarea:not([data-bare]):focus,
+select:not([data-bare]):focus,
+[role="combobox"]:not([data-bare]):focus,
+input:is([type="checkbox"], [type="radio"], [type="range"]):focus-visible {
+  outline: 1px solid var(--color-primary);
+  outline-offset: 0;
+  box-shadow: none;
+}
+input[data-bare]:focus,
+textarea[data-bare]:focus,
+input:is([type="checkbox"], [type="radio"], [type="range"]):focus:not(:focus-visible) {
   outline: none;
   box-shadow: none;
 }
 
-/* Nor do buttons, links or anything clickable — no browser focus outline. Their resting shadows are left alone. */
+/* Buttons, links and other controls: the browser's thick default outline is replaced by the same slim 1px edge,
+   shown only for keyboard focus (a mouse click leaves nothing behind). Menu items and options are left out — they
+   take focus on hover and already highlight with a background. Resting shadows are left alone. */
 button:focus,
+a:focus {
+  outline: none;
+}
 button:focus-visible,
-a:focus,
 a:focus-visible,
 summary:focus-visible,
 [role="button"]:focus-visible,
@@ -251,11 +261,9 @@ summary:focus-visible,
 [role="switch"]:focus-visible,
 [role="checkbox"]:focus-visible,
 [role="radio"]:focus-visible,
-[role="slider"]:focus-visible,
-[role="menuitem"]:focus-visible,
-[role="option"]:focus-visible,
-[tabindex]:focus-visible {
-  outline: none;
+[role="slider"]:focus-visible {
+  outline: 1px solid var(--color-primary);
+  outline-offset: 0;
 }
 
 /* ---- Refined scrollbars (from agentAI) ---- */

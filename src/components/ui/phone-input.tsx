@@ -154,7 +154,7 @@ export function PhoneInput({
     <div ref={rootRef} className="relative">
       <div
         className={cn(
-          "flex h-10 w-full items-center rounded-xl border border-border bg-background text-sm",
+          "flex h-10 w-full items-center rounded-xl border border-border bg-background text-sm has-[input:focus]:focus-ring",
           invalid && "border-danger",
           className,
         )}
@@ -182,6 +182,7 @@ export function PhoneInput({
           placeholder={placeholder}
           autoComplete={autoComplete}
           aria-invalid={invalid}
+          data-bare
           className="h-full flex-1 rounded-r-xl bg-transparent px-3 outline-none placeholder:text-muted-foreground"
         />
       </div>
@@ -199,6 +200,7 @@ export function PhoneInput({
               }}
               onKeyDown={onMenuKeyDown}
               placeholder="Search country"
+              data-bare
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
           </div>

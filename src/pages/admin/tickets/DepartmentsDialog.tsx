@@ -481,6 +481,7 @@ export function DepartmentsDialog({
                                   }
                                 }}
                                 placeholder="Search staff by name or email"
+                                data-bare
                                 className="h-11 w-full border-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                               />
                               <button

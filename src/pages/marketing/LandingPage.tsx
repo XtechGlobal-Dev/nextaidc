@@ -340,7 +340,7 @@ export default function LandingPage() {
               <div
                 className="card-glass relative rounded-[20px] border border-border p-3 shadow-[var(--shadow-panel)] sm:p-3.5"
               >
-                <div className="flex items-center gap-2.5 rounded-[14px] border border-border bg-background px-4 transition-colors">
+                <div className="flex items-center gap-2.5 rounded-[14px] border border-border bg-background px-4 transition-colors has-[input:focus]:focus-ring">
                   <Globe className="size-4 shrink-0 text-muted-foreground" />
                   <input
                     ref={urlInputRef}
@@ -355,6 +355,7 @@ export default function LandingPage() {
                       }
                     }}
                     placeholder="Enter your website URL"
+                    data-bare
                     className="h-[52px] w-full bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
                   />
                 </div>

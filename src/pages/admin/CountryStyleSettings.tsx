@@ -116,6 +116,7 @@ function AddCountryPicker({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search country"
+                data-bare
                 className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
