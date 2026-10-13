@@ -20,7 +20,8 @@ type ProfileUsage = {
 interface ProfileState {
   profile: Profile;
   hydrate: () => Promise<void>;
-  updateProfile: (patch: Partial<Profile>) => void;
+  /** Resolves true once the server has saved it; false after it refused (already toasted and rolled back). */
+  updateProfile: (patch: Partial<Profile>) => Promise<boolean>;
   /** Persist call-forwarding choice / confirmation. `confirmed` maps to the
    *  forwardingConfirmedAt timestamp server-side (true = now, false = clear). */
   saveForwarding: (patch: { mode?: Profile["forwardingMode"]; confirmed?: boolean }) => void;
@@ -79,10 +80,20 @@ export const useProfileStore = create<ProfileState>()(
         if (address !== undefined) payload.address = address;
         if (country !== undefined) payload.country = country;
         if (industry !== undefined) payload.industry = industry;
-        void api.profile
+        return api.profile
           .update(payload)
-          .then((profile) => set((s) => ({ profile: { ...s.profile, ...profile } })))
-          .catch((e) => toast.error(errorMessage(e, "Failed to save profile")));
+          .then((profile) => {
+            set((s) => ({ profile: { ...s.profile, ...profile } }));
+            return true;
+          })
+          .catch(async (e) => {
+            toast.error(errorMessage(e, "Failed to save profile"));
+            // Undo the optimistic edit: otherwise the header and form keep showing an email that was never saved.
+            await get().hydrate();
+            const { fullName, email: saved } = get().profile;
+            useAuthStore.getState().patchUser({ fullName, email: saved });
+            return false;
+          });
       },
       saveForwarding: ({ mode, confirmed }) => {
         // Optimistically reflect the choice; forwardingConfirmedAt mirrors the

@@ -40,6 +40,7 @@ import {
   setBrandOwner,
 } from "../services/platformCustomers.js";
 import { tenantFor, tenantForUser, TenantUnavailableError, planeOf, type TenantClient } from "../services/tenantDb.js";
+import { emailField, sameEmail } from "../lib/emailAddress.js";
 
 /** Staff role name, looked up (not joined) in the account's own plane — brand roles live in the brand DB. Missing reads as none. */
 async function withStaffRole<T extends { staffRoleId: string | null; brandId: string | null }>(
@@ -130,15 +131,20 @@ async function findAccountOnThisDoor(
       }
       throw e;
     }
-    const row = await tenant.user.findUnique({
-      where: { email },
+    const row = await tenant.user.findFirst({
+      where: { email: sameEmail(email) },
       select: { id: true, passwordHash: true },
+      orderBy: { createdAt: "asc" },
     });
     if (row) return { ...row, brandId: door };
   }
   // The platform's own people — the only accounts in the control plane — may
   // sign in on any door.
-  const own = await prisma.user.findUnique({ where: { email }, select: { id: true, passwordHash: true } });
+  const own = await prisma.user.findFirst({
+    where: { email: sameEmail(email) },
+    select: { id: true, passwordHash: true },
+    orderBy: { createdAt: "asc" },
+  });
   if (own) return { ...own, brandId: null };
   // The platform door's customers each live in their own customer-state brand's database.
   if (!door) {
@@ -156,7 +162,7 @@ async function findAccountOnThisDoor(
   }
   // Not here. Main's directory knows which door they belong to — say that, not "wrong password".
   const elsewhere = await prisma.customerDirectory.findFirst({
-    where: { email, ...(door ? { brandId: { not: door } } : { brand: { kind: "brand" } }) },
+    where: { email: sameEmail(email), ...(door ? { brandId: { not: door } } : { brand: { kind: "brand" } }) },
     select: { brandId: true },
   });
   if (!elsewhere) return null;
@@ -463,7 +469,7 @@ const strongPassword = z
   .regex(/[^A-Za-z0-9]/, "Password must include a special character");
 
 const registerSchema = z.object({
-  email: z.string().email(),
+  email: emailField(),
   password: strongPassword,
   // Always store a person's name title-cased ("redtape" -> "Redtape") so it
   // reads correctly everywhere it's displayed.
@@ -495,7 +501,7 @@ async function assertEmailAvailable(email: string): Promise<void> {
     return;
   }
   const { db } = await signupTenant();
-  const existing = await db.user.findUnique({ where: { email } });
+  const existing = await db.user.findFirst({ where: { email: sameEmail(email) }, select: { id: true } });
   if (existing) throw new HttpError(409, "Email already registered");
 }
 
@@ -628,7 +634,7 @@ async function verifyPlatformSignup(email: string, code: string) {
 }
 
 const otpVerifySchema = z.object({
-  email: z.string().email(),
+  email: emailField(),
   code: z.string().min(4),
 });
 
@@ -644,7 +650,7 @@ router.post(
     }
 
     const { brandId: door, db } = await signupTenant();
-    const existing = await db.user.findUnique({ where: { email }, include: { profile: true } });
+    const existing = await db.user.findFirst({ where: { email: sameEmail(email) }, include: { profile: true } });
     if (existing) {
       // Recovery: a prior verify created the account but the response was lost. Same code → re-issue the session, don't 409.
       if (!(await signupCodeMatches(email, code))) {
@@ -670,7 +676,7 @@ router.post(
   }),
 );
 
-const emailOnlySchema = z.object({ email: z.string().email() });
+const emailOnlySchema = z.object({ email: emailField() });
 
 // Re-issue a sign-up code, reusing the pending details from the prior code.
 router.post(
@@ -713,7 +719,7 @@ router.post(
 );
 
 const resetSchema = z.object({
-  email: z.string().email(),
+  email: emailField(),
   code: z.string().min(4),
   newPassword: z.string().min(8).max(40, "Password must be at most 40 characters"),
 });
@@ -749,7 +755,7 @@ router.post(
 );
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: emailField(),
   password: z.string(),
 });
 

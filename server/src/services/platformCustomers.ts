@@ -6,6 +6,7 @@ import { cachedBrand, provisionBrand, refreshBrand } from "./brands.js";
 import { tenantFor } from "./tenantDb.js";
 import { claimSpare } from "./customerPool.js";
 import { audit } from "./audit.js";
+import { sameEmail } from "../lib/emailAddress.js";
 
 // Main-domain customers (docs/brand-as-customer-plan.md). Every sign-up on the platform's own door gets
 // its own brand row in the CUSTOMER state and its own database: the row opens no door and wears the
@@ -29,7 +30,7 @@ export async function platformAccountFor(
   email: string,
 ): Promise<{ mine: { brandId: string; userId: string; ownerSet: boolean } | null; ownsAccount: boolean }> {
   const rows = await prisma.customerDirectory.findMany({
-    where: { email },
+    where: { email: sameEmail(email) },
     select: { brandId: true, userId: true, brand: { select: { kind: true, ownerUserId: true } } },
   });
   const customer = rows.filter((r) => r.brand.kind === "customer");
@@ -50,7 +51,7 @@ export async function findPlatformCustomer(
   email: string,
 ): Promise<{ brandId: string; userId: string; ownerSet: boolean } | null> {
   const rows = await prisma.customerDirectory.findMany({
-    where: { email, brand: { kind: "customer" } },
+    where: { email: sameEmail(email), brand: { kind: "customer" } },
     select: { brandId: true, userId: true, brand: { select: { ownerUserId: true } } },
   });
   const mine = rows.find((r) => r.brand.ownerUserId === r.userId) ?? rows.find((r) => r.brand.ownerUserId === null);
@@ -58,10 +59,11 @@ export async function findPlatformCustomer(
 }
 
 /** True when this email already owns an account on the platform: a main-domain customer, or a brand's
- *  owner (who signs in on their brand's door). One person, one owned account. */
-export async function emailOwnsAccount(email: string): Promise<boolean> {
+ *  owner (who signs in on their brand's door). One person, one owned account. `exceptUserId` leaves the
+ *  asker's own account out, for an owner changing their email. */
+export async function emailOwnsAccount(email: string, exceptUserId?: string): Promise<boolean> {
   const rows = await prisma.customerDirectory.findMany({
-    where: { email },
+    where: { email: sameEmail(email), ...(exceptUserId ? { userId: { not: exceptUserId } } : {}) },
     select: { userId: true, brand: { select: { kind: true, ownerUserId: true } } },
   });
   return rows.some(
