@@ -129,17 +129,18 @@ function ProfileCard({
   mobile: string;
   // Business Name is managed in the AI Brain (Identity), so it's not part of
   // this form.
-  onSave: (patch: { fullName: string; email: string; mobile: string }) => void;
+  onSave: (patch: { fullName: string; email: string; mobile: string }) => Promise<boolean>;
 }) {
   const [form, setForm] = useState({ fullName, email, mobile });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [key]: e.target.value }));
     setErrors((prev) => ({ ...prev, [key]: "" }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const next: Record<string, string> = {};
     if (!form.fullName.trim()) next.fullName = "Full name is required.";
     if (!form.email.trim()) next.email = "Email is required.";
@@ -151,8 +152,11 @@ function ProfileCard({
     }
     if (Object.keys(next).length) { setErrors(next); return; }
     setErrors({});
-    onSave(form);
-    toast.success("Profile saved");
+    // Only say "saved" once the server has it — an email change can be refused (already in use).
+    setSaving(true);
+    const saved = await onSave({ ...form, email: form.email.trim().toLowerCase() });
+    setSaving(false);
+    if (saved) toast.success("Profile saved");
   };
 
   return (
@@ -188,7 +192,7 @@ function ProfileCard({
         </Field>
 
         <div className="sm:col-span-2 flex justify-end">
-          <Button onClick={handleSave}>Save Profile</Button>
+          <Button onClick={handleSave} disabled={saving}>Save Profile</Button>
         </div>
       </CardContent>
     </Card>

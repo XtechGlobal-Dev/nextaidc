@@ -36,6 +36,11 @@ const db = vi.hoisted(() => {
       if (cond === null) return value === null || value === undefined;
       if (cond && typeof cond === "object") {
         const c = cond as Record<string, unknown>;
+        if ("equals" in c) {
+          return c.mode === "insensitive"
+            ? String(value).toLowerCase() === String(c.equals).toLowerCase()
+            : value === c.equals;
+        }
         if ("in" in c) return (c.in as unknown[]).includes(value);
         if ("notIn" in c) return !(c.notIn as unknown[]).includes(value);
         if ("not" in c) return value !== c.not;

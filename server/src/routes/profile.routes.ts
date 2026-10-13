@@ -1,6 +1,10 @@
 import express from "express";
 import { z } from "zod";
-import { requestTenant, tenantForUser } from "../services/tenantDb.js";
+import { prisma } from "../prisma.js";
+import { requestTenant, tenantFor, tenantForUser } from "../services/tenantDb.js";
+import { cachedBrand, isCustomerBrand, refreshBrand } from "../services/brands.js";
+import { emailOwnsAccount } from "../services/platformCustomers.js";
+import { emailField, sameEmail } from "../lib/emailAddress.js";
 import { asyncHandler, notFound, badRequest, HttpError } from "../lib/http.js";
 import { clampName, titleCaseName, DEFAULT_AGENT_CONFIG } from "../lib/agentConfig.js";
 import { normalizeCountry } from "../lib/countryStyles.js";
@@ -211,7 +215,7 @@ const patchSchema = z.object({
   // Title-case a person's name on save so it displays consistently everywhere.
   fullName: z.string().transform(titleCaseName).optional(),
   // Email lives on the User table; trim + lowercase so it stays consistent with login.
-  email: z.string().email().transform((s) => s.trim().toLowerCase()).optional(),
+  email: emailField().optional(),
   // Clamp to 40 (Vapi's assistant-name limit) instead of rejecting the save.
   businessName: z.string().transform(clampName).optional(),
   mobile: z.string().optional(),
@@ -227,6 +231,36 @@ const patchSchema = z.object({
   forwardingMode: z.enum(["", "all", "overflow"]).optional(),
   forwardingConfirmed: z.boolean().optional(),
 });
+
+/** Refuses an email another sign-in already answers to. This brand's own DB is not the only place sign-in
+ *  looks: the platform door also checks Main's platform accounts and directory, so a duplicate there would
+ *  sign this person into someone else's account (or them into this one). */
+async function assertEmailFree(brandId: string, userId: string, email: string): Promise<void> {
+  const inUse = () => badRequest("That email is already in use by another account.");
+  const db = await tenantFor(brandId);
+  const local = await db.user.findFirst({
+    where: { email: sameEmail(email), id: { not: userId } },
+    select: { id: true },
+  });
+  if (local) throw inUse();
+  const brand = cachedBrand(brandId);
+  // A main-domain customer signs in on the platform door, where the platform's own people are found first.
+  if (isCustomerBrand(brand) && (await prisma.user.findFirst({ where: { email: sameEmail(email) }, select: { id: true } }))) {
+    throw inUse();
+  }
+  // An owner (of a brand, or of their main-domain account) follows the sign-up rule: one person, one owned account.
+  if (brand?.ownerUserId === userId && (await emailOwnsAccount(email, userId))) throw inUse();
+}
+
+/** Main's copy of an owner's email: the brand's support address, when it was just the owner's own email
+ *  (set at brand setup), so the super admin's brand page and the brand's emails show the new one. */
+async function syncOwnerEmail(brandId: string, userId: string, oldEmail: string, email: string): Promise<void> {
+  const brand = await prisma.brand.findUnique({ where: { id: brandId }, select: { ownerUserId: true, supportEmail: true } });
+  if (!brand || brand.ownerUserId !== userId) return;
+  if (brand.supportEmail.trim().toLowerCase() !== oldEmail.trim().toLowerCase()) return;
+  await prisma.brand.update({ where: { id: brandId }, data: { supportEmail: email } });
+  await refreshBrand(brandId);
+}
 
 router.patch(
   "/",
@@ -245,6 +279,13 @@ router.patch(
       forwardingConfirmed,
     } = patchSchema.parse(req.body);
     const userId = req.user!.sub;
+    const brandId = req.user!.brandId!;
+    const db = await requestTenant(req);
+
+    // The form always sends the email, so only treat it as a change when it differs from what's stored.
+    const before = await db.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const emailChanged = email !== undefined && !!before && before.email.toLowerCase() !== email;
+    if (emailChanged) await assertEmailFree(brandId, userId, email);
 
     // fullName and email both live on the User record.
     if (fullName !== undefined || email !== undefined) {
@@ -264,6 +305,8 @@ router.patch(
         throw e;
       }
     }
+    // The tenant write already reached Main's directory (the mirror); the brand row's copy follows here.
+    if (emailChanged) await syncOwnerEmail(brandId, userId, before!.email, email!);
 
     const profile = await (await requestTenant(req)).profile.update({
       where: { userId },

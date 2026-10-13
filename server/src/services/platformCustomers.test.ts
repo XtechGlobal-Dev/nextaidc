@@ -75,7 +75,11 @@ describe("findPlatformCustomer", () => {
   it("finds the owner of a customer-state row", async () => {
     h.dirFindMany.mockResolvedValue([{ brandId: "b1", userId: "u1", brand: { ownerUserId: "u1" } }]);
     expect(await findPlatformCustomer("jo@example.com")).toEqual({ brandId: "b1", userId: "u1", ownerSet: true });
-    expect(h.dirFindMany.mock.calls[0][0].where).toEqual({ email: "jo@example.com", brand: { kind: "customer" } });
+    // Ignoring case: an account registered as "Jo@Example.com" is still found when typed in lowercase.
+    expect(h.dirFindMany.mock.calls[0][0].where).toEqual({
+      email: { equals: "jo@example.com", mode: "insensitive" },
+      brand: { kind: "customer" },
+    });
   });
 
   it("ignores a downgraded brand's own customers", async () => {
